@@ -21,8 +21,4 @@ MEMORY: dict[str, Value] = {
 # ====== INSTRUCTIONS =========
 InstType = tuple[int, FunctionType]
 
-ValueName
-
-def inst_set(name: str, value: Value | str)
-
 instructions: dict[str, InstType] = {}

@@ -1,6 +1,5 @@
 from sys import exit
 from scripts import *
-from icecream import ic
 
 def main(argc: int, argv: list[str]):
     if argc == 1:
@@ -13,6 +12,7 @@ def main(argc: int, argv: list[str]):
 
     input_file = None
 
+    # Flag and files loop
     for arg in argv[1:]:
         if arg.startswith('--'):
             flag = arg[2:]
@@ -30,6 +30,7 @@ def main(argc: int, argv: list[str]):
             assert input_file is None, ERROR_FORMAT('USAGE', 'input', "input already provided", f"input -> {input_file}")
             input_file = arg
 
+    # File doesn't exist ERROR
     assert input_file is not None, ERROR_FORMAT('USAGE', 'input', 'input was not provided')
 
     file_content = get_file_content(input_file)
@@ -39,6 +40,8 @@ def main(argc: int, argv: list[str]):
     for ln, line in enumerate(file_content):
         line_words = line.split(' ')
         lexed_file.append(lex_line(ln, line_words))
+        
+    print(*lexed_file, sep='\n')
 
 from sys import argv
 

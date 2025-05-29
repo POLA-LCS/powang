@@ -1,5 +1,5 @@
 from .value import Types, get_number_from_word
-from .errors import INLINE, ERROR_FORMAT_SYNTAX
+from .errors import INLINE, ERROR_FORMAT_SYNTAX, RAISE
 from .runtime import instructions
 
 class TokenType:
@@ -22,22 +22,27 @@ class Token:
 
 Expression = tuple[Token, ...]
 List = list[Token]
-Sentence = list[Token | Expression | List | 'Sentence']
+Sentence = list[Token | Expression | List]
 
-from icecream import ic as PRINT
+# from icecream import ic as PRINT
 
-def lex_open_close(record: str, part_in_words: list[str], close: str) -> tuple[int, str] | None:
+def lex_open_close(record: str, part_in_words: list[str], open: str, close: str) -> tuple[int, str] | None:
     if record.endswith(close) and len(record) > 1:
         return (0, record)
     record += ' '
+    stack = 0
     for eaten, word in enumerate(part_in_words):
+        if open in word and not word.endswith(close):
+            stack += 1
         if word.endswith(close):
-            return (eaten + 1, (record + word))
+            if stack > 0:
+                stack -= 1
+            else:
+                return (eaten + 1, (record + word))
         record += word + ' '
     return None # SYNTAX ERROR
 
 def lex_line(ln: int, line_in_words: list[str]) -> Sentence:
-    PRINT('lex_line', line_in_words)
     sentence: Sentence = []
     
     eaten = 0
@@ -50,18 +55,18 @@ def lex_line(ln: int, line_in_words: list[str]) -> Sentence:
         elif (number := get_number_from_word(word)) is not None:
             sentence.append(Token(TokenType.NUMBER_LIT, word))
         elif word.startswith("\'"):
-            assert (result := lex_open_close(word, line_in_words[word_i + 1:], "\'")) is not None, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX("strings must end you know...", ' '.join(line_in_words[word_i:])))
+            assert (result := lex_open_close(word, line_in_words[word_i + 1:], "\'", "\'")) is not None, \
+                    INLINE(ln, ERROR_FORMAT_SYNTAX('invalid literal string: perhaps you miss a space?', ' '.join(line_in_words[word_i:])))
             eaten, record = result
-            sentence.append(Token(TokenType.STRING_LIT, record[1:-1]))
-        elif word.startswith("["):
-            assert (result := lex_open_close(word, line_in_words[word_i + 1:], "]")) is not None, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX("list literal must end you know...", ' '.join(line_in_words[word_i:])))
+            sentence.append(Token(TokenType.STRING_LIT, record))
+        elif word.startswith('['):
+            assert (result := lex_open_close(word, line_in_words[word_i + 1:], '[', ']')) is not None, \
+                    INLINE(ln, ERROR_FORMAT_SYNTAX('invalid list expression: perhaps you miss a space?', ' '.join(line_in_words[word_i:])))
             eaten, record = result
             sentence.append(Token(TokenType.LIST_LIT, record))
         elif word.startswith('('):
-            assert (result := lex_open_close(word, line_in_words[word_i + 1:], ")")) is not None, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX("expression must end you know...", ' '.join(line_in_words[word_i:])))
+            assert (result := lex_open_close(word, line_in_words[word_i + 1:], '(', ')')) is not None, \
+                    INLINE(ln, ERROR_FORMAT_SYNTAX('invalid expression: perhaps you miss a space?', ' '.join(line_in_words[word_i:])))
             eaten, record = result
             sentence.append(Token(TokenType.EXPRESSION, record))
 
