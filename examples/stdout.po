@@ -1,0 +1,8 @@
+## This is an example for https://github.com/POLA-LCS/powang
+
+## STDOUT
+
+stdout 69        ## -> 69
+stdout 'pola'    ## -> pola
+stdout [1 2 3]   ## -> [1 2 3]
+stdout [4 'p' 6] ## -> [4 p 6]

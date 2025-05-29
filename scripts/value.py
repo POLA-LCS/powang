@@ -1,37 +1,27 @@
+from typing import Self
+
 # POLANG TYPE SUPPORT
 class Types:
-    Number = int | float
-    Any = str | Number | list | None
-    STRING = 'string'
-    NUMBER = 'number'
-    LIST = 'list'
-    NONE = 'none'
-    ANY = 'any'
-
-def get_number_from_word(number: str) -> (Types.Number | None):
-    try:
-        num = float(number)
-        return integer if (integer := int(num)) == num else num
-    except ValueError:
-        return None
+    Number = float
+    String = str
+    List = list
+    Any = Number | String | List
 
 # A powang value representation
 class Value:
-    def __init__(self, value: Types.Any, const: bool):
+    def __init__(self, value: Types.Any | Self, const: bool):
         self.value = value
         self.const = const
 
     @property
     def type(self):
-        if self.value is None:
-            return Types.NONE
         if isinstance(self.value, (int, float)):
-            return Types.NUMBER
+            return Types.Number
         if isinstance(self.value, str):
-            return Types.STRING
+            return Types.String
         if isinstance(self.value, list):
-            return Types.LIST
-        return Types.ANY
+            return Types.List
+        return Types.Any
 
     def __repr__(self) -> str:
         return f'({self.value}: {self.type})'
