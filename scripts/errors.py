@@ -1,5 +1,4 @@
 from typing import Optional as opt
-from .value import Value
 
 # ERRORS
 def ERROR_FORMAT(name: opt[str] = None, scope: opt[str] = None, resume: opt[str] = None, message: opt[str] = None):
@@ -17,11 +16,14 @@ def RAISE(error: str):
     assert 0, error
     
 # ERROR FORMATS
-def ERROR_FORMAT_INVALID_ARGUMENTS(scope: opt[str], resume: str, expected: int, provided: int):
-    return ERROR_FORMAT('ARGUMENT', scope, resume, f'expected {expected} but {provided} was provided.')
+def ERROR_FORMAT_ARGC(scope: opt[str], resume: str, expected: int | str, provided: int):
+    return ERROR_FORMAT('ARG COUNT', scope, resume, f'expected {expected} but {provided} was provided.')
 
-def ERROR_FORMAT_TYPE(scope: opt[str], left: Value, right: Value):
-    return ERROR_FORMAT('TYPE', scope, 'types doesn\'t match', f'{left.type} --> {right.type}')
+def ERROR_FORMAT_ARGV(scope: opt[str], inst_or_macro: str, expected: str, provided: str):
+    return ERROR_FORMAT('ARG TYPE', scope, "Invalid arguments", f'{inst_or_macro} expected {expected.upper()} but {provided.upper()} was provided.')
+
+def ERROR_FORMAT_TYPE(scope: opt[str], left: type, right: type):
+    return ERROR_FORMAT('TYPE', scope, 'types doesn\'t match', f'{left} --> {right}')
 
 def ERROR_FORMAT_NAME(scope: opt[str], var_name: str, ):
     return ERROR_FORMAT('NAME', scope, 'doesn\'t exists', f'var -> {var_name}')

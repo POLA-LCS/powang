@@ -1,8 +1,22 @@
-## This is an example for https://github.com/POLA-LCS/powang
+## This is an example for the powang language (https://github.com/POLA-LCS/powang)
+## STDOUT (input...)
 
-## STDOUT
+## stdout (10)
+## >> 10
 
-stdout 69        ## -> 69
-stdout 'pola'    ## -> pola
-stdout [1 2 3]   ## -> [1 2 3]
-stdout [4 'p' 6] ## -> [4 p 6]
+## stdout 10    => stdout (10) ## SUGAR
+
+## stdout ()
+## >>
+
+## stdout (10 20)
+## >> 1020
+
+## stdout newl  => stdout (newl) ## SUGAR
+## >>
+## ->
+
+stdout (10)
+stdout 20
+stdout (30 40)
+stdout (newl 50 ' ' 60)

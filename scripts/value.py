@@ -1,31 +1,35 @@
-from typing import Self
 
 # POLANG TYPE SUPPORT
 class Types:
     Number = float
     String = str
     List = list
-    Any = Number | String | List
+    Any_t = Number | String | List | None
+
+    map = {
+        Number: 'number',
+        String: 'string',
+        List: 'list',
+        Any_t: 'any',
+        None: 'none'
+    }
 
 # A powang value representation
 class Value:
-    def __init__(self, value: Types.Any | Self, const: bool):
+    def __init__(self, value: Types.Any_t, const: bool):
+        if isinstance(value, int):
+            value = float(value)
         self.value = value
         self.const = const
 
     @property
-    def type(self):
-        if isinstance(self.value, (int, float)):
-            return Types.Number
-        if isinstance(self.value, str):
-            return Types.String
-        if isinstance(self.value, list):
-            return Types.List
-        return Types.Any
+    def type(self) -> str:
+        return Types.map[type(self.value)]
 
     def __repr__(self) -> str:
         return f'({self.value}: {self.type})'
 
+    # """""""PYTHONIC""""""""" DEBUG
     def __str__(self) -> str:
         if self.value is None:
             return 'none'

@@ -1,5 +1,5 @@
 from .value import *
-from types import FunctionType
+from typing import Callable
 from .lexer import INSTRUCTIONS_SET, Token, TokenType
 from .errors import *
 
@@ -17,32 +17,62 @@ RUNNING    : bool      = True
 STACK = ['global'] # TODO
 
 MEMORY: dict[str, Value] = {
-    'nice': Value(69, True)
+    'nice': Value(69.0, True),
+    'newl': Value('\n', False)
 }
 
 # ====== INSTRUCTIONS =========
-InstType = tuple[int, FunctionType]
+InstType = tuple[int, Callable]
 
-def inst_out(*args: Token):
-    for tk in args:
-        if tk.type == TokenType.KEYWORD:
-            if tk.value == 'out':
-                print()
-        elif tk.type == TokenType.NAME:
-            assert (value := MEMORY.get(tk.value)) is not None, ERROR_FORMAT_NAME(STACK[-1] + ' out', tk.value) # type: ignore
+def inst_stdout(*tokens: Token) -> int:
+    """### RECURSIVE """
+    # TYPE CHECK ASSERT
+    if len(tokens) == 0:
+        return 0
+
+    for tk in tokens:
+        # NAME
+        if tk.type == TokenType.NAME:
+            assert (value := MEMORY.get(tk.value)) is not None, ERROR_FORMAT_NAME(STACK[-1], tk.value) # type: ignore
             print(value.value, end='')
+        # LIST LITERAL
         elif tk.type == TokenType.LIST_LIT:
             print('[', end='')
-            for i, item in enumerate(tk.value):
-                inst_out(item) # type: ignore
-                if i + 1 < len(tk.value):
-                    print(' ', end='')
+            i = 0
+            while i < len(tk.value) - 1:
+                inst_stdout(tk.value[i], Token(TokenType.STRING_LIT, ' ')) # type: ignore
+                i += 1
+            inst_stdout(tk.value[i]) # type: ignore
             print(']', end='')
+        # LIST_LIT LITERAL
+        elif tk.type == TokenType.EXPRESSION:
+            print('(...)', end='')
         else:
             print(tk.value, end='')
+    return len(tokens)
+
+def inst_print(
+        values: Token,
+        sep = Token(TokenType.STRING_LIT, ' '),
+        end = Token(TokenType.NAME, 'newl')
+    ):
+
+    #                     TYPE CHECK RELAX | vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+    assert values.type == TokenType.LIST_LIT and isinstance(values.value, list), ERROR_FORMAT_ARGV(
+        STACK[-1], 'print', TokenType.LIST_LIT, str(values)
+    )
+
+    length = len(values.value)
+    i = 1
+    while i < length + length - 1:
+        values.value.insert(i, sep)
+        i += 2
+
+    return inst_stdout(*values.value, end)
 
 INSTRUCTIONS: dict[str, InstType] = {
-    'stdout': (-1, inst_out) # type: ignore
+    'stdout': (-1, inst_stdout),
+    'print': (3, inst_print)
 }
 
 # DEVELOP ASSERT
