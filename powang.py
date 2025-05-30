@@ -38,10 +38,8 @@ def interpret_line(ln: int, sentence: list[Token], expression: bool) -> Value:
     except AssertionError as ass:
         error = INLINE_ERROR(ln, ass.args[0])
         assert FLAG_FLEX and is_flex, error # NORMAL ASSERT
-        if FLAG_DISCREET:
+        if not FLAG_DISCREET:
             ERRORS_LIST.append(error)
-        else:
-            print(error)
         return Value(None, True)
 
 def interpret_program(token_program: list[list[Token]]):
@@ -62,6 +60,7 @@ def main(argc: int, argv: list[str]):
     global FLAG_WARNING
     global FLAG_FLEX
     global FLAG_DISCREET
+    global ERRORS_LIST
     global EXIT_CODE
 
     input_file = None
@@ -77,13 +76,20 @@ def main(argc: int, argv: list[str]):
             if ':' in flag:
                 flag, option = flag.split(':')
 
-            assert flag in ['warn', 'error', 'flex'], error_format('USAGE', None, f'Invalid flag', f'flag -> {flag}')
-            if flag == 'warn':
+            if flag == 'help':
+                display_help()
+                return
+            elif flag == 'warn':
                 FLAG_WARNING = True
             elif flag == 'flex':
                 FLAG_FLEX = True
-                assert option is None or option == 'discreet', error_format('USAGE', None, "Invalid flag option", f'option -> {flag}\n    Expected: discreet')
-                FLAG_DISCREET = True
+                if option is not None:
+                    if option == 'discreet':
+                        FLAG_DISCREET = True
+                    else:
+                        error_format('USAGE', None, "Invalid flag option", f'option -> {flag}\n    Expected: discreet')
+            else:
+                RAISE(error_format('USAGE', None, f'Invalid flag', f'flag -> {flag}'))
         else:
             assert input_file is None, error_format('USAGE', None, "input already provided", f"input -> {input_file}")
             input_file = arg
@@ -110,6 +116,9 @@ from sys import argv
 if __name__ == '__main__':
     try:
         main(len(argv), argv)
+        if ERRORS_LIST:
+            for error_msg in ERRORS_LIST:
+                print("[FLEX]", error_msg)
     except AssertionError as ass:
         print('\r', ass)
     exit(EXIT_CODE) # END
