@@ -1,28 +1,9 @@
-from .value import Types
-from .errors import INLINE, ERROR_FORMAT_SYNTAX
-from typing import Self
+from ..types import NUMBER
+from .token import Token, TokenType
+from ..errors import error_format, error_format_syntax, INLINE_ERROR
+from ..insts.instructions import INSTRUCTIONS
 
-INSTRUCTIONS_SET: list[str] = [
-    'stdout', 'print'
-]
-
-class TokenType:
-    KEYWORD    = 'keyword'
-    NAME       = 'name'
-    NUMBER_LIT = 'number'
-    STRING_LIT = 'string'
-    LIST_LIT   = 'list'
-    EXPRESSION = 'expression'
-
-class Token:
-    def __init__(self, type: str, value: str | list[Self]):
-        self.type = type
-        self.value = value
-
-    def __repr__(self) -> str:
-        return f'({self.type}: {self.value})'
-
-def get_number_from_word(number_str: str) -> (Types.Number | None):
+def get_number_from_word(number_str: str) -> (NUMBER | None):
     try:
         return float(number_str)
     except ValueError:
@@ -58,7 +39,7 @@ def tokenize_line(ln: int, line_in_words: list[str]) -> list[Token]:
             continue
 
         # KEYWORDS
-        if word in INSTRUCTIONS_SET:
+        if word in INSTRUCTIONS:
             sentence.append(Token(TokenType.KEYWORD, word))
         # LITERAL NUMBER
         elif (number := get_number_from_word(word)) is not None:
@@ -66,19 +47,19 @@ def tokenize_line(ln: int, line_in_words: list[str]) -> list[Token]:
         # LITERAL STRING
         elif word.startswith("\'"):
             assert (result := lex_open_close(word, line_in_words[word_index + 1:], "\'", "\'")) is not None, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX("invalid literal string: reached end of line", ' '.join(line_in_words[word_index:])))
+                    INLINE_ERROR(ln, error_format_syntax("invalid literal string: reached end of line", ' '.join(line_in_words[word_index:])))
             eaten_words, record = result
             record = record[1:-1]
             record = record.replace("\\n", '\n')
             record = record.replace("\\t", '\t')
             assert "\'" not in record, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX("string didin't finished properly", ' '.join(line_in_words[word_index:])))
+                    INLINE_ERROR(ln, error_format_syntax("string didin't finished properly", ' '.join(line_in_words[word_index:])))
 
             sentence.append(Token(TokenType.STRING_LIT, record))
         # LITERAL LIST
         elif word.startswith('['):
             assert (result := lex_open_close(word, line_in_words[word_index + 1:], '[', ']')) is not None, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX('invalid list expression: perhaps you miss a space?', ' '.join(line_in_words[word_index:])))
+                    INLINE_ERROR(ln, error_format_syntax('invalid list expression: perhaps you miss a space?', ' '.join(line_in_words[word_index:])))
             eaten_words, record = result
 
             # RE LEXING
@@ -86,7 +67,7 @@ def tokenize_line(ln: int, line_in_words: list[str]) -> list[Token]:
         # EXPRESSION
         elif word.startswith('('):
             assert (result := lex_open_close(word, line_in_words[word_index + 1:], '(', ')')) is not None, \
-                    INLINE(ln, ERROR_FORMAT_SYNTAX('invalid expression: perhaps you miss a space?', ' '.join(line_in_words[word_index:])))
+                    INLINE_ERROR(ln, error_format_syntax('invalid expression: perhaps you miss a space?', ' '.join(line_in_words[word_index:])))
             eaten_words, record = result
 
             # RE LEXING
