@@ -1,0 +1,9 @@
+scope ndeaah
+    var a 10
+    var b 20
+    end
+
+scope global
+    var a 30
+
+print_memory

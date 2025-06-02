@@ -10,3 +10,4 @@ def display_help():
     print("    --warn                :  Displays all the warnings.")
     print("    --flex[:option]       :  Flex instructions doesn't panic execution.")
     print("    | discreet            :  Errors at exit doesn't display.")
+    print()

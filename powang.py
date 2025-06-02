@@ -10,37 +10,36 @@ ERRORS_LIST: list[str] = []
 EXIT_CODE  : int       = 0
 RUNNING    : bool      = True
 
-def interpret_line(ln: int, sentence: list[Token], expression: bool) -> Value:
+def interpret_line(ln: int, sentence: list[Token]):
     """### RECURSIVE"""
+    
+    for tk in sentence:
+        if tk.type == TokenType.EXPRESSION:
+            return interpret_line(ln, tk.value)
 
     inst, rest = sentence[0], sentence[1:]
 
-    if inst.type == TokenType.EXPRESSION:
-        return force_value(interpret_line(ln, inst.value, True)) # type: ignore
+    assert inst.type == TokenType.KEYWORD, error_with_line(ln,
+        error_syntax("expecting valid instruction", [f"guilty -> {inst}"]))
+    
+    assert inst.type == TokenType.KEYWORD, error_with_line(ln,
+        error_syntax("expecting valid instruction", [f"guilty -> {inst}"]))
 
-    assert inst.type == TokenType.KEYWORD, INLINE_ERROR(ln,
-        error_format_syntax('expecting valid instruction', f"inst? -> {inst}"))
+    argc, is_flex, func = INSTRUCTIONS[inst.value]
 
-    argc, is_flex, func = INSTRUCTIONS[inst.value] # type: ignore
+    print(inst, rest, argc, is_flex, func)
 
-    assert len(rest) == 1, INLINE_ERROR(ln,
-        error_format_syntax("multiple arguments must be listed", ' '.join([str(tk) for  tk in rest]))
-    )
-
-    if rest[0].type != TokenType.EXPRESSION:
-        rest = [Token(TokenType.EXPRESSION, rest)]
-
-    assert (arg_count := len(rest[0].value)) <= argc or argc == -1, INLINE_ERROR(ln,
-        error_format_ARGC(STACK[-1], f'not enough arguments for inst "{inst.value}"', argc, arg_count))
-
+    assert (arg_count := len(rest)) <= argc or argc == -1, error_with_line(ln,
+        error_argc(STACK[-1], f'not enough arguments for inst "{inst.value}"', argc, arg_count))
+    
     try:
-        return Value(func(*rest[0].value), True)
+        return func(*rest)
     except AssertionError as ass:
-        error = INLINE_ERROR(ln, ass.args[0])
+        error = error_with_line(ln, ass.args[0])
         assert FLAG_FLEX and is_flex, error # NORMAL ASSERT
         if not FLAG_DISCREET:
             ERRORS_LIST.append(error)
-        return Value(None, True)
+        return None
 
 def interpret_program(token_program: list[list[Token]]):
     global EXIT_CODE
@@ -48,9 +47,10 @@ def interpret_program(token_program: list[list[Token]]):
         if len(sentence) == 0: # IGNORE EMPTY LINES
             continue
 
-        exit_code_value = interpret_line(ln, sentence, False)
-        if exit_code_value.type == NUMBER:
-            EXIT_CODE = int(exit_code_value.value) # type: ignore
+        exit_code_value = interpret_line(ln, sentence)
+        # print(exit_code_value)
+        if isinstance(exit_code_value, (int, float)):
+            EXIT_CODE = int(exit_code_value) # type: ignore
 
 def main(argc: int, argv: list[str]):
     if argc == 1:
@@ -67,36 +67,37 @@ def main(argc: int, argv: list[str]):
 
     # Flag and files loop
     for arg in argv[1:]:
-        if arg.startswith('--'):
+        if arg.startswith("--"):
             flag = arg[2:]
             option = None
 
             # FLAG TRIGGERS
             
-            if ':' in flag:
-                flag, option = flag.split(':')
+            if ":" in flag:
+                flag, option = flag.split(":")
 
-            if flag == 'help':
+            if flag == "help":
                 display_help()
                 return
-            elif flag == 'warn':
+            elif flag == "warn":
                 FLAG_WARNING = True
-            elif flag == 'flex':
+                assert option is None, error_usage("warn does not has options")
+            elif flag == "flex":
                 FLAG_FLEX = True
                 if option is not None:
-                    if option == 'discreet':
+                    if option == "discreet":
                         FLAG_DISCREET = True
                     else:
-                        error_format('USAGE', None, "Invalid flag option", f'option -> {flag}\n    Expected: discreet')
+                        error_usage("Invalid flag option", [f"option -> {flag}\n    Expected: discreet"])
             else:
-                RAISE(error_format('USAGE', None, f'Invalid flag', f'flag -> {flag}'))
+                raise_error(error_usage(f"Invalid flag", [f"flag -> {flag}"]))
         else:
-            assert input_file is None, error_format('USAGE', None, "input already provided", f"input -> {input_file}")
+            assert input_file is None, error_usage("input already provided", [f"input -> {input_file}"])
             input_file = arg
 
-    # File doesn't exist ERROR
+    # File doesn"t exist ERROR
     if input_file is None:
-        print(error_format('USAGE', None, 'input was not provided'))
+        print(error_usage("input was not provided"))
         display_help()
         EXIT_CODE = 1
         return
@@ -106,21 +107,21 @@ def main(argc: int, argv: list[str]):
     token_program: list[list[Token]] = []
 
     for ln, line in enumerate(file_content):
-        line_words = line.split(' ')
+        line_words = line.split(" ")
         token_program.append(tokenize_line(ln, line_words))
 
     interpret_program(token_program)
 
 from sys import argv
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main(len(argv), argv)
         if ERRORS_LIST:
             for error_msg in ERRORS_LIST:
-                print("[FLEX]", error_msg)
+                print("\npowang: [FLEX]", error_msg)
     except AssertionError as ass:
-        print('\r', ass)
+        print("\npowang: ", ass)
     exit(EXIT_CODE) # END
     
 # TODO: Change the "scope" thing...

@@ -1,6 +1,6 @@
 from ..types import NUMBER
-from .token import Token, TokenType
-from ..errors import error_format, error_format_syntax, INLINE_ERROR
+from .token import TokenStrValue, TokenListValue, Token, TokenType
+from ..errors import error_syntax, error_with_line
 from ..insts.instructions import INSTRUCTIONS
 
 def get_number_from_word(number_str: str) -> (NUMBER | None):
@@ -25,7 +25,8 @@ def lex_open_close(record: str, part_in_words: list[str], open: str, close: str)
         record += word + ' '
     return None # SYNTAX ERROR
 
-def tokenize_line(ln: int, line_in_words: list[str]) -> list[Token]:
+def tokenize_line(ln: int, line_in_words: list[str]):
+    """### RECURSIVE"""
     sentence: list[Token] = []
 
     eaten_words = 0
@@ -38,42 +39,46 @@ def tokenize_line(ln: int, line_in_words: list[str]) -> list[Token]:
             eaten_words -= 1
             continue
 
-        # KEYWORDS
+        # ====== KEYWORDS
         if word in INSTRUCTIONS:
-            sentence.append(Token(TokenType.KEYWORD, word))
-        # LITERAL NUMBER
-        elif (number := get_number_from_word(word)) is not None:
-            sentence.append(Token(TokenType.NUMBER_LIT, word))
-        # LITERAL STRING
+            sentence.append(TokenStrValue(TokenType.KEYWORD, word))
+            
+        # ====== LITERAL NUMBER
+        elif get_number_from_word(word) is not None:
+            sentence.append(TokenStrValue(TokenType.NUMBER_LIT, word))
+
+        # ====== LITERAL STRING
         elif word.startswith("\'"):
             assert (result := lex_open_close(word, line_in_words[word_index + 1:], "\'", "\'")) is not None, \
-                    INLINE_ERROR(ln, error_format_syntax("invalid literal string: reached end of line", ' '.join(line_in_words[word_index:])))
+                    error_with_line(ln, error_syntax("invalid literal string: reached end of line", [' '.join(line_in_words[word_index:])]))
             eaten_words, record = result
             record = record[1:-1]
             record = record.replace("\\n", '\n')
             record = record.replace("\\t", '\t')
             assert "\'" not in record, \
-                    INLINE_ERROR(ln, error_format_syntax("string didin't finished properly", ' '.join(line_in_words[word_index:])))
+                    error_with_line(ln, error_syntax("string didin't finished properly", [' '.join(line_in_words[word_index:])]))
 
-            sentence.append(Token(TokenType.STRING_LIT, record))
-        # LITERAL LIST
+            sentence.append(TokenStrValue(TokenType.STRING_LIT, record))
+
+        # ====== LITERAL LIST
         elif word.startswith('['):
             assert (result := lex_open_close(word, line_in_words[word_index + 1:], '[', ']')) is not None, \
-                    INLINE_ERROR(ln, error_format_syntax('invalid list expression: perhaps you miss a space?', ' '.join(line_in_words[word_index:])))
+                    error_with_line(ln, error_syntax('invalid list expression: perhaps you miss a space?', [' '.join(line_in_words[word_index:])]))
             eaten_words, record = result
 
-            # RE LEXING
-            sentence.append(Token(TokenType.LIST_LIT, tokenize_line(ln, record[1:-1].split(' '))))
-        # EXPRESSION
+            #                                                  relexing for inner tokens
+            sentence.append(TokenListValue(TokenType.LIST_LIT, tokenize_line(ln, record[1:-1].split(' '))))
+
+        # ====== EXPRESSION
         elif word.startswith('('):
             assert (result := lex_open_close(word, line_in_words[word_index + 1:], '(', ')')) is not None, \
-                    INLINE_ERROR(ln, error_format_syntax('invalid expression: perhaps you miss a space?', ' '.join(line_in_words[word_index:])))
+                    error_with_line(ln, error_syntax('invalid expression: perhaps you miss a space?', [' '.join(line_in_words[word_index:])]))
             eaten_words, record = result
 
-            # RE LEXING
-            sentence.append(Token(TokenType.EXPRESSION, tokenize_line(ln, record[1:-1].split(' '))))
+            #                                                    relexing for inner tokens
+            sentence.append(TokenListValue(TokenType.EXPRESSION, tokenize_line(ln, record[1:-1].split(' '))))
 
         else:
-            sentence.append(Token(TokenType.NAME, word))
+            sentence.append(TokenStrValue(TokenType.NAME, word))
 
     return sentence
