@@ -14,8 +14,9 @@ def error_format(
     if resume is not None:
         output_message += ' ' + resume
     if message is not None:
+        output_message += ':\n'
         for line in message:
-            output_message += f':\n    {line}'
+            output_message += f'|    {line}\n'
     return output_message + '\n'
 
 def raise_error(error: str):
@@ -50,7 +51,7 @@ def error_type(
         'types doesn\'t match',
         [f'{left} --> {right}'])
 
-def error_name(
+def error_identifier(
         scope: opt[str],
         var_name: str
     ): return error_format('NAME', scope,

@@ -1,45 +1,48 @@
-from typing import Literal
-from enum import Enum
+from typing import Literal, Any
+from enum import Enum, auto
+from ..runtime import PolangAny
 
 class TokenType(Enum):
-    KEYWORD    = 'keyword'
-    NAME       = 'name'
-    NUMBER_LIT = 'number'
-    STRING_LIT = 'string'
-    LIST_LIT   = 'list'
-    EXPRESSION = 'expression'
+    KEYWORD    = auto()
+    IDENTIFIER = auto()
+    NUMBER_LIT = auto()
+    STRING_LIT = auto()
+    LIST_LIT   = auto()
+    EXPRESSION = auto()
 
     @staticmethod
-    def str(type: 'TokenType'):
+    def to_str(type: 'TokenType'):
         return {
             TokenType.KEYWORD    : 'KEYWORD',
-            TokenType.NAME       : 'NAME',
-            TokenType.NUMBER_LIT : 'LIT NUMBER',
-            TokenType.STRING_LIT : 'LIT STRING',
-            TokenType.LIST_LIT   : 'LIT LIST',
+            TokenType.IDENTIFIER : 'IDENTIFIER',
+            TokenType.NUMBER_LIT : 'NUMBER LITERAL',
+            TokenType.STRING_LIT : 'STRING LITERAL',
+            TokenType.LIST_LIT   : 'LIST LITERAL',
             TokenType.EXPRESSION : 'EXPRESSION',
-        }[type]
+        }.get(type, 'UNKNOWN TOKEN TYPE ???')
 
 # ====== THE NEXT TOKEN STRUCTURE IS TO MATCH THE TYPE CONSCISTENCY ========= #
-class TokenStrValue:
+class TokenBase:
+    def __init__(self, type, value):
+        self.type = type
+        self.value = value
+        
+    def __repr__(self):
+        return f'({TokenType.to_str(self.type)}: {self.value})'
+        
+class TokenNameValue(TokenBase):
     Types = Literal [
         TokenType.KEYWORD,
-        TokenType.NAME,
-        TokenType.NUMBER_LIT,
-        TokenType.STRING_LIT
+        TokenType.IDENTIFIER,
     ]
     type: Types
     value: str
 
     def __init__(self, type: Types, value: str):
-        self.type = type
-        self.value = value
-
-    def __repr__(self):
-        return f'({TokenType.str(self.type)}: {self.value})'
+        super().__init__(type, value)
 
 # Tokens with list content
-class TokenListValue:
+class TokenListValue(TokenBase):
     Types = Literal [
         TokenType.LIST_LIT,
         TokenType.EXPRESSION
@@ -49,11 +52,19 @@ class TokenListValue:
     value: list['Token']
 
     def __init__(self, type: Types, value: list['Token']):
-        self.type = type
-        self.value = value
+        super().__init__(type, value)
 
-    def __repr__(self):
-        return f'({TokenType.str(self.type)}: {self.value})'
+class TokenLiteralValue(TokenBase):
+    Types = Literal [
+        TokenType.NUMBER_LIT,
+        TokenType.STRING_LIT,
+    ]
+    
+    type: Types
+    value: PolangAny
+    
+    def __init__(self, type: Types, value: PolangAny):
+        super().__init__(type, value)
 
 # Union Token type
-Token = TokenListValue | TokenStrValue
+Token = TokenLiteralValue | TokenNameValue | TokenListValue

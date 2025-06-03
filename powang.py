@@ -8,49 +8,62 @@ FLAG_DISCREET: bool = False
 ERRORS_LIST: list[str] = []
 
 EXIT_CODE  : int       = 0
-RUNNING    : bool      = True
 
-def interpret_line(ln: int, sentence: list[Token]):
+def interpret_line(ln: int, sentence: list[Token]) -> PolangAny:
     """### RECURSIVE"""
-    
-    for tk in sentence:
-        if tk.type == TokenType.EXPRESSION:
-            return interpret_line(ln, tk.value)
+    #ic(ln, sentence, '\n')
 
     inst, rest = sentence[0], sentence[1:]
 
     assert inst.type == TokenType.KEYWORD, error_with_line(ln,
         error_syntax("expecting valid instruction", [f"guilty -> {inst}"]))
-    
-    assert inst.type == TokenType.KEYWORD, error_with_line(ln,
-        error_syntax("expecting valid instruction", [f"guilty -> {inst}"]))
 
-    argc, is_flex, func = INSTRUCTIONS[inst.value]
+    argc, func_is_flex, func = INSTRUCTIONS[inst.value]
 
-    print(inst, rest, argc, is_flex, func)
+    def process_values(ln: int, rest: list[Token]) -> list[PolangAny]:
+        """### RECURSIVE CHILD"""
+        value_list: list[PolangAny] = []
+        for tk in rest:
+            if tk.type == TokenType.NUMBER_LIT or tk.type == TokenType.STRING_LIT:
+                value_list.append(tk.value)
+            elif tk.type == TokenType.LIST_LIT:
+                value_list.append(
+                    PolangList(process_values(ln, tk.value), const=False)
+                )
+            elif tk.type == TokenType.IDENTIFIER:
+                assert (value := get_memory(tk.value)) is not None, error_with_line(ln,
+                    error_identifier(STACK[-1], tk.value)
+                )
+                value_list.append(value)
+            elif tk.type == TokenType.EXPRESSION:
+                value_list.append(interpret_line(ln, tk.value))
+        return value_list
 
-    assert (arg_count := len(rest)) <= argc or argc == -1, error_with_line(ln,
-        error_argc(STACK[-1], f'not enough arguments for inst "{inst.value}"', argc, arg_count))
-    
-    try:
-        return func(*rest)
-    except AssertionError as ass:
-        error = error_with_line(ln, ass.args[0])
-        assert FLAG_FLEX and is_flex, error # NORMAL ASSERT
-        if not FLAG_DISCREET:
-            ERRORS_LIST.append(error)
-        return None
+    arguments = process_values(ln, rest)
+
+    result = func(*arguments)
+    if result.type == 'error':
+        assert func_is_flex and FLAG_FLEX, result.data
+        ERRORS_LIST.append(result.data)
+        return PolangNov()
+    else:
+        return result
 
 def interpret_program(token_program: list[list[Token]]):
     global EXIT_CODE
     for ln, sentence in enumerate(token_program):
+        if len(STACK) == 0:
+            return
+
         if len(sentence) == 0: # IGNORE EMPTY LINES
             continue
 
         exit_code_value = interpret_line(ln, sentence)
-        # print(exit_code_value)
         if isinstance(exit_code_value, (int, float)):
             EXIT_CODE = int(exit_code_value) # type: ignore
+            error_message = error_with_line(ln, *ass.args)
+            if not FLAG_DISCREET:
+                ERRORS_LIST.append(error_message)
 
 def main(argc: int, argv: list[str]):
     if argc == 1:
@@ -72,7 +85,7 @@ def main(argc: int, argv: list[str]):
             option = None
 
             # FLAG TRIGGERS
-            
+
             if ":" in flag:
                 flag, option = flag.split(":")
 
@@ -102,7 +115,8 @@ def main(argc: int, argv: list[str]):
         EXIT_CODE = 1
         return
 
-    file_content = get_file_content(input_file)
+    file_content: list[str] | None = get_file_content(input_file)
+    assert file_content is not None, error_identifier("input", input_file)
 
     token_program: list[list[Token]] = []
 
@@ -121,7 +135,10 @@ if __name__ == "__main__":
             for error_msg in ERRORS_LIST:
                 print("\npowang: [FLEX]", error_msg)
     except AssertionError as ass:
-        print("\npowang: ", ass)
+        print("\npowang:", ass)
+        exit(1)
     exit(EXIT_CODE) # END
-    
-# TODO: Change the "scope" thing...
+
+# TODO:
+# - Change the "scope" thing... (whatever this means...).
+# - Add the TokenNumberValue

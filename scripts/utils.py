@@ -1,6 +1,9 @@
 def get_file_content(file_path: str):
-    with open(file_path, 'r') as file:
-        return [line.strip() for line in file.readlines()]
+    try:
+        with open(file_path, 'r') as file:
+            return [line.strip() for line in file.readlines()]
+    except FileNotFoundError:
+        return None
 
 def display_help():
     print("USAGE:")

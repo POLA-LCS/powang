@@ -1,13 +1,11 @@
-from ..types import NUMBER
-from .token import TokenStrValue, TokenListValue, Token, TokenType
+from .token import Token, TokenLiteralValue, TokenNameValue, TokenListValue, TokenType
+from ..runtime.types import PolangNumber, PolangString, PolangList, PolangStruct # TODO: PolangStruct
 from ..errors import error_syntax, error_with_line
 from ..insts.instructions import INSTRUCTIONS
 
-def get_number_from_word(number_str: str) -> (NUMBER | None):
-    try:
-        return float(number_str)
-    except ValueError:
-        return None
+def get_number_from_word(number_str: str) -> (float | None):
+    try:               return float(number_str)
+    except ValueError: return None
 
 def lex_open_close(record: str, part_in_words: list[str], open: str, close: str) -> (tuple[int, str] | None):
     if record.endswith(close) and len(record) > 1:
@@ -41,11 +39,11 @@ def tokenize_line(ln: int, line_in_words: list[str]):
 
         # ====== KEYWORDS
         if word in INSTRUCTIONS:
-            sentence.append(TokenStrValue(TokenType.KEYWORD, word))
+            sentence.append(TokenNameValue(TokenType.KEYWORD, word))
             
         # ====== LITERAL NUMBER
-        elif get_number_from_word(word) is not None:
-            sentence.append(TokenStrValue(TokenType.NUMBER_LIT, word))
+        elif (number := get_number_from_word(word)) is not None:
+            sentence.append(TokenLiteralValue(TokenType.NUMBER_LIT, PolangNumber(number)))
 
         # ====== LITERAL STRING
         elif word.startswith("\'"):
@@ -58,7 +56,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
             assert "\'" not in record, \
                     error_with_line(ln, error_syntax("string didin't finished properly", [' '.join(line_in_words[word_index:])]))
 
-            sentence.append(TokenStrValue(TokenType.STRING_LIT, record))
+            sentence.append(TokenLiteralValue(TokenType.STRING_LIT, PolangString(record)))
 
         # ====== LITERAL LIST
         elif word.startswith('['):
@@ -66,8 +64,10 @@ def tokenize_line(ln: int, line_in_words: list[str]):
                     error_with_line(ln, error_syntax('invalid list expression: perhaps you miss a space?', [' '.join(line_in_words[word_index:])]))
             eaten_words, record = result
 
-            #                                                  relexing for inner tokens
-            sentence.append(TokenListValue(TokenType.LIST_LIT, tokenize_line(ln, record[1:-1].split(' '))))
+            sentence.append(TokenListValue(
+                TokenType.LIST_LIT,
+                tokenize_line(ln, record[1:-1].split(' ')), # relexing for inner tokens
+            ))
 
         # ====== EXPRESSION
         elif word.startswith('('):
@@ -75,10 +75,12 @@ def tokenize_line(ln: int, line_in_words: list[str]):
                     error_with_line(ln, error_syntax('invalid expression: perhaps you miss a space?', [' '.join(line_in_words[word_index:])]))
             eaten_words, record = result
 
-            #                                                    relexing for inner tokens
-            sentence.append(TokenListValue(TokenType.EXPRESSION, tokenize_line(ln, record[1:-1].split(' '))))
+            sentence.append(TokenListValue(
+                TokenType.EXPRESSION,
+                tokenize_line(ln, record[1:-1].split(' ')) # relexing for inner tokens
+            ))
 
         else:
-            sentence.append(TokenStrValue(TokenType.NAME, word))
+            sentence.append(TokenNameValue(TokenType.IDENTIFIER, word))
 
     return sentence
