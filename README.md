@@ -32,8 +32,8 @@ You need [Python3](https://www.python.org/) (I will migrate to C++ probably).
 - Clone the repository with:  
 ```git clone https://github.com/POLA-LCS/powang```
 
-Go to `./powang`  
-Run `powang.py --help`  
-Create the file `main.po`   
-Write your first hello world with `stdout 'Hello, world!\n'`  
-Run it with `powang.py main.po`  
+- Go to `./powang`  
+- Run `powang.py --help`  
+- Create the file `main.po`   
+- Write your first hello world with `stdout 'Hello, world!\n'`  
+- Run it with `powang.py main.po`  
