@@ -59,9 +59,9 @@ def interpret_program(token_program: list[list[Token]]):
             continue
 
         try:
-            exit_code_value = interpret_line(ln, sentence)
-            if isinstance(exit_code_value, (int, float)):
-                EXIT_CODE = int(exit_code_value) # type: ignore
+            return_value = interpret_line(ln, sentence)
+            if return_value.type == 'number':
+                EXIT_CODE = int(return_value.data)
         except AssertionError as ass:
             if not FLAG_DISCREET:
                 ERRORS_LIST.append(*ass.args)

@@ -1,9 +1,11 @@
 from ..runtime.types import *
+from ..errors import error_arguments
+from ..runtime.memory import STACK
 
 def inst_stdout(*args: PolangAny) -> PolangNumber:
     """### RECURSIVE"""
     for arg in args:
-        if arg.type == 'number' and int(arg.data) == arg.data:
+        if arg.type == PolangNumber.type and int(arg.data) == arg.data:
             print(int(arg.data), end='')
         elif arg.type == 'list':
             print('[', end='')
@@ -16,7 +18,6 @@ def inst_stdout(*args: PolangAny) -> PolangNumber:
         else:
             print(arg.data, end='')
     return PolangNumber(float(len(args)), const=False)
-
 
 def inst_print(
         args: PolangAny,
@@ -33,3 +34,12 @@ def inst_print(
             i += 2
         return inst_stdout(*args.data, end) - PolangNumber(float(length))
     return inst_stdout(args, end)
+
+def inst_exit(arg: PolangAny):
+    assert arg.type == PolangNumber.type, error_arguments(
+        STACK[-1], 'exit', PolangNumber.type, arg.type
+    )
+    
+    STACK.clear()
+    
+    return arg

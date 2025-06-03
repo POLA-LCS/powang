@@ -1,4 +1,4 @@
-# Powang programming language | WIP
+# Powang | programming language | WIP
 Hiii, this is POLA, a software engineering student, and this is my own programming language :D  
 
 > [!WARNING]

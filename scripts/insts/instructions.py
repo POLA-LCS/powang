@@ -11,5 +11,6 @@ from icecream import ic
 INSTRUCTIONS: dict[str, InstructionType] = {
     'stdout': (-1, True, inst_stdout),
     'print': (3, True, inst_print),
+    'exit': (1, False, inst_exit)
     # 'stdin': (2, False, inst_stdin),
 }
