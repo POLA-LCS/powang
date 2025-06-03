@@ -17,7 +17,7 @@ def error_format(
         output_message += ':\n'
         for line in message:
             output_message += f'|    {line}\n'
-    return output_message + '\n'
+    return output_message
 
 def raise_error(error: str):
     """`assert False, error`"""

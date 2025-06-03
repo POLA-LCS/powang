@@ -58,12 +58,13 @@ def interpret_program(token_program: list[list[Token]]):
         if len(sentence) == 0: # IGNORE EMPTY LINES
             continue
 
-        exit_code_value = interpret_line(ln, sentence)
-        if isinstance(exit_code_value, (int, float)):
-            EXIT_CODE = int(exit_code_value) # type: ignore
-            error_message = error_with_line(ln, *ass.args)
+        try:
+            exit_code_value = interpret_line(ln, sentence)
+            if isinstance(exit_code_value, (int, float)):
+                EXIT_CODE = int(exit_code_value) # type: ignore
+        except AssertionError as ass:
             if not FLAG_DISCREET:
-                ERRORS_LIST.append(error_message)
+                ERRORS_LIST.append(*ass.args)
 
 def main(argc: int, argv: list[str]):
     if argc == 1:
@@ -116,7 +117,7 @@ def main(argc: int, argv: list[str]):
         return
 
     file_content: list[str] | None = get_file_content(input_file)
-    assert file_content is not None, error_identifier("input", input_file)
+    assert file_content is not None, "File doens't exists: " + input_file
 
     token_program: list[list[Token]] = []
 
