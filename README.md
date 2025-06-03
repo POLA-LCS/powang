@@ -7,14 +7,14 @@ or
 `print ['Hello, world!']`
 
 ## TODO
-[x] Support for:
-[x] - `number`.
-[x] - `string`.
-[x] - `list`.
-[x] - `expression`.
-[x] Comments `##`.
-[x] Standard console output `stdout`.
-[x] Fancy print with `print` (almost 1:1 with python print).
+Support for:
+[X] - `number`.
+[X] - `string`.
+[X] - `list`.
+[X] - `expression`.
+[X] Comments `##`.
+[X] Standard console output `stdout`.
+[X] Fancy print with `print` (almost 1:1 with python print).
 [ ] A good lexical analysis.
 [ ] User types.
 [ ] - Methods.
