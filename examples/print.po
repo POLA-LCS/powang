@@ -1,17 +1,15 @@
 ## This is an example for the powang language (https://github.com/POLA-LCS/powang)
 ## PRINT (input sep=' ' end=newl) -> number
 
-print ([1 2 3])
+print [1 2 3]
 ## >> 1 2 3
 ## ->
 
-print [1 2 3] ## => print ([1 2 3]) ## SUGAR
-
-print ([8 9 2005] '/') ## => print ([8 9 2005] '/' newl) ## DEFAULT ARG
+print [8 9 2005] '/' ## => print [8 9 2005] '/' newl ## DEFAULT ARG
 ## >> 8/9/2005
 ## ->
 
-print ([1 2 3] '|' '...')
+print [1 2 3] '|' '...'
 ## >> 1|2|3...
 
 print ['end']

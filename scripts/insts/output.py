@@ -31,5 +31,5 @@ def inst_print(
         while i < length + length - 1:
             args.data.insert(i, sep)
             i += 2
-        return inst_stdout(*args.data, end) - PolangNumber(float(length - 1))
+        return inst_stdout(*args.data, end) - PolangNumber(float(length))
     return inst_stdout(args, end)
