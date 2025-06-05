@@ -1,6 +1,6 @@
 from typing import Literal, Any
 from enum import Enum, auto
-from ..types import PolangAny
+from ..types import PowangAny
 
 class TokenType(Enum):
     KEYWORD     = auto()
@@ -68,9 +68,9 @@ class TokenLiteralValue(TokenBase):
     ]
     
     type: Types
-    value: PolangAny
+    value: PowangAny
     
-    def __init__(self, type: Types, value: PolangAny):
+    def __init__(self, type: Types, value: PowangAny):
         super().__init__(type, value)
 
 # Union Token type

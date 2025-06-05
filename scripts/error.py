@@ -48,9 +48,10 @@ def error_type( # types doesn't match: X != Y
     f'expected {left} but {right} was provided.'
 ])
 
-def error_identifier(
-    var_name: str
-): return error_format('NAME', "doesn't exists", [
+def error_identifier_not_found(
+    var_name: str,
+    is_inst: bool,
+): return error_format('NAME', ("instruction " if is_inst else '') + "doesn't exists", [
     f'{var_name}'
 ])
 

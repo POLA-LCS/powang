@@ -1,0 +1,7 @@
+## false_struct and true_struct are two structs that its "bool" methods returns 0 and 1 respectively
+if false_struct (print ['FALSE' 'from' 'false'])
+if true_struct (print ['TRUE' 'from' 'true']) 
+
+## "not" it is an instruction
+if (not false_struct) (print ['FALSE' 'from' 'not' 'true'])
+if (not true_struct) (print ['TRUE' 'from' 'not' 'true'])

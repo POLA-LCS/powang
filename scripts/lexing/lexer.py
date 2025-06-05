@@ -1,7 +1,8 @@
 from .token import Token, TokenLiteralValue, TokenNameValue, TokenListValue, TokenType
-from ..types import PolangNumber, PolangString, PolangStruct # TODO: PolangStruct
+from ..types import PowangNumber, PowangString, PowangStruct # TODO: PowangStruct
 from ..error import error_syntax, error_with_line
-from ..instructions.instructions import INSTRUCTIONS, KEYWORDS
+from ..runtime.instructions import INSTRUCTIONS
+from ..runtime.keywords import KEYWORDS
 
 def get_number_from_word(number_str: str) -> (float | None):
     try:               return float(number_str)
@@ -46,7 +47,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
             
         # ====== LITERAL NUMBER
         elif (number := get_number_from_word(word)) is not None:
-            sentence.append(TokenLiteralValue(TokenType.NUMBER_LIT, PolangNumber(number)))
+            sentence.append(TokenLiteralValue(TokenType.NUMBER_LIT, PowangNumber(number)))
 
         # ====== LITERAL STRING
         elif word.startswith("\'"):
@@ -72,7 +73,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
             assert "\'" not in record, \
                     error_with_line(ln, error_syntax("string didin't finished properly", [' '.join(line_in_words[word_index:])]))
 
-            sentence.append(TokenLiteralValue(TokenType.STRING_LIT, PolangString(record)))
+            sentence.append(TokenLiteralValue(TokenType.STRING_LIT, PowangString(record)))
 
         # ====== LITERAL LIST
         elif word.startswith('['):
