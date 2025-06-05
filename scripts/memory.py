@@ -1,6 +1,6 @@
 from .types import *
 
-STACK = ['global']
+SCOPE_STACK: list[str] = ['global']
 
 MEMORY: dict[str, dict[str, PolangAny]] = {
     'global': {
@@ -10,6 +10,6 @@ MEMORY: dict[str, dict[str, PolangAny]] = {
 }
 
 def get_memory(name: str) -> (PolangAny | None):
-    if (value := MEMORY[STACK[-1]].get(name)) is not None:
+    if (value := MEMORY[SCOPE_STACK[-1]].get(name)) is not None:
         return value
     return MEMORY['global'].get(name)

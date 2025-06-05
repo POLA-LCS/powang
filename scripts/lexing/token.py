@@ -1,24 +1,27 @@
 from typing import Literal, Any
 from enum import Enum, auto
-from ..runtime import PolangAny
+from ..types import PolangAny
 
 class TokenType(Enum):
-    KEYWORD    = auto()
-    IDENTIFIER = auto()
-    NUMBER_LIT = auto()
-    STRING_LIT = auto()
-    LIST_LIT   = auto()
-    EXPRESSION = auto()
+    KEYWORD     = auto()
+    INSTRUCTION = auto()
+    IDENTIFIER  = auto()
+    # ====== LITERALS =========
+    NUMBER_LIT  = auto()
+    STRING_LIT  = auto()
+    LIST_LIT    = auto()
+    
+    EXPRESSION  = auto()
 
     @staticmethod
     def to_str(type: 'TokenType'):
         return {
-            TokenType.KEYWORD    : 'KEYWORD',
-            TokenType.IDENTIFIER : 'IDENTIFIER',
-            TokenType.NUMBER_LIT : 'NUMBER LITERAL',
-            TokenType.STRING_LIT : 'STRING LITERAL',
-            TokenType.LIST_LIT   : 'LIST LITERAL',
-            TokenType.EXPRESSION : 'EXPRESSION',
+            TokenType.INSTRUCTION : 'INSTRUCTION',
+            TokenType.IDENTIFIER  : 'IDENTIFIER',
+            TokenType.NUMBER_LIT  : 'NUMBER LITERAL',
+            TokenType.STRING_LIT  : 'STRING LITERAL',
+            TokenType.LIST_LIT    : 'LIST LITERAL',
+            TokenType.EXPRESSION  : 'EXPRESSION',
         }.get(type, 'UNKNOWN TOKEN TYPE ???')
 
 # ====== THE NEXT TOKEN STRUCTURE IS TO MATCH THE TYPE CONSCISTENCY ========= #
@@ -32,7 +35,7 @@ class TokenBase:
         
 class TokenNameValue(TokenBase):
     Types = Literal [
-        TokenType.KEYWORD,
+        TokenType.INSTRUCTION,
         TokenType.IDENTIFIER,
     ]
     type: Types

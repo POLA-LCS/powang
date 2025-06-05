@@ -1,5 +1,5 @@
-from .utils import *
-from .errors import *
+from .error import *
 from .lexing import *
-from .insts import *
-from .runtime import *
+from .circular import *
+from .interpret import *
+# What a beautiful stairs

@@ -1,70 +1,22 @@
 from sys import exit
 from scripts import *
 
-FLAG_WARNING : bool = False
-FLAG_FLEX    : bool = False
-FLAG_DISCREET: bool = False
+def get_file_content(file_path: str):
+    try:
+        with open(file_path, 'r') as file:
+            return [line.strip() for line in file.readlines()]
+    except FileNotFoundError:
+        return None
 
-ERRORS_LIST: list[str] = []
-
-EXIT_CODE  : int       = 0
-
-def interpret_line(ln: int, sentence: list[Token]) -> PolangAny:
-    """### RECURSIVE"""
-    #ic(ln, sentence, '\n')
-
-    inst, rest = sentence[0], sentence[1:]
-
-    assert inst.type == TokenType.KEYWORD, error_with_line(ln,
-        error_syntax("expecting valid instruction", [f"guilty -> {inst}"]))
-
-    argc, func_is_flex, func = INSTRUCTIONS[inst.value]
-
-    def process_values(ln: int, rest: list[Token]) -> list[PolangAny]:
-        """### RECURSIVE CHILD"""
-        value_list: list[PolangAny] = []
-        for tk in rest:
-            if tk.type == TokenType.NUMBER_LIT or tk.type == TokenType.STRING_LIT:
-                value_list.append(tk.value)
-            elif tk.type == TokenType.LIST_LIT:
-                value_list.append(
-                    PolangList(process_values(ln, tk.value), const=False)
-                )
-            elif tk.type == TokenType.IDENTIFIER:
-                assert (value := get_memory(tk.value)) is not None, error_with_line(ln,
-                    error_identifier(STACK[-1], tk.value)
-                )
-                value_list.append(value)
-            elif tk.type == TokenType.EXPRESSION:
-                value_list.append(interpret_line(ln, tk.value))
-        return value_list
-
-    arguments = process_values(ln, rest)
-
-    result = func(*arguments)
-    if result.type == 'error':
-        assert func_is_flex and FLAG_FLEX, result.data
-        ERRORS_LIST.append(result.data)
-        return PolangNov()
-    else:
-        return result
-
-def interpret_program(token_program: list[list[Token]]):
-    global EXIT_CODE
-    for ln, sentence in enumerate(token_program):
-        if len(STACK) == 0:
-            return
-
-        if len(sentence) == 0: # IGNORE EMPTY LINES
-            continue
-
-        try:
-            return_value = interpret_line(ln, sentence)
-            if return_value.type == 'number':
-                EXIT_CODE = int(return_value.data)
-        except AssertionError as ass:
-            if not FLAG_DISCREET:
-                ERRORS_LIST.append(*ass.args)
+def display_help():
+    print("USAGE:")
+    print("    polang <input.po> [options]  :  Interprets an input.\n")
+    print("OPTIONS:")
+    print("    --help                :  Displays this message (same as no input).")
+    print("    --warn                :  Displays all the warnings.")
+    print("    --flex[:option]       :  Flex instructions doesn't panic execution.")
+    print("    | discreet            :  Errors at exit doesn't display.")
+    print()
 
 def main(argc: int, argv: list[str]):
     if argc == 1:
@@ -132,7 +84,7 @@ from sys import argv
 if __name__ == "__main__":
     try:
         main(len(argv), argv)
-        if ERRORS_LIST:
+        if not FLAG_DISCREET and ERRORS_LIST:
             for error_msg in ERRORS_LIST:
                 print("\npowang: [FLEX]", error_msg)
     except AssertionError as ass:
