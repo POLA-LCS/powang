@@ -16,7 +16,6 @@ def calculate_operation(operation_string: str, *args: PolangAny):
         return PolangNov()
     result_sum = args[0]
     for arg in args[1:]:
-        print('[DEBUG]', arg)
         complete_operation = operation_string + arg.type
         assert result_sum.has(complete_operation), error_operand(
             result_sum.type,
@@ -37,10 +36,3 @@ def inst_operator_div(*args: PolangAny):
 
 def inst_operator_sub(*args: PolangAny):
     return calculate_operation('substraction', *args)
-    
-OPERATIONS: dict = {
-    '+': (-1, False, inst_operator_plus),
-    '-': (-1, False, inst_operator_sub),
-    '*': (-1, False, inst_operator_mult),
-    '/': (-1, False, inst_operator_div),
-}

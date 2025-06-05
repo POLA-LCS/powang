@@ -1,7 +1,7 @@
 from .token import Token, TokenLiteralValue, TokenNameValue, TokenListValue, TokenType
 from ..types import PolangNumber, PolangString, PolangStruct # TODO: PolangStruct
 from ..error import error_syntax, error_with_line
-from ..instructions.instructions import INSTRUCTIONS
+from ..instructions.instructions import INSTRUCTIONS, KEYWORDS
 
 def get_number_from_word(number_str: str) -> (float | None):
     try:               return float(number_str)
@@ -40,6 +40,9 @@ def tokenize_line(ln: int, line_in_words: list[str]):
         # ====== INSTRUCTIONS
         if word in INSTRUCTIONS:
             sentence.append(TokenNameValue(TokenType.INSTRUCTION, word))
+            
+        elif word in KEYWORDS:
+            sentence.append(TokenNameValue(TokenType.KEYWORD, word))
             
         # ====== LITERAL NUMBER
         elif (number := get_number_from_word(word)) is not None:

@@ -16,11 +16,14 @@ class TokenType(Enum):
     @staticmethod
     def to_str(type: 'TokenType'):
         return {
+            TokenType.KEYWORD     : 'KEYWORD',
             TokenType.INSTRUCTION : 'INSTRUCTION',
             TokenType.IDENTIFIER  : 'IDENTIFIER',
+            
             TokenType.NUMBER_LIT  : 'NUMBER LITERAL',
             TokenType.STRING_LIT  : 'STRING LITERAL',
             TokenType.LIST_LIT    : 'LIST LITERAL',
+            
             TokenType.EXPRESSION  : 'EXPRESSION',
         }.get(type, 'UNKNOWN TOKEN TYPE ???')
 
@@ -37,6 +40,7 @@ class TokenNameValue(TokenBase):
     Types = Literal [
         TokenType.INSTRUCTION,
         TokenType.IDENTIFIER,
+        TokenType.KEYWORD
     ]
     type: Types
     value: str
