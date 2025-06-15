@@ -1,16 +1,30 @@
 from sys import exit
 from scripts import *
 
+TAB_SIZE = 4
+
 def get_file_content(file_path: str):
     try:
         with open(file_path, 'r') as file:
-            return [line.strip() for line in file.readlines()]
+            lines = file.readlines()
+            result: list[tuple[int, str]] = []
+            for line in lines:
+                line = line.replace(' ' * TAB_SIZE, '\t')
+                # strip left
+                indent = 0
+                for i, ch in enumerate(line):
+                    if not ch.isspace():
+                        indent = line[:i].count('\t')
+                        break
+                result.append((indent, line.strip()))
+            return result
     except FileNotFoundError:
         return None
 
 def display_help():
+
     print("USAGE:")
-    print("    polang <input.po> [options]  :  Interprets an input.\n")
+    print("    powang <input.po> [options]  :  Interprets an input.\n")
     print("OPTIONS:")
     print("    --help                :  Displays this message (same as no input).")
     print("    --warn                :  Displays all the warnings.")
@@ -49,7 +63,7 @@ def main(argc: int, argv: list[str]):
                 FLAG_WARNING = True
                 assert option is None, error_usage("warn does not has options")
             elif flag == "flex":
-                FLAG_FLEX = True
+                set_flag_flex_true()
                 if option is not None:
                     if option == "discreet":
                         FLAG_DISCREET = True
@@ -68,14 +82,15 @@ def main(argc: int, argv: list[str]):
         EXIT_CODE = 1
         return
 
-    file_content: list[str] | None = get_file_content(input_file)
+    file_content = get_file_content(input_file)
     assert file_content is not None, "File doens't exists: " + input_file
 
-    token_program: list[list[Token]] = []
+    token_program: list[tuple[int, list[Token]]] = []
 
-    for ln, line in enumerate(file_content):
-        line_words = line.split(" ")
-        token_program.append(tokenize_line(ln, line_words))
+    for ln, composed_line in enumerate(file_content):
+        indent, line = composed_line
+        line_words = line.split()
+        token_program.append((indent, tokenize_line(ln, line_words)))
 
     interpret_program(token_program)
 
@@ -84,14 +99,11 @@ from sys import argv
 if __name__ == "__main__":
     try:
         main(len(argv), argv)
-        if not FLAG_DISCREET and ERRORS_LIST:
-            for error_msg in ERRORS_LIST:
-                print("\npowang: [FLEX]", error_msg)
     except AssertionError as ass:
         print("\npowang:", ass)
-        exit(1)
-    exit(EXIT_CODE) # END
+        EXIT_CODE = 1
 
-# TODO:
-# - Change the "scope" thing... (whatever this means...).
-# - Add the TokenNumberValue
+    if not FLAG_DISCREET and ERRORS_LIST:
+        for error_msg in ERRORS_LIST:
+            print("\npowang: [FLEX]", error_msg)
+    exit(EXIT_CODE) # END

@@ -1,7 +1,7 @@
 from .token import Token, TokenLiteralValue, TokenNameValue, TokenListValue, TokenType
-from ..types import PowangNumber, PowangString, PowangStruct # TODO: PowangStruct
+from ..types import PowangNumber, PowangString, PowangBool, PowangStruct # TODO: PowangStruct
 from ..error import error_syntax, error_with_line
-from ..runtime.instructions import INSTRUCTIONS
+from ..runtime.instructions import BUILTINS
 from ..runtime.keywords import KEYWORDS
 
 def get_number_from_word(number_str: str) -> (float | None):
@@ -38,16 +38,20 @@ def tokenize_line(ln: int, line_in_words: list[str]):
             eaten_words -= 1
             continue
 
-        # ====== INSTRUCTIONS
-        if word in INSTRUCTIONS:
-            sentence.append(TokenNameValue(TokenType.INSTRUCTION, word))
-            
+        # ====== BUILTINS
+        if word in BUILTINS:
+            sentence.append(TokenNameValue(TokenType.BUILTIN, word))
+
         elif word in KEYWORDS:
             sentence.append(TokenNameValue(TokenType.KEYWORD, word))
-            
+
         # ====== LITERAL NUMBER
         elif (number := get_number_from_word(word)) is not None:
             sentence.append(TokenLiteralValue(TokenType.NUMBER_LIT, PowangNumber(number)))
+
+        # ====== LITERAL BOOL
+        elif word in ['true', 'false']:
+            sentence.append(TokenLiteralValue(TokenType.BOOL_LIT, PowangBool(True if word == 'true' else False)))
 
         # ====== LITERAL STRING
         elif word.startswith("\'"):
@@ -59,17 +63,17 @@ def tokenize_line(ln: int, line_in_words: list[str]):
                 ]))
             eaten_words, record = result
             record = record[1:-1]
-            
+
             # scape chars
-            record = record.replace("\\n", '\n')
-            record = record.replace("\\t", '\t')
-            
-            # ascii scape
-            if "\\a" in record:
-                record = record.replace("\\a32", ' ')
-                record = record.replace("\\a13", '\n')
-                record = record.replace("\\a9", '\t')
-            
+            if '\\' in record:
+                record = record.replace("\\n", '\n')
+                record = record.replace("\\t", '\t')
+                # ascii scape
+                if "\\a" in record:
+                    record = record.replace("\\a32", ' ')
+                    record = record.replace("\\a13", '\n')
+                    record = record.replace("\\a9", '\t')
+
             assert "\'" not in record, \
                     error_with_line(ln, error_syntax("string didin't finished properly", [' '.join(line_in_words[word_index:])]))
 
@@ -102,7 +106,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
                 TokenType.EXPRESSION,
                 tokenize_line(ln, record[1:-1].split(' ')) # relexing for inner tokens
             ))
-            
+
         else:
             sentence.append(TokenNameValue(TokenType.IDENTIFIER, word))
 

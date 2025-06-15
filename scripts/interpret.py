@@ -4,51 +4,65 @@ from .error import *
 from .memory import *
 from .circular import *
 from .runtime import *
+from .runtime.external_condition import EXTERNAL_CONDITION, ACTUAL_LINE
 
 FLAG_WARNING : bool = False
 FLAG_FLEX    : bool = False
 FLAG_DISCREET: bool = False
 
+def set_flag_flex_true():
+    global FLAG_FLEX
+    FLAG_FLEX = True
+
 ERRORS_LIST: list[str] = []
 
 EXIT_CODE  : int       = 0
 
-def process_values(rest: list[Token]) -> list[PowangAny]:
-    """### RECURSIVE CHILD"""
+def list_expression(tokens: list[Token]):
+    return tokens
+
+def process_values(indent: int, rest: list[Token]) -> list[PowangAny]:
+    """### RECURSIVE"""
     value_list: list[PowangAny] = []
     for tk in rest:
-        if tk.type == TokenType.NUMBER_LIT or tk.type == TokenType.STRING_LIT:
+        if \
+            tk.type == TokenType.NUMBER_LIT or \
+            tk.type == TokenType.STRING_LIT or \
+            tk.type == TokenType.BOOL_LIT:
             value_list.append(tk.value)
         elif tk.type == TokenType.LIST_LIT:
+            #print('[DEBUG]', tk.value)
             value_list.append(
-                PowangList(process_values(tk.value), const=False)
+                PowangList(process_values(indent, tk.value))
             )
         elif tk.type == TokenType.IDENTIFIER:
-            assert (value := get_memory(tk.value)) is not None, error_identifier_not_found(
+            assert (value := SCOPE.get_memory(tk.value)) is not None, error_identifier_not_found(
                 tk.value, False
             )
-            value_list.append(value)
+            _, powang_value = value
+            value_list.append(powang_value)
         elif tk.type == TokenType.EXPRESSION:
-            value_list.append(interpret_line(tk.value))
-        elif tk.type == TokenType.INSTRUCTION:
-            value_list.append(PowangString(f'<powang {tk.value}>'))
+            value_list.append(interpret_line(indent, tk.value))
 
     return value_list
 
-def interpret_line(sentence: list[Token]) -> PowangAny:
+def interpret_line(indent: int, sentence: list[Token]) -> PowangAny:
     """### RECURSIVE"""
-    #print(sentence, '\n')
 
     domain, rest = sentence[0], sentence[1:]
 
-    if get_skip_condition(domain, rest):
-        return PowangNov()
-    else:
-        pop_skip_condition()
+    #print('[DEBUG]', indent, SCOPE.peek_name())
+
+    if EXTERNAL_CONDITION:
+        condition = EXTERNAL_CONDITION[-1](indent, domain)
+        if condition:
+            return PowangNov()
+        else:
+            EXTERNAL_CONDITION.pop()
 
     assert \
         domain.type == TokenType.KEYWORD     or \
-        domain.type == TokenType.INSTRUCTION or \
+        domain.type == TokenType.BUILTIN or \
         domain.type == TokenType.IDENTIFIER,    \
         error_syntax(
         "bad token", [
@@ -61,41 +75,50 @@ def interpret_line(sentence: list[Token]) -> PowangAny:
         domain.value, True
     )
 
-    if domain.type == TokenType.INSTRUCTION or domain.type == TokenType.IDENTIFIER:
-        arguments = process_values(rest)
-        assert len(arguments) >= powang_callable.min_argc, \
+    min_argc, max_argc, is_flex, function = powang_callable
+
+    if domain.type == TokenType.BUILTIN or domain.type == TokenType.IDENTIFIER:
+        rest = process_values(indent, rest)
+        assert len(rest) >= min_argc, \
             error_argc(
-                powang_callable.min_argc,
-                len(arguments
+                min_argc,
+                len(rest
         ))
             
-        assert len(arguments) <= powang_callable.max_argc or powang_callable.max_argc == -1, \
+        assert len(rest) <= max_argc or max_argc == -1, \
             error_argc(
-                powang_callable.max_argc,
-                len(arguments
-        ))
-        result = powang_callable.function(*arguments)
-    else: # HERE powang_callable is a KEYWORD
-        result = powang_callable.function(*rest)
-
-    if result.type == 'error':
-        assert powang_callable.is_flex and FLAG_FLEX, result.data
-        ERRORS_LIST.append(error_format(*result.data))
+                max_argc,
+                len(rest)
+            )
+    
+    try:
+        result = function(*rest)
+        assert result.type != 'error', error_format(*result.data)
+    except AssertionError as ass: # reached by FLEX instructions
+        assert is_flex and FLAG_FLEX, ass
+        ERRORS_LIST.append(*ass.args)
         return PowangNov()
-    else:
-        return result
+    return result
 
-def interpret_program(token_program: list[list[Token]]):
+def interpret_program(token_program: list[tuple[int, list[Token]]]):
     global EXIT_CODE
-    for ln, sentence in enumerate(token_program):
-        if len(SCOPE_STACK) == 0:
+    global ACTUAL_LINE
+    while ACTUAL_LINE[0] < len(token_program):
+        sentence = token_program[ACTUAL_LINE[0]]
+        
+        if SCOPE.depth < 0:
             return
-        if len(sentence) == 0: # IGNORE EMPTY LINES
+
+        indent, token_list = sentence
+
+        ACTUAL_LINE[0] += 1
+        
+        if len(token_list) == 0: # IGNORE EMPTY LINES
             continue
 
         try:
-            return_value = interpret_line(sentence)
+            return_value = interpret_line(indent, token_list)
             if return_value.type == 'number':
                 EXIT_CODE = int(return_value.data)
         except AssertionError as ass:
-            raise_error(error_with_line(ln, *ass.args))
+            raise_error(error_with_line(ACTUAL_LINE[0] - 1, *ass.args))

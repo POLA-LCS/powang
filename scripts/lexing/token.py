@@ -1,15 +1,16 @@
-from typing import Literal, Any
+from typing import Literal, Self
 from enum import Enum, auto
 from ..types import PowangAny
 
 class TokenType(Enum):
     KEYWORD     = auto()
-    INSTRUCTION = auto()
+    BUILTIN = auto()
     IDENTIFIER  = auto()
     # ====== LITERALS =========
     NUMBER_LIT  = auto()
     STRING_LIT  = auto()
     LIST_LIT    = auto()
+    BOOL_LIT    = auto()
     
     EXPRESSION  = auto()
 
@@ -17,15 +18,25 @@ class TokenType(Enum):
     def to_str(type: 'TokenType'):
         return {
             TokenType.KEYWORD     : 'KEYWORD',
-            TokenType.INSTRUCTION : 'INSTRUCTION',
+            TokenType.BUILTIN : 'BUILTIN',
             TokenType.IDENTIFIER  : 'IDENTIFIER',
             
             TokenType.NUMBER_LIT  : 'NUMBER LITERAL',
             TokenType.STRING_LIT  : 'STRING LITERAL',
             TokenType.LIST_LIT    : 'LIST LITERAL',
+            TokenType.BOOL_LIT    : 'BOOL LITERAL',
             
             TokenType.EXPRESSION  : 'EXPRESSION',
         }.get(type, 'UNKNOWN TOKEN TYPE ???')
+        
+    @staticmethod
+    def is_literal(type: 'TokenType') -> bool:
+        return type in {
+            TokenType.NUMBER_LIT,
+            TokenType.STRING_LIT,
+            TokenType.BOOL_LIT,
+        }
+        
 
 # ====== THE NEXT TOKEN STRUCTURE IS TO MATCH THE TYPE CONSCISTENCY ========= #
 class TokenBase:
@@ -38,9 +49,9 @@ class TokenBase:
         
 class TokenNameValue(TokenBase):
     Types = Literal [
-        TokenType.INSTRUCTION,
+        TokenType.KEYWORD,
+        TokenType.BUILTIN,
         TokenType.IDENTIFIER,
-        TokenType.KEYWORD
     ]
     type: Types
     value: str
@@ -65,6 +76,7 @@ class TokenLiteralValue(TokenBase):
     Types = Literal [
         TokenType.NUMBER_LIT,
         TokenType.STRING_LIT,
+        TokenType.BOOL_LIT,
     ]
     
     type: Types

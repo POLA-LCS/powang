@@ -1,5 +1,5 @@
 from typing import Optional as opt
-from .circular import get_scope_name
+from .memory import SCOPE
 
 # ====== PRIMIGENOUS ERROR FORMAT =========
 def error_format(
@@ -10,7 +10,7 @@ def error_format(
 
     output_message = (
         f'[{name} ERROR]' if name is not None else '[ERROR]'
-    ) + f' (in {get_scope_name()})'
+    ) + f' (in {SCOPE.peek_name()[0]})'
 
     if resume is not None:
         output_message += ' ' + resume
@@ -60,7 +60,7 @@ def error_out_of_range(
     index: int,
     size: int
 ): return error_format('INDEX', f'{type} index out of range', [
-    f'{index} > {size - 1}'
+    f'in length {size - 1} reached index {index}'
 ])
 
 def error_logic(
@@ -89,5 +89,11 @@ def error_usage(
     resume: str,
     message: opt[list] = None
 ): return error_format('USAGE', resume,
+    message
+)
+
+def error_constant_assign(
+    message: opt[list] = None
+): return error_format('ASSIGN', "Trying to change a constant value",
     message
 )

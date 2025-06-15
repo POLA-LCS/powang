@@ -1,2 +1,2 @@
-from .boolean import *
+from .control import *
 from .variable import *

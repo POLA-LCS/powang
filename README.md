@@ -1,8 +1,11 @@
 # Powang | programming language | WIP
 Hiii, this is POLA, a software engineering student, and this is my own programming language :D  
+It is based on the lisp way to work but at a higher level
 
 > [!WARNING]
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
+
+![powang logo](./powang_logo.png)
 
 ## TODO
 - [X] Comments `##`.
@@ -16,18 +19,18 @@ Hiii, this is POLA, a software engineering student, and this is my own programmi
 - - [ ] Methods.
 - - [ ] Inheritance.
 - [ ] Functions.
-- - [ ] Declare.
+- - [ ] Signature.
 - - [ ] Define.
 - - [ ] Profiles (like C++ templates).
-- [ ] A good lexical analysis.
-- [ ] Pointers.
+- [ ] A better lexical analysis.
+- [ ] References.
 - [ ] Logical operators.
+- [X] Arithmetics (see [Arithmetic Operators](help/Arithmetics.md)).
 - [ ] User error handling.
-- [ ] Decide when to preprocess the tokens into values and when into raw tokens.
+- [X] Decide when to preprocess the tokens into values and when into raw tokens.
 
 ## Get started
-You need [Git](https://git-scm.com/) obviously.  
-You need [Python3](https://www.python.org/) (I will migrate to C++ probably).
+You need [Python3](https://www.python.org/).
 
 - Clone the repository with:  
 ```git clone https://github.com/POLA-LCS/powang```
@@ -35,5 +38,5 @@ You need [Python3](https://www.python.org/) (I will migrate to C++ probably).
 - Go to `./powang`  
 - Run `powang.py --help`  
 - Create the file `main.po`   
-- Write your first hello world with `stdout 'Hello, world!\n'`  
+- Write your first hello world with `stdout 'Hello,\a32world!\n'`  
 - Run it with `powang.py main.po`  
