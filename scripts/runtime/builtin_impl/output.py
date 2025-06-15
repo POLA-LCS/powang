@@ -5,8 +5,8 @@ from ...memory import SCOPE
 def builtin_stdout(*args: PowangAny) -> PowangNumber:
     """### RECURSIVE"""
     for arg in args:
-        if arg.type == PowangNumber.type and int(arg.data) == arg.data:
-            print(int(arg.data), end='')
+        if arg.type == PowangNumber.type:
+            print(arg.get_number(), end='')
         elif arg.type == 'list':
             print('[', end='')
             if (length := len(arg.data)) == 1:
@@ -19,6 +19,8 @@ def builtin_stdout(*args: PowangAny) -> PowangNumber:
             print(']', end='')          
         elif arg.type == 'nov':
             print('nov', end='')
+        elif arg.type == 'bool':
+            print({True: 'true', False: 'false'}[arg.data], end='')
         else:
             print(arg.data, end='')
     return PowangNumber(float(len(args)), const=False)
@@ -36,7 +38,7 @@ def builtin_print(
         while i < length + length - 1:
             args.data.insert(i, sep)
             i += 2
-        return builtin_stdout(*args.data, end).substraction_number(PowangNumber(float(length)))
+        return builtin_stdout(*args.data, end).substraction(PowangNumber(float(length)))
     return builtin_stdout(args, end)
 
 def builtin_exit(arg: PowangAny):

@@ -35,7 +35,7 @@ class ScopeType:
         for i, scope in enumerate(reversed(self.name_stack)):
             scope_name, _ = scope
             if scope_name == where:
-                self.memory_stack[-i - 1].setdefault(var_name, var_value).data = var_value.data # type: ignore
+                self.memory_stack[-i - 1].setdefault(var_name, var_value).data = var_value.data
         return self
 
     def get_memory(self, name: str):

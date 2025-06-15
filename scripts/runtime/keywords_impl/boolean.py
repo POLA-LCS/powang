@@ -6,7 +6,7 @@ from ...lexing import tokenize_line
 
 def evaluate_boolean_expression(value: PowangAny | PowangError) -> bool:
     if value.type == PowangBool.type:
-        return value.state
+        return value.data
     if value.type == PowangNov.type or value.type == PowangError.type:
         return False
     if value.type == PowangNumber.type:

@@ -1,28 +1,49 @@
 from ...types import *
-from ...error import error_operand
+from ...error import error_operand, error_logic
 
-def calculate_operation_single(operation_string: str, arg: PowangAny) -> PowangAny:
-    if arg.type == PowangList.type:
-        return calculate_operation(operation_string, *arg.data)
-    if arg.type == PowangNumber.type and operation_string == 'substraction':
-        return PowangNumber(-arg.data)
-    return arg
+def calculate_operation_single(operation_string: OperationName, arg: PowangAny) -> PowangAny:
+    if operation_string == 'addition':
+        return arg
+    if operation_string == 'substraction':
+        if arg.type == PowangBool.type:
+            return PowangBool(not arg.data)
+        if arg.type == PowangNumber.type:
+            return PowangNumber(-arg.data)
+        if arg.type == PowangString.type:
+            return PowangString(arg.data[::-1])
+        if arg.type == PowangList.type:
+            return PowangList(arg.data[::-1])
+    return PowangNov()
 
-def calculate_operation(operation_string: str, *args: PowangAny):
+def calculate_operation(operation_string: OperationName, *args: PowangAny):
     if len(args) == 1:
-        return calculate_operation_single(operation_string, *args)
-    if len(args) == 0:
-        return PowangNov()
-    result_sum = args[0]
+        result = calculate_operation_single(operation_string, *args)
+        assert result.type != PowangNov.type, error_operand(
+            args[0].type,
+            operation_string,
+            'prefix',
+        )
+        return result
+
+    operation_result = args[0]
+    
     for arg in args[1:]:
-        complete_operation = operation_string + '_' + arg.type
-        assert result_sum.has(complete_operation), error_operand(
-            result_sum.type,
-            complete_operation,
+        operation: OperationFunc = {
+            'addition': operation_result.addition,
+            'substraction': operation_result.substraction,
+            'multiplication': operation_result.multiplication,
+            'division': operation_result.division,
+        }[operation_string]
+        result = operation(arg)
+
+        assert operation_result.type != PowangNov.type, error_operand(
+            operation_result.type,
+            operation_string,
             arg.type
         )
-        result_sum = result_sum.__getattribute__(complete_operation)(arg)
-    return result_sum
+        
+        operation_result = result
+    return operation_result
 
 # ====== ARITHMETICS =========
 def builtin_operator_plus(*args: PowangAny):

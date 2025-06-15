@@ -9,17 +9,6 @@ IF_EXPRESSION  = 'if expression'
 IF_STATEMENT   = 'if statement'
 ELSE_STATEMENT = 'else statement'
 
-def evaluate_expression(expression: PowangAny):
-    if expression.type == PowangNov.type:
-        return False
-    if expression.type == PowangBool.type:
-        return expression.state
-    if expression.type == PowangNumber.type:
-        return expression.data != 0.0
-    if expression.type == PowangString.type or expression.type == PowangList.type:
-        return len(expression.data) > 0
-    return False
-
 def keyword_if(expression: Token):
     SCOPE.push(IF_EXPRESSION, False)
     if expression.type == TokenType.EXPRESSION:
