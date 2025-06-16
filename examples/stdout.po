@@ -1,5 +1,6 @@
 ## This is an example for the powang language (https://github.com/POLA-LCS/powang)
-## STDOUT (input...)
+## STDOUT
+## Recieved unlimited amount of arguments and print them ALL!
 
 ## stdout 10
 ## >> 10

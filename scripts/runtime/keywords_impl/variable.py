@@ -1,7 +1,7 @@
 from ...lexing.token import Token, TokenType
 from ...interpret import process_values, interpret_expression
 from ...types.native import PowangList, PowangAny
-from .control import keyword_end
+from .control import keyword_ends
 from ...error import *
 from ...types import PowangCopyConstruct
 
