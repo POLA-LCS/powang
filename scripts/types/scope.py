@@ -1,7 +1,12 @@
 from .native import PowangAny, PowangError
 from typing import Callable
 
-InstructionFormat = tuple[int, int, bool, Callable[(...), PowangAny | PowangError]]
+InstructionFormat = tuple[
+    int,  # minimum number of arguments
+    int,  # maximum number of arguments, -1 for unlimited
+    bool, # indents, whether the function is indented or not
+    Callable[(...), PowangAny | PowangError] # the function itself
+]
 MemoryType = dict[str, PowangAny]
 
 class MemoryScopeHandler:

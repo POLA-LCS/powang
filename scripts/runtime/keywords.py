@@ -11,7 +11,7 @@ KEYWORDS: dict[str, InstructionFormat] = {
     'set':  (2, 2, True, keyword_set),
     
     # ====== CONTROL =========
-    'if':   (1, 3, True , keyword_if  ),
+    'if':   (1, 4, True , keyword_if  ),
     'else': (0, 1, False, keyword_else_else_if),
     'ends':  (0, 0, False, keyword_end),
     #'del':  (1, 1, True , keyword_del )

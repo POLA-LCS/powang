@@ -1,7 +1,7 @@
 from .token import Token, TokenLiteralValue, TokenNameValue, TokenListValue, TokenType
 from ..types import PowangNumber, PowangString, PowangBool, PowangStruct # TODO: PowangStruct
 from ..error import error_syntax, error_with_line
-from ..runtime.instructions import BUILTINS
+from ..runtime.builtins import BUILTINS
 from ..runtime.keywords import KEYWORDS
 
 def get_number_from_word(number_str: str) -> (float | None):
@@ -68,6 +68,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
             if '\\' in record:
                 record = record.replace("\\n", '\n')
                 record = record.replace("\\t", '\t')
+                record = record.replace("\\s", ' ')
                 # ascii scape
                 if "\\a" in record:
                     record = record.replace("\\a32", ' ')

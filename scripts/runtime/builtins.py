@@ -24,6 +24,10 @@ def builtin_index(index: PowangAny, list: PowangAny):
         PowangList.type, int_index, length
     )
     
+    # assert int_index >= 0, error_out_of_range(
+    #     PowangList.type, int_index, length,
+    # )
+
     return list.data[int_index]
 
 BUILTINS: dict[str, InstructionFormat] = {

@@ -9,23 +9,20 @@ IF_EXPRESSION  = 'if expression'
 IF_STATEMENT   = 'if statement'
 ELSE_STATEMENT = 'else statement'
 
-def keyword_if(expression: Token, quick_true: Token | None = None, quick_false: Token | None = None):
+def keyword_if(expression: Token, quick_true: Token | None = None, quick_false: Token | None = None, ends: Token | None = None):
     quick_true_value: PowangAny = PowangNov()
     quick_false_value: PowangAny = PowangNov()
 
-    if quick_true is not None:
-        if quick_true.type == TokenType.EXPRESSION:
-            quick_value = interpret_expression(MEMORY.indent_depth, quick_true.value)
-        else:
-            quick_value = process_values(MEMORY.indent_depth, [quick_true])[0]
-        quick_true_value = PowangCopyConstruct(quick_value)
-
-    if quick_false is not None:
-        if quick_false.type == TokenType.EXPRESSION:
-            quick_value = interpret_expression(MEMORY.indent_depth, quick_false.value)
-        else:
-            quick_value = process_values(MEMORY.indent_depth, [quick_false])[0]
-        quick_false_value = PowangCopyConstruct(quick_value)
+    if ends is not None:
+        assert ends.type == TokenType.KEYWORD, error_bad_token(
+            TokenType.to_str(ends.type), TokenType.to_str(TokenType.KEYWORD), [
+                'quick if only accepts the "ends" keyword in this case',
+        ])
+        
+        assert ends.value == 'ends', error_bad_token(
+            ends.value, 'ends', [
+                "quick if only accepts the 'ends' keyword in this case",
+        ])
 
     MEMORY.push(IF_EXPRESSION, False)
     if expression.type == TokenType.EXPRESSION:
@@ -33,7 +30,14 @@ def keyword_if(expression: Token, quick_true: Token | None = None, quick_false: 
     else:
         result = process_values(MEMORY.indent_depth, [expression])[0]
 
-    if not PowangBool.from_expression(result).data:
+    if not PowangBool.eval_expression(result).data:
+        if quick_false is not None:
+            if quick_false.type == TokenType.EXPRESSION:
+                quick_value = interpret_expression(MEMORY.indent_depth, quick_false.value)
+            else:
+                quick_value = process_values(MEMORY.indent_depth, [quick_false])[0]
+            quick_false_value = PowangCopyConstruct(quick_value)
+
         EXTERNAL_CONDITION.append(
             lambda indent, domain: (
                 indent > MEMORY.indent_depth or
@@ -41,7 +45,16 @@ def keyword_if(expression: Token, quick_true: Token | None = None, quick_false: 
             )
         )
         return quick_false_value
-    MEMORY.push(IF_STATEMENT, True)
+
+    if quick_true is not None:
+        if quick_true.type == TokenType.EXPRESSION:
+            quick_value = interpret_expression(MEMORY.indent_depth, quick_true.value)
+        else:
+            quick_value = process_values(MEMORY.indent_depth, [quick_true])[0]
+        quick_true_value = PowangCopyConstruct(quick_value)
+    
+    if ends is None:
+        MEMORY.push(IF_STATEMENT, True)
     return quick_true_value
 
 def keyword_else_else_if(expression: Token | None = None):

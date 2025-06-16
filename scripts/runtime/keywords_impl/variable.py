@@ -55,14 +55,8 @@ def keyword_def(var_name: Token, value: Token):
     return keyword_var(var_name, value, True)
 
 def keyword_set(var_name: Token, var_value: Token):
-    assert var_name.type == TokenType.IDENTIFIER, error_syntax(
-        "bad token", [
-            f"expected {TokenType.to_str(TokenType.IDENTIFIER)}",
-            f"but {var_name.type} was provided"
-        ]
-    )
-
     spread_names, spread_values = get_spread_names_value(var_name, var_value)
+
     assert len(spread_names) == len(spread_values), error_syntax(
         "invalid spread expression", [
             "spread variable names and values must have a 1:1 matching",
@@ -72,18 +66,18 @@ def keyword_set(var_name: Token, var_value: Token):
 
     for name, value in zip(spread_names, spread_values):
         assert (powang_variable := MEMORY.get_memory(name)) is not None, error_identifier_not_found(
-            var_name.value, False
+            name, False
         )
 
-        scope, value = powang_variable
+        powang_scope, powang_value = powang_variable
 
-        assert value.type == value.type, error_type(
-            value.type, value.type
+        assert powang_value.type == value.type, error_type(
+            powang_value.type, value.type
         )
         
-        assert not value.const, error_constant_assign([
-            f"const -> {var_name.value}"
+        assert not powang_value.const, error_constant_assign([
+            f"const -> {name}"
         ])
 
-        MEMORY.set_memory(var_name.value, value, scope.name)
+        MEMORY.set_memory(name, value, powang_scope.name)
     return PowangList(spread_values) if len(spread_values) > 1 else spread_values[0]

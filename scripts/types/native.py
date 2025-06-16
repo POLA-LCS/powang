@@ -49,7 +49,7 @@ class PowangBool(PowangType_Base):
         self.data = data
 
     @staticmethod
-    def from_expression(expression: 'PowangAny'):
+    def eval_expression(expression: 'PowangAny'):
         result = PowangBool(False)
         if expression.type == PowangBool.type:
             result.data = expression.data
@@ -62,16 +62,16 @@ class PowangBool(PowangType_Base):
         return result
 
     def addition(self, right: 'PowangAny'):
-        return PowangBool(self.data or PowangBool.from_expression(right).data)
+        return PowangBool(self.data or PowangBool.eval_expression(right).data)
 
     def substraction(self, right: 'PowangAny'):
-        return PowangBool(self.data or not PowangBool.from_expression(right).data)
+        return PowangBool(self.data or not PowangBool.eval_expression(right).data)
 
     def multiplication(self, right: 'PowangAny'):
-        return PowangBool(self.data and PowangBool.from_expression(right).data)
+        return PowangBool(self.data and PowangBool.eval_expression(right).data)
 
     def division(self, right: 'PowangAny'):
-        return PowangBool(self.data and not PowangBool.from_expression(right).data)
+        return PowangBool(self.data and not PowangBool.eval_expression(right).data)
 
 # ====== NUMBER =========
 class PowangNumber(PowangType_Base):
@@ -99,7 +99,7 @@ class PowangNumber(PowangType_Base):
 
     def substraction(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).substraction(right)
+            return PowangBool.eval_expression(self).substraction(right)
         if right.type == PowangNumber.type:
             return PowangNumber(self.data - right.data)
         if right.type == PowangString.type:
@@ -110,7 +110,7 @@ class PowangNumber(PowangType_Base):
 
     def multiplication(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).multiplication(right)
+            return PowangBool.eval_expression(self).multiplication(right)
         if right.type == PowangNumber.type:
             return PowangNumber(self.data * right.data)
         if right.type == PowangString.type:
@@ -121,7 +121,7 @@ class PowangNumber(PowangType_Base):
 
     def division(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).division(right)
+            return PowangBool.eval_expression(self).division(right)
         if right.type == PowangNumber.type:
             return PowangNumber(self.data / right.data)
         if right.type == PowangString.type:
@@ -141,7 +141,7 @@ class PowangString(PowangType_Base):
 
     def addition(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).addition(right)
+            return PowangBool.eval_expression(self).addition(right)
         if right.type == PowangNumber.type:
             return PowangString(self.data + chr(int(right.data)))
         if right.type == PowangString.type:
@@ -155,7 +155,7 @@ class PowangString(PowangType_Base):
 
     def substraction(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).substraction(right)
+            return PowangBool.eval_expression(self).substraction(right)
         if right.type == PowangNumber.type:
             return PowangString(chr(int(right.data)) + self.data)
         if right.type == PowangString.type:
@@ -169,7 +169,7 @@ class PowangString(PowangType_Base):
 
     def multiplication(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).multiplication(right)
+            return PowangBool.eval_expression(self).multiplication(right)
         if right.type == PowangNumber.type:
             return right.multiplication(self)
         if right.type == PowangString.type:
@@ -183,7 +183,7 @@ class PowangString(PowangType_Base):
 
     def division(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).division(right)
+            return PowangBool.eval_expression(self).division(right)
         if right.type == PowangNumber.type:
             return PowangList([PowangString(self.data[i - int(right.data):i]) for i in range(len(self.data), 0, -int(right.data))])
         if right.type == PowangString.type:
@@ -206,7 +206,7 @@ class PowangList(PowangType_Base):
 
     def addition(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).addition(right)
+            return PowangBool.eval_expression(self).addition(right)
         if right.type == PowangNumber.type:
             return PowangList(self.data + [right])
         if right.type == PowangString.type:
@@ -217,7 +217,7 @@ class PowangList(PowangType_Base):
 
     def substraction(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).substraction(right)
+            return PowangBool.eval_expression(self).substraction(right)
         if right.type == PowangNumber.type:
             return PowangList(self.data[:-int(right.data)])
         if right.type == PowangString.type:
@@ -232,11 +232,11 @@ class PowangList(PowangType_Base):
 
     def multiplication(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).multiplication(right)
+            return PowangBool.eval_expression(self).multiplication(right)
         if right.type == PowangNumber.type:
-            return right.multiplication(self)
+            return PowangNumber(float(self.data.count(right)))
         if right.type == PowangString.type:
-            return PowangNumber(self.data.count(right))
+            return PowangNumber(float(self.data.count(right)))
         if right.type == PowangList.type:
             result = PowangList(self.data)
             for element in right.data:
@@ -246,7 +246,7 @@ class PowangList(PowangType_Base):
 
     def division(self, right: 'PowangAny'):
         if right.type == PowangBool.type:
-            return PowangBool.from_expression(self).division(right)
+            return PowangBool.eval_expression(self).division(right)
         if right.type == PowangNumber.type:
             return PowangList(self.data[::int(right.data)])
         if right.type == PowangString.type:
