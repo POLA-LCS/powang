@@ -123,11 +123,11 @@ class PowangNumber(PowangType_Base):
         if right.type == PowangBool.type:
             return PowangBool.from_expression(self).division(right)
         if right.type == PowangNumber.type:
-            return PowangNumber(self.data + right.data)
+            return PowangNumber(self.data / right.data)
         if right.type == PowangString.type:
-            return PowangList([PowangString(right.data[part:part + int(self.data)]) for part in range(0, len(right.data), int(self.data))])
+            return PowangList([PowangString(right.data[i:i + int(self.data)]) for i in range(0, len(right.data), int(self.data))])
         if right.type == PowangList.type:
-            return PowangList([PowangList(right.data[part:part + int(self.data)]) for part in range(0, len(right.data), len(right.data) // int(self.data))])
+            return PowangList([PowangList([PowangCopyConstruct(element) for element in right.data[i:i + int(self.data)]]) for i in range(0, len(right.data), int(self.data))])
         return PowangNov()
 
 # ====== STRING =========
@@ -272,8 +272,8 @@ class PowangFunction(PowangType_Base):
         self.max_argc = max_argc
 
 # ====== STRUCT ========= TODO
-class PowangStruct(PowangType_Base):   # user defined types
-    data: dict[str, 'PowangAny']       # properties
+class PowangStruct(PowangType_Base):       # user defined types
+    data: dict[str, 'PowangAny']           # properties
     methods: dict[str, PowangFunction] = { # methods
         'bool': PowangFunction(0, 0, [
             '+ 0'
@@ -288,12 +288,12 @@ class PowangStruct(PowangType_Base):   # user defined types
 
 # ====== ANY =========
 PowangAny = Union[
-    PowangNov,
-    PowangBool,
-    PowangNumber,
-    PowangString,
-    PowangList,
-    PowangStruct,
+    PowangNov,    # None
+    PowangBool,   # bool
+    PowangNumber, # float
+    PowangString, # str
+    PowangList,   # list
+    PowangStruct, # object
 ]
 
 # ====== ERROR =========

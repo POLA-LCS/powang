@@ -1,6 +1,6 @@
 from ...types import *
 from ...error import error_type
-from ...memory import SCOPE
+from ...memory import MEMORY
 
 def builtin_stdout(*args: PowangAny) -> PowangNumber:
     """### RECURSIVE"""
@@ -42,12 +42,12 @@ def builtin_print(
     return builtin_stdout(args, end)
 
 def builtin_exit(arg: PowangAny):
-    SCOPE.push('exit', False)
+    MEMORY.push('exit', False)
     assert arg.type == PowangNumber.type, error_type(
         PowangNumber.type, arg.type
     )
     
-    while SCOPE.depth > 0:
-        SCOPE.pop()
+    while MEMORY.indent_depth > 0:
+        MEMORY.pop()
     
     return arg

@@ -1,6 +1,6 @@
 from .types import *
 
-SCOPE = ScopeType({
+MEMORY = MemoryScopeHandler({
     'nice': PowangNumber(69.0, const=True),
     'newl': PowangString('\n', const=True),
 })

@@ -1,7 +1,7 @@
 from ...types import *
 from ...lexing.token import *
-from ...interpret import interpret_line
-from ...runtime import SCOPE
+from ...interpret import interpret_expression
+from ...runtime import MEMORY
 from ...lexing import tokenize_line
 
 def evaluate_boolean_expression(value: PowangAny | PowangError) -> bool:
@@ -14,7 +14,7 @@ def evaluate_boolean_expression(value: PowangAny | PowangError) -> bool:
     if value.type == PowangString.type or value.type == PowangList.type:
         return len(value.data) != 0
     if value.type == PowangStruct.type:
-        return evaluate_boolean_expression(interpret_line(SCOPE.depth, tokenize_line(0, value.methods['bool'].data)))
+        return evaluate_boolean_expression(interpret_expression(MEMORY.indent_depth, tokenize_line(0, value.methods['bool'].data)))
     return False
 
 def builtin_keyword_not(value: PowangAny):

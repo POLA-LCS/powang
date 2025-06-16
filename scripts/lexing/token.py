@@ -3,39 +3,31 @@ from enum import Enum, auto
 from ..types import PowangAny
 
 class TokenType(Enum):
-    KEYWORD     = auto()
-    BUILTIN = auto()
-    IDENTIFIER  = auto()
+    KEYWORD        = auto()
+    BUILTIN        = auto()
+    IDENTIFIER     = auto()
     # ====== LITERALS =========
-    NUMBER_LIT  = auto()
-    STRING_LIT  = auto()
-    LIST_LIT    = auto()
-    BOOL_LIT    = auto()
+    NUMBER_LITERAL = auto()
+    STRING_LITERAL = auto()
+    LIST_LITERAL   = auto()
+    BOOL_LITERAL   = auto()
     
-    EXPRESSION  = auto()
+    EXPRESSION     = auto()
 
     @staticmethod
     def to_str(type: 'TokenType'):
         return {
-            TokenType.KEYWORD     : 'KEYWORD',
-            TokenType.BUILTIN : 'BUILTIN',
-            TokenType.IDENTIFIER  : 'IDENTIFIER',
+            TokenType.KEYWORD        : 'KEYWORD',
+            TokenType.BUILTIN        : 'BUILTIN',
+            TokenType.IDENTIFIER     : 'IDENTIFIER',
             
-            TokenType.NUMBER_LIT  : 'NUMBER LITERAL',
-            TokenType.STRING_LIT  : 'STRING LITERAL',
-            TokenType.LIST_LIT    : 'LIST LITERAL',
-            TokenType.BOOL_LIT    : 'BOOL LITERAL',
+            TokenType.NUMBER_LITERAL : 'NUMBER LITERAL',
+            TokenType.STRING_LITERAL : 'STRING LITERAL',
+            TokenType.LIST_LITERAL   : 'LIST LITERAL',
+            TokenType.BOOL_LITERAL   : 'BOOL LITERAL',
             
-            TokenType.EXPRESSION  : 'EXPRESSION',
+            TokenType.EXPRESSION     : 'EXPRESSION',
         }.get(type, 'UNKNOWN TOKEN TYPE ???')
-        
-    @staticmethod
-    def is_literal(type: 'TokenType') -> bool:
-        return type in {
-            TokenType.NUMBER_LIT,
-            TokenType.STRING_LIT,
-            TokenType.BOOL_LIT,
-        }
         
 
 # ====== THE NEXT TOKEN STRUCTURE IS TO MATCH THE TYPE CONSCISTENCY ========= #
@@ -62,7 +54,7 @@ class TokenNameValue(TokenBase):
 # Tokens with list content
 class TokenListValue(TokenBase):
     Types = Literal [
-        TokenType.LIST_LIT,
+        TokenType.LIST_LITERAL,
         TokenType.EXPRESSION
     ]
 
@@ -74,9 +66,9 @@ class TokenListValue(TokenBase):
 
 class TokenLiteralValue(TokenBase):
     Types = Literal [
-        TokenType.NUMBER_LIT,
-        TokenType.STRING_LIT,
-        TokenType.BOOL_LIT,
+        TokenType.NUMBER_LITERAL,
+        TokenType.STRING_LITERAL,
+        TokenType.BOOL_LITERAL,
     ]
     
     type: Types

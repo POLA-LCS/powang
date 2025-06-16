@@ -1,7 +1,7 @@
 from ...lexing.token import Token, TokenType, TokenNameValue
-from ...interpret import process_values, interpret_line
+from ...interpret import process_values, interpret_expression
 from ...types import *
-from ...memory import SCOPE, SCOPE_LABELS
+from ...memory import MEMORY, SCOPE_LABELS
 from ...runtime.external_condition import *
 from ...error import *
 
@@ -9,35 +9,51 @@ IF_EXPRESSION  = 'if expression'
 IF_STATEMENT   = 'if statement'
 ELSE_STATEMENT = 'else statement'
 
-def keyword_if(expression: Token):
-    SCOPE.push(IF_EXPRESSION, False)
+def keyword_if(expression: Token, quick_true: Token | None = None, quick_false: Token | None = None):
+    quick_true_value: PowangAny = PowangNov()
+    quick_false_value: PowangAny = PowangNov()
+
+    if quick_true is not None:
+        if quick_true.type == TokenType.EXPRESSION:
+            quick_value = interpret_expression(MEMORY.indent_depth, quick_true.value)
+        else:
+            quick_value = process_values(MEMORY.indent_depth, [quick_true])[0]
+        quick_true_value = PowangCopyConstruct(quick_value)
+
+    if quick_false is not None:
+        if quick_false.type == TokenType.EXPRESSION:
+            quick_value = interpret_expression(MEMORY.indent_depth, quick_false.value)
+        else:
+            quick_value = process_values(MEMORY.indent_depth, [quick_false])[0]
+        quick_false_value = PowangCopyConstruct(quick_value)
+
+    MEMORY.push(IF_EXPRESSION, False)
     if expression.type == TokenType.EXPRESSION:
-        result = interpret_line(SCOPE.depth, expression.value)
+        result = interpret_expression(MEMORY.indent_depth, expression.value)
     else:
-        result = process_values(SCOPE.depth, [expression])[0]
+        result = process_values(MEMORY.indent_depth, [expression])[0]
 
-
-    if not evaluate_expression(result):
+    if not PowangBool.from_expression(result).data:
         EXTERNAL_CONDITION.append(
             lambda indent, domain: (
-                indent > SCOPE.depth or
-                not (domain.type == TokenType.KEYWORD and domain.value in ['else', 'end'])
+                indent > MEMORY.indent_depth or
+                not (domain.type == TokenType.KEYWORD and domain.value in ['else', 'ends'])
             )
         )
-        return PowangBool(False)
-    SCOPE.push(IF_STATEMENT, True)
-    return PowangBool(True)
+        return quick_false_value
+    MEMORY.push(IF_STATEMENT, True)
+    return quick_true_value
 
-def keyword_else(expression: Token | None = None):
-    if SCOPE.peek_name()[0] == IF_STATEMENT:
+def keyword_else_else_if(expression: Token | None = None):
+    if MEMORY.peek_scope().name == IF_STATEMENT:
         EXTERNAL_CONDITION.append(
             lambda indent, domain: (
-                indent > SCOPE.depth or
-                not (domain.type == TokenType.KEYWORD and domain.value == 'end')
+                indent > MEMORY.indent_depth or
+                not (domain.type == TokenType.KEYWORD and domain.value == 'ends')
             )
         )
     else:
-        assert SCOPE.peek_name()[0] == IF_EXPRESSION, error_syntax(
+        assert MEMORY.peek_scope().name == IF_EXPRESSION, error_syntax(
             "Encounter else without a corresponding if", [
                 'Perhaps you missed an "end"'
             ]
@@ -46,23 +62,25 @@ def keyword_else(expression: Token | None = None):
         if expression is not None:
             return keyword_if(expression)
 
-        SCOPE.push(ELSE_STATEMENT, True)
+        MEMORY.push(ELSE_STATEMENT, True)
     return PowangNov()
 
 def keyword_end():
-    assert SCOPE.depth > 0, error_syntax(
+    if MEMORY.peek_scope().name == IF_EXPRESSION:
+        MEMORY.pop(1)
+        return PowangNov()
+
+    assert MEMORY.indent_depth > 0, error_syntax(
         "there's no active scope to end", [
             "trying to end global scope",
             'perhaps you meant "exit"?'
         ]
     )
     
-    if SCOPE.peek_name()[0] == IF_EXPRESSION:
-        SCOPE.pop(1)
-    elif SCOPE.peek_name()[0] in [IF_STATEMENT, ELSE_STATEMENT]:
-        SCOPE.pop(2)
+    if MEMORY.peek_scope().name in [IF_STATEMENT, ELSE_STATEMENT]:
+        MEMORY.pop(2)
     else:
-        SCOPE.pop(1)
+        MEMORY.pop(1)
     return PowangNov()
 
 def keyword_label(name: Token):
@@ -80,7 +98,7 @@ def keyword_label(name: Token):
     )
 
     SCOPE_LABELS[name.value] = ACTUAL_LINE[0]
-    SCOPE.push(name.value, True)
+    MEMORY.push(name.value, True)
     return PowangString(name.value)
 
 def keyword_goto(name: Token | None = None):
@@ -109,7 +127,7 @@ def keyword_goto(name: Token | None = None):
         SCOPE_LABELS.pop(label)
 
     
-    while SCOPE.peek_name()[0] != name.value:
-        SCOPE.pop()
+    while MEMORY.peek_scope().name != name.value:
+        MEMORY.pop()
     
     return PowangString(name.value)

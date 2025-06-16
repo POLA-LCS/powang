@@ -1,5 +1,5 @@
 from typing import Optional as opt
-from .memory import SCOPE
+from .memory import MEMORY
 
 # ====== PRIMIGENOUS ERROR FORMAT =========
 def error_format(
@@ -10,7 +10,7 @@ def error_format(
 
     output_message = (
         f'[{name} ERROR]' if name is not None else '[ERROR]'
-    ) + f' (in {SCOPE.peek_name()[0]})'
+    ) + f' (in {MEMORY.peek_scope().name})'
 
     if resume is not None:
         output_message += ' ' + resume
@@ -77,6 +77,14 @@ def error_syntax(
     message
 )
 
+def error_bad_token(
+    token: str,
+    expected: str,
+    message: list = []
+): return error_syntax("bad token", [
+    f'expected {expected} but {token} was provided.'
+] + message)
+
 def error_operand(
     lhs_type: str,
     operation: str,
@@ -97,3 +105,18 @@ def error_constant_assign(
 ): return error_format('ASSIGN', "Trying to change a constant value",
     message
 )
+
+def error_spread_expression(
+    index: int,
+    result: str
+): return error_format('SPREAD', "Invalid spread expression", [
+    f"expected name at {index + 1} to be an identifier",
+    f"but {result} was provided.",
+])
+
+def error_spread_value(
+    result: str
+): return error_format('SPREAD', "Invalid spread value", [
+    f"expected value to be a list",
+    f"but {result} was provided.",
+])

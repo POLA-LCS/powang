@@ -1,121 +1,89 @@
 from ...lexing.token import Token, TokenType
-from ...interpret import process_values, interpret_line
+from ...interpret import process_values, interpret_expression
 from ...types.native import PowangList, PowangAny
+from .control import keyword_end
 from ...error import *
 from ...types import PowangCopyConstruct
 
-def keyword_var(
-        name: Token,
-        value: Token,
-        const: bool = False,
-    ):
-    
-    spread_values: PowangList = PowangList([])
-    spread_names: list[str] = []
-    
-    if name.type != TokenType.EXPRESSION:
-        assert name.type == TokenType.IDENTIFIER, error_syntax(
-            "bad token", [
-                f"expected {TokenType.to_str(TokenType.IDENTIFIER)} or {TokenType.to_str(TokenType.EXPRESSION)}",
-                f"but {name.type} was provided"
-            ]
-        )
-        
-        spread_names = [name.value]
-        
-        if value.type == TokenType.EXPRESSION:
-            result = interpret_line(SCOPE.depth, value.value)
-        else:
-            result = process_values(SCOPE.depth, [value])[0]
-            
-        spread_values.data = [result]
-        
+VARIABLE_EXPRESSION = 'variable expression'
+
+def get_spread_names_value(names: Token, values: Token) -> tuple[list[str], list[PowangAny]]:
+    if values.type == TokenType.EXPRESSION:
+        result: PowangAny = interpret_expression(MEMORY.indent_depth, values.value)
     else:
-        for i, token in enumerate(name.value):
-            assert token.type == TokenType.IDENTIFIER, error_syntax(
-                "bad token", [
-                    f"expected token {i} to be a {TokenType.to_str(TokenType.IDENTIFIER)}",
-                    f"but {name.type} was provided"
-                ]
-            )
-            spread_names.append(token.value)
+        result: PowangAny = process_values(MEMORY.indent_depth, [values])[0]
+    
+    spread_names : list[str]       = []
+    spread_values: list[PowangAny] = []
+    
+    # Common variable definition
+    if names.type == TokenType.IDENTIFIER:
+        return ([names.value], [result])
+    
+    # Spread variable definition
+    if names.type == TokenType.EXPRESSION:
+        assert result.type == PowangList.type, error_spread_value(result.type)
+        spread_values = result.data
         
-        if value.type == TokenType.EXPRESSION:
-            spread_values.data = [interpret_line(SCOPE.depth, value.value)]
-        elif value.type == TokenType.IDENTIFIER:
-            assert (result := SCOPE.get_memory(value.value)) is not None, error_identifier_not_found(
-                value.value, False
-            )
-            
-            scope, list_value = result
-            
-            assert list_value.type == PowangList.type, error_syntax(
-                "invalid spread type", [
-                    f"spreading expression expected type {PowangList.type}",
-                    f"but {list_value.type} was provided",
-                ]
-            )
-            
-            spread_values.data = list_value.data
-        else:
-            assert value.type == TokenType.LIST_LIT, error_syntax(
-                "bad token", [
-                    f"spreading expression expected {TokenType.to_str(TokenType.LIST_LIT)}",
-                    f"but {TokenType.to_str(value.type)} was provided",
-                ]
-            )
-            
-            spread_values.data = process_values(SCOPE.depth, value.value)   
-        assert (name_len := len(spread_names)) == (value_len := len(spread_values.data)), error_syntax(
-            "not enough values to spread", [
-                f"expected {name_len} values",
-                f"but {value_len} was provided.",
-            ]
-        )
+        for i, spread_name in enumerate(names.value):
+            assert spread_name.type == TokenType.IDENTIFIER, error_spread_expression(i, result.type)
+            spread_names.append(spread_name.value)
+    return (spread_names, spread_values)
+    
+def keyword_var(
+        var_name : Token,
+        var_value: Token,
+        var_const: bool = False,
+    ):
 
-    for sp_name, sp_value in zip(spread_names, spread_values.data):
-        if (existing := SCOPE.get_memory(sp_name)) is not None:
-            _, existing_value = existing
-            assert existing_value.type == sp_value.type, error_type(
-                existing_value.type, sp_value.type
-            )
-
-        powang_result = PowangCopyConstruct(sp_value)
-        powang_result.const = const
-
-        SCOPE.set_memory(sp_name, powang_result, SCOPE.peek_name()[0])
-
-    return spread_values if len(spread_values.data) > 1 else spread_values.data[0]
-
-def keyword_def(name: Token, value: Token):
-    return keyword_var(name, value, True)
-
-def keyword_set(name: Token, value: Token):
-    assert name.type == TokenType.IDENTIFIER, error_syntax(
-        "bad token", [
-            f"expected {TokenType.to_str(TokenType.IDENTIFIER)}",
-            f"but {name.type} was provided"
+    spread_names, spread_values = get_spread_names_value(var_name, var_value)
+    assert len(spread_names) == len(spread_values), error_syntax(
+        "invalid spread expression", [
+            "spread variable names and values must have a 1:1 matching",
+            f"but {len(spread_names)} names and {len(spread_values)} values were provided."
         ]
     )
 
-    if value.type == TokenType.EXPRESSION:
-        result = interpret_line(SCOPE.depth, value.value)
-    else:
-        result = process_values(SCOPE.depth, [value])[0]
+    for name, value in zip(spread_names, spread_values):
+        powang_result = PowangCopyConstruct(value)
+        powang_result.const = var_const
+        MEMORY.set_memory(name, powang_result, MEMORY.peek_scope().name)
 
-    assert (existing := SCOPE.get_memory(name.value)) is not None, error_identifier_not_found(
-        name.value, False
+    return PowangList(spread_values) if len(spread_values) > 1 else spread_values[0]
+
+def keyword_def(var_name: Token, value: Token):
+    return keyword_var(var_name, value, True)
+
+def keyword_set(var_name: Token, var_value: Token):
+    assert var_name.type == TokenType.IDENTIFIER, error_syntax(
+        "bad token", [
+            f"expected {TokenType.to_str(TokenType.IDENTIFIER)}",
+            f"but {var_name.type} was provided"
+        ]
     )
 
-    existing_scope, existing_value = existing
-
-    assert existing_value.type == result.type, error_type(
-        existing_value.type, result.type
+    spread_names, spread_values = get_spread_names_value(var_name, var_value)
+    assert len(spread_names) == len(spread_values), error_syntax(
+        "invalid spread expression", [
+            "spread variable names and values must have a 1:1 matching",
+            f"but {len(spread_names)} names and {len(spread_values)} values were provided."
+        ]
     )
-    
-    assert not existing_value.const, error_constant_assign([
-        f"const -> {name.value}"
-    ])
 
-    SCOPE.set_memory(name.value, result, existing_scope[0])
-    return result
+    for name, value in zip(spread_names, spread_values):
+        assert (powang_variable := MEMORY.get_memory(name)) is not None, error_identifier_not_found(
+            var_name.value, False
+        )
+
+        scope, value = powang_variable
+
+        assert value.type == value.type, error_type(
+            value.type, value.type
+        )
+        
+        assert not value.const, error_constant_assign([
+            f"const -> {var_name.value}"
+        ])
+
+        MEMORY.set_memory(var_name.value, value, scope.name)
+    return PowangList(spread_values) if len(spread_values) > 1 else spread_values[0]

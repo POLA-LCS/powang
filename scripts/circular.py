@@ -12,6 +12,6 @@ def circular_process_value(indent: int, rest: list):
     from .interpret import process_values
     return process_values(indent, rest)
 
-def circular_interpret_line(indent: int, line: list):
-    from .interpret import interpret_line
-    return interpret_line(indent, line)
+def circular_interpret_expression(indent: int, line: list):
+    from .interpret import interpret_expression
+    return interpret_expression(indent, line)

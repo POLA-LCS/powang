@@ -47,11 +47,11 @@ def tokenize_line(ln: int, line_in_words: list[str]):
 
         # ====== LITERAL NUMBER
         elif (number := get_number_from_word(word)) is not None:
-            sentence.append(TokenLiteralValue(TokenType.NUMBER_LIT, PowangNumber(number)))
+            sentence.append(TokenLiteralValue(TokenType.NUMBER_LITERAL, PowangNumber(number)))
 
         # ====== LITERAL BOOL
         elif word in ['true', 'false']:
-            sentence.append(TokenLiteralValue(TokenType.BOOL_LIT, PowangBool(True if word == 'true' else False)))
+            sentence.append(TokenLiteralValue(TokenType.BOOL_LITERAL, PowangBool(True if word == 'true' else False)))
 
         # ====== LITERAL STRING
         elif word.startswith("\'"):
@@ -77,7 +77,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
             assert "\'" not in record, \
                     error_with_line(ln, error_syntax("string didin't finished properly", [' '.join(line_in_words[word_index:])]))
 
-            sentence.append(TokenLiteralValue(TokenType.STRING_LIT, PowangString(record)))
+            sentence.append(TokenLiteralValue(TokenType.STRING_LITERAL, PowangString(record)))
 
         # ====== LITERAL LIST
         elif word.startswith('['):
@@ -89,7 +89,7 @@ def tokenize_line(ln: int, line_in_words: list[str]):
                 ]))
             eaten_words, record = result
             sentence.append(TokenListValue(
-                TokenType.LIST_LIT,
+                TokenType.LIST_LITERAL,
                 tokenize_line(ln, record[1:-1].split(' ')), # relexing for inner tokens
             ))
 
