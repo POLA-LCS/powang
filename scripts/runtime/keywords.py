@@ -13,7 +13,7 @@ KEYWORDS: dict[str, InstructionFormat] = {
     # ====== CONTROL =========
     'if':   (1, 4, True , keyword_if  ),
     'else': (0, 1, False, keyword_else_else_if),
-    'ends':  (0, 0, False, keyword_end),
+    'ends':  (0, 0, False, keyword_ends),
     #'del':  (1, 1, True , keyword_del )
     
     'label': (1, 1, False, keyword_label),

@@ -1,6 +1,9 @@
 ## This is an example for the powang language (https://github.com/POLA-LCS/powang)
-## PRINT (input sep=' ' end=newl) -> number
-
+## PRINT
+## Arguments:
+## - input : list
+## - sep   : string
+## - end   : string
 print [1 2 3]
 ## >> 1 2 3
 ## ->

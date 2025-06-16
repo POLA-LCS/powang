@@ -1,8 +1,8 @@
-# Arithmetics
+# Arithmetics | Powang Documentation
 This is a helpful file that list the interaction between native types using the __+, -, * and /__ operators:
   
 ## Nov
-Throws an ERROR in any arithmetic operation.
+Throws an ERROR in any operation.
 
 ## Bool
 If the main operand it's a bool, the result will be always a bool. (see [Example logical](../examples/logical.po))

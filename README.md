@@ -25,7 +25,7 @@ It is based on the lisp way to work but at a higher level
 - [ ] A better lexical analysis.
 - [ ] References.
 - [ ] Logical operators.
-- [X] Arithmetics (see [Arithmetic Operators](help/Arithmetics.md)).
+- [X] Arithmetics (see [Arithmetic Operators](docs/Arithmetics.md)).
 - [ ] User error handling.
 - [X] Decide when to preprocess the tokens into values and when into raw tokens.
 
