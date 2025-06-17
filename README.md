@@ -1,11 +1,12 @@
-# Powang | programming language | WIP
-Hiii, this is POLA, a software engineering student, and this is my own programming language :D  
-It is based on the lisp way to work but at a higher level
+# Powang programming language
+
+![powang banner](./powang_banner.jpeg)
+
+Hiii, this is POLA, a software engineering student, and this is my own programming language.  
+It is based on the lisp-type operations but with higher level interation.
 
 > [!WARNING]
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
-
-![powang banner](./powang_banner.jpeg)
 
 ## TODO
 - [X] Comments `##`.
@@ -28,6 +29,12 @@ It is based on the lisp way to work but at a higher level
 - [X] Arithmetics (see [Arithmetic Operators](docs/Arithmetics.md)).
 - [ ] User error handling.
 - [X] Decide when to preprocess the tokens into values and when into raw tokens.
+- [X] Control flow:
+- - [X] if.
+- - [X] else.
+- - [X] else if.
+- - [ ] for.
+- - [ ] each.
 
 ## Get started
 You need [Python3](https://www.python.org/).
