@@ -1,12 +1,12 @@
-# Powang programming language
+# Powang, a powerful lisp programming language.
 
 ![powang banner](./powang_banner.jpeg)
 
-Hiii, this is POLA, a software engineering student, and this is my own programming language.  
-It is based on the lisp-type operations but with higher level interation.
-
 > [!WARNING]
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
+
+Hiii, this is POLA, a software engineering student, and this is my own programming language.  
+It is based on the lisp-type operations but with higher level interation.
 
 ## TODO
 - [X] Comments `##`.
