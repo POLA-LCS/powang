@@ -5,7 +5,7 @@ It is based on the lisp way to work but at a higher level
 > [!WARNING]
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
 
-![powang logo: Powang banner](./powang_banner.png)
+![powang logo](./powang_banner.png)
 
 ## TODO
 - [X] Comments `##`.
