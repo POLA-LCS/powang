@@ -22,7 +22,7 @@ It is based on   operations but with higher level interation.
 - [X] A better lexical analysis.
 - [ ] References.
 - [ ] Logical operators.
-- [X] Arithmetics (see [Arithmetic Operators](docs/Arithmetics.md)).
+- [X] Arithmetics (see [Arithmetic Operators](examples/arithmetics.po)).
 - [ ] Error handling.
 - [ ] Control flow:
 - - [ ] if.
