@@ -1,0 +1,104 @@
+i: integer = 2;
+n: number = 2.5;
+s: string = 'hello';
+c: container = [1 2 3];
+
+print('INTEGER:');
+print('    INTEGER:');
+print(['    +' i + i]);
+print(['    -' i - i]);
+print(['    *' i * i]);
+print(['    /' i / i]);
+
+print('    NUMBER:');
+print(['    +' i + n]);
+print(['    -' i - n]);
+print(['    *' i * n]);
+print(['    /' i / n]);
+
+print('    STRING:');
+print(['    +' i + s]);
+print(['    -' i - s]);
+print(['    *' i * s]);
+print(['    /' i / s]);
+
+print('    CONTAINER:');
+print(['    +' i + c]);
+print(['    -' i - c]);
+print(['    *' i * c]);
+print(['    /' i / c]);
+
+print('NUMBER:');
+print('    INTEGER:');
+print(['    +' n + i]);
+print(['    -' n - i]);
+print(['    *' n * i]);
+print(['    /' n / i]);
+
+print('    NUMBER:');
+print(['    +' n + n]);
+print(['    -' n - n]);
+print(['    *' n * n]);
+print(['    /' n / n]);
+
+print('    STRING:');
+print(['    +' n + s]);
+print(['    -' n - s]);
+print(['    *' n * s]);
+print(['    /' n / s]);
+
+print('    CONTAINER:');
+print(['    +' n + c]);
+print(['    -' n - c]);
+print(['    *' n * c]);
+print(['    /' n / c]);
+
+print('STRING:');
+print('    INTEGER:');
+print(['    +' s + i]);
+print(['    -' s - i]);
+print(['    *' s * i]);
+print(['    /' s / i]);
+
+print('    NUMBER:');
+print(['    +' s + n]);
+print(['    -' s - n]);
+print(['    *' s * n]);
+print(['    /' s / n]);
+
+print('    STRING:');
+print(['    +' s + s]);
+print(['    -' s - s]);
+print(['    *' s * s]);
+print(['    /' s / s]);
+
+print('    CONTAINER:');
+print(['    +' s + c]);
+print(['    -' s - c]);
+print(['    *' s * c]);
+print(['    /' s / c]);
+
+print('CONTAINER:');
+print('    INTEGER:');
+print(['    +' c + i]);
+print(['    -' c - i]);
+print(['    *' c * i]);
+print(['    /' c / i]);
+
+print('    NUMBER:');
+print(['    +' c + n]);
+print(['    -' c - n]);
+print(['    *' c * n]);
+print(['    /' c / n]);
+
+print('    STRING:');
+print(['    +' c + s]);
+print(['    -' c - s]);
+print(['    *' c * s]);
+print(['    /' c / s]);
+
+print('    CONTAINER:');
+print(['    +' c + c]);
+print(['    -' c - c]);
+print(['    *' c * c]);
+print(['    /' c / c]);

@@ -1,4 +1,4 @@
-# Powang, a powerful lisp programming language.
+# Powang, multi-purpose programming language.
 
 ![powang banner](./powang_banner.jpeg)
 
@@ -6,33 +6,28 @@
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
 
 Hiii, this is POLA, a software engineering student, and this is my own programming language.  
-It is based on the lisp-type operations but with higher level interation.
+It is based on   operations but with higher level interation.
 
 ## TODO
 - [X] Comments `##`.
-- [X] `number`.
-- [X] `string`.
-- [X] `list`.
-- [X] `expression`.
-- [X] Standard console output `stdout`.
-- [X] Fancy print with `print` (almost 1:1 with python print).
+- [X] primitive types: `integer`, `number`, `string`, `container`.
+- [X] Standard io `stdout(...)`, `stdin(var)`.
 - [ ] User types.
 - - [ ] Methods.
 - - [ ] Inheritance.
 - [ ] Functions.
 - - [ ] Signature.
 - - [ ] Define.
-- - [ ] Profiles (like C++ templates).
-- [ ] A better lexical analysis.
+- - [ ] Templates.
+- [X] A better lexical analysis.
 - [ ] References.
 - [ ] Logical operators.
 - [X] Arithmetics (see [Arithmetic Operators](docs/Arithmetics.md)).
-- [ ] User error handling.
-- [X] Decide when to preprocess the tokens into values and when into raw tokens.
-- [X] Control flow:
-- - [X] if.
-- - [X] else.
-- - [X] else if.
+- [ ] Error handling.
+- [ ] Control flow:
+- - [ ] if.
+- - [ ] else.
+- - [ ] else if.
 - - [ ] for.
 - - [ ] each.
 
