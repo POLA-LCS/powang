@@ -5,7 +5,7 @@ from .token import LexerTokenType, LexerToken
 
 class Tokenizer:
     Keywords: set[str] = {
-        'if', 'else', 'for', 'func', 'ret', 'use', 'type'
+        'if', 'else', 'for', 'fun', 'ret', 'use', 'type'
     }
     
     RegexPatterns: dict[
@@ -18,27 +18,28 @@ class Tokenizer:
         r'##.*': (None, None),                      # Comments
         r';'   : (LexerTokenType.SEMI_COLON, None), # Line termination
         
-        r'-?\d+\.\d+': (LexerTokenType.FLOATING_LITERAL, None),
-        r'-?\d+'     : (LexerTokenType.INTEGER_LITERAL, None),
+        r'\d+\.\d+': (LexerTokenType.FLOATING_LITERAL, None),
+        r'\d+'     : (LexerTokenType.INTEGER_LITERAL, None),
         
-        r'\'([^\']*)\'': ( # eg. 'Hello, world!'
+        r'\"([^\"]*)\"': (
             LexerTokenType.STRING_LITERAL,
             lambda x: x[1:-1]  # Remove the quotes
         ),
         
-        r'\"([^\"]*)\"': ( # eg. "Hello, @[name]!"
-            LexerTokenType.FMT_STRING_LITERAL,
-            lambda x: x[1:-1]  # Remove the quotes
-        ),
-        
-        r'[+-]': (LexerTokenType.OPERATOR_ADDITION, None),
-        r'[*/]': (LexerTokenType.OPERATOR_MULTIPLICATION, None),
+        r'\+': (LexerTokenType.OPERATOR_PLUS , None),
+        r'-': (LexerTokenType.OPERATOR_MINUS, None),
+        r'\*': (LexerTokenType.STAR , None),
+        r'/': (LexerTokenType.SLASH, None),
+
         r':'   : (LexerTokenType.COLON, None),
-        r'@'   : (LexerTokenType.WEAK_PREFIX, None),
-        r'!'   : (LexerTokenType.EXCLAMATION, None),
+        r'=>'  : (LexerTokenType.ARROW, None),
         r'='   : (LexerTokenType.OPERATOR_ASSIGNMENT, None),
+        r'!'   : (LexerTokenType.EXCLAMATION, None),
+
         r'\.'  : (LexerTokenType.DOT,   None),
         r','   : (LexerTokenType.COMMA, None),
+
+        r'@'   : (LexerTokenType.ARROBA, None),
             
         r'\(': (LexerTokenType.LEFT_PARENTHESIS, None),
         r'\)': (LexerTokenType.RIGHT_PARENTHESIS, None),
@@ -49,13 +50,13 @@ class Tokenizer:
         r'\{': (LexerTokenType.LEFT_BRACE, None),
         r'\}': (LexerTokenType.RIGHT_BRACE, None),
         
-
+        r' as '   : (LexerTokenType.OPERATOR_CAST_AS, lambda x: x[1:-1]),
         r'\s+': (None, None),                          # Whitespace
 
-        r'\b(?:' + '|'.join(Keywords) + r')\b': (LexerTokenType.KEYWORD, None), # Keywords
         r'true' : (LexerTokenType.BOOLEAN_LITERAL, None),
         r'false': (LexerTokenType.BOOLEAN_LITERAL, None),
         r'nova' : (LexerTokenType.NOVA_LITERAL,    None),
+        r'\b(?:' + '|'.join(Keywords) + r')\b': (LexerTokenType.KEYWORD, None), # Keywords
         r'[a-zA-Z_][a-zA-Z0-9_]*': (LexerTokenType.IDENTIFIER, None),           # Identifiers
     }
     
@@ -79,11 +80,12 @@ class Tokenizer:
         return self.data[self.position]
         
     def getNextToken(self) -> LexerToken:
-        if not self.hasMoreTokens():
-            return LexerToken(LexerTokenType.END_OF_FILE, None)
-               
-        if self.actualChar() == '\n':
+        while self.hasMoreTokens() and self.actualChar() == '\n':
             self.row += 1
+            self.position += 1
+
+        if not self.hasMoreTokens():
+            return LexerToken(LexerTokenType.END_OF_FILE, None)   
                
         # Pattern recognition
         for pattern, (token_type, modifier) in self.RegexPatterns.items():
@@ -102,8 +104,8 @@ class Tokenizer:
                 return LexerToken(token_type, modifier(matched_string))
         lines = self.data.split('\n')
         for i in range(self.row):
-            self.position -= len(lines[i])
+            self.position -= len(lines[i]) + 1
         raise powang_throw(powang_error_syntax(None, "unexpected character", [
             lines[self.row],
-            ' ' * (self.position) + '^'
+            (' ' * (self.position)) + '^'
         ]))

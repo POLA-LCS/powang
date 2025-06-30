@@ -19,7 +19,7 @@ def powang_error_format(
     if messages:
         error_message += ':'
         for msg in messages:
-            error_message += '\n\t' + msg
+            error_message += '\n      | ' + msg
     return error_message
         
 def powang_error_syntax(
@@ -36,10 +36,10 @@ def powang_error_syntax_unexpected_end(
 ])
 
 def powang_error_syntax_unexpected_token(
+    where: Optional[str],
     encountered: str,
     expected: str,
-    where: Optional[str]
-):  return powang_error_syntax(None, f"Unexpected token", [
+):  return powang_error_syntax(where, f"Unexpected token", [
     f"expected {expected}",
     f"but {encountered} was encountered"
 ])
@@ -70,19 +70,16 @@ def powang_error_type_match(
 ])
 
 def powang_error_strong_nova_assign(
-    where      : Optional[str],
-    var_name   : str,
+    where : Optional[str],
+    value : str,
 ):  return powang_error_format('ASSIGN', where, "Weak assign to strong value", [
-    f"trying to assign nova to the strong variable '{var_name}'"
+    f"trying to assign nova to the strong value: {value}"
 ])
 
-def powang_error_undefined_value(
+def powang_error_undefined_reference(
     where      : Optional[str],
-    left_side  : str,
-    right_side : str,
-):  return powang_error_format('ASSIGN', where, "Undefined reference", [
-    f"trying to assign the undefined variable '{right_side}' to '{left_side}'",
-])
+    undefined  : str,
+):  return powang_error_format('REFERENCE', where, f"Undefined reference: {undefined}\n",)
 
 def powang_error_undefined_argument(
     where     : Optional[str],
@@ -101,4 +98,57 @@ def powang_error_invalid_input(
 ):  return powang_error_format('INPUT', where, 'Invalid input for specified type', [
     f"cannot convert {value}",
     f"into type {type}",
+])
+
+def powang_error_prefix_operator(
+    where     : Optional[str],
+    operator  : str,
+):  return powang_error_format('PREFIX', where, 'Invalid prefix', [
+    f'"{operator}" is not a valid prefix'
+])
+
+def powang_error_invalid_type_for_prefix_operator(
+    where    : Optional[str],
+    operator : str,
+    type     : str,
+):  return powang_error_format('PREFIX', where, 'Unsupported prefix', [
+    f'for prefix "{operator}"',
+    f'and type "{type}"',
+])
+
+def powang_error_index_out_of_range(
+    index : int,
+    size  : int,
+):  return powang_error_format('INDEX', None, 'Out of range', [
+    f"index {index} out of range [0; {size})"
+])
+
+def powang_error_format_strings_multiple_expressions(
+    string: str,
+):  return powang_error_format(
+    'FORMAT',
+    'string format',
+    'invalid format string due to multiple expressions', [
+        string,
+        ' ' * string.index(';') + '^'
+])
+
+def powang_error_format_invalid_cast(
+    where    : Optional[str],
+    cast_to  : str,
+    to_cast  : str,
+    explicit : bool,
+): return powang_error_format(
+    'TYPE',
+    where,
+    f'Invalid {"explicit" if explicit else ''} cast types', [
+        f"unable to cast {to_cast} to {cast_to}"
+])
+
+def powang_error_constant_assign(
+    where : Optional[str],
+    type  : str,
+    weak  : bool,
+):  return powang_error_format('ASSIGN', where, "constant assign", [
+    f"trying to assign into a {f"not changeable weak" if weak else ''} const {type}"
 ])
