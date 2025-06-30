@@ -22,23 +22,19 @@ class PowangType_Base:
   
     PropertiesDict = dict[str, bool | PropertyConst | PropertyWeak | str | None]
   
-    data    : Any           = None
-    type    : Any           = None
-    defined : bool          = True
-    some    : str | None    = None
+    data    : Any  = None
+    type    : Any  = None
+    defined : bool = True
+    some    : str  = ''
     const   : PropertyConst
     weak    : PropertyWeak
     
-    def __init__(self, data, *, properties: PropertiesDict = {}
-    ):
-        self.data = data
-        self.defined    = True
+    def __init__(self, data):
+        self.data    = data
+        self.defined = True
 
         self.const = self.PropertyConst()
         self.weak  = self.PropertyWeak()
-
-        for prop, value in properties.items():
-            self.__setattr__(prop, value)
 
     @property
     def properties(self):
@@ -78,8 +74,8 @@ class PowangType_Base:
 class PowangNova(PowangType_Base):
     data: None
     type: Literal['nova'] = 'nova'
-    def __init__(self, _: None = None, *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(None, properties=properties)
+    def __init__(self, _: None = None):
+        super().__init__(None)
         self.weak.has_value = False
 
     @staticmethod
@@ -92,8 +88,8 @@ class PowangNova(PowangType_Base):
 class PowangSome(PowangType_Base):
     data: Any
     type: Literal['some'] = 'some'
-    def __init__(self, data: Any = 0, *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: Any = 0):
+        super().__init__(data)
         self.some = 'some'
 
     @staticmethod
@@ -104,8 +100,8 @@ class PowangSome(PowangType_Base):
 class PowangBoolean(PowangType_Base):
     data: bool
     type: Literal['boolean'] = 'boolean'
-    def __init__(self, data: bool = False, *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: bool = False):
+        super().__init__(data)
         
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -140,8 +136,8 @@ class PowangBoolean(PowangType_Base):
 class PowangInteger(PowangType_Base):
     data: int
     type: Literal['integer'] = 'integer'
-    def __init__(self, data: int = 0, *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: int = 0):
+        super().__init__(data)
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -198,8 +194,8 @@ class PowangInteger(PowangType_Base):
 class PowangNumber(PowangType_Base):
     data: float
     type: Literal['number'] = 'number'
-    def __init__(self, data: float = 0.0, *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: float = 0.0):
+        super().__init__(data)
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -245,8 +241,8 @@ class PowangNumber(PowangType_Base):
 class PowangString(PowangType_Base):
     data: str
     type: Literal['string'] = 'string'
-    def __init__(self, data: str = '', *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: str = ''):
+        super().__init__(data)
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -288,8 +284,8 @@ class PowangString(PowangType_Base):
 class PowangArray(PowangType_Base):
     data: list['PowangAny']
     type: Literal['array'] = 'array'
-    def __init__(self, data: list['PowangAny'] = [], *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: list['PowangAny'] = []):
+        super().__init__(data)
 
     @staticmethod        
     def cast(right: 'PowangAny'):
@@ -336,8 +332,8 @@ class PowangArray(PowangType_Base):
 class PowangMap(PowangType_Base):
     data: dict['PowangAny', 'PowangAny']
     type: Literal['map'] = 'map'
-    def __init__(self, data: dict['PowangAny', 'PowangAny'] = {}, *, properties: PowangType_Base.PropertiesDict = {}):
-        super().__init__(data, properties=properties)
+    def __init__(self, data: dict['PowangAny', 'PowangAny'] = {}):
+        super().__init__(data)
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -369,7 +365,7 @@ class PowangFunction(PowangType_Base):
         max_argc: int = 0,
         data: list[str] = []
     ):
-        super().__init__(data, properties={'const': True})
+        super().__init__(data)
         self.min_argc = min_argc
         self.max_argc = max_argc
         
@@ -386,7 +382,7 @@ class PowangUserType(PowangType_Base):      # user defined types
         methods: dict[str, PowangFunction] = {}, *,
         properties: PowangType_Base.PropertiesDict = {}
     ):
-        super().__init__(data, properties=properties)
+        super().__init__(data)
         self.methods = methods
         self.name = name
 
@@ -417,8 +413,7 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:
-    valor = PowangTypeMap(any.type)(any.data, properties=any.properties)
-    return valor
+    return PowangTypeMap(any.type)(any.data)
 
 def PowangCast(type: str, any: PowangAny) -> PowangAny | None:
     return PowangTypeMap(type).cast(any) # type: ignore

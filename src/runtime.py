@@ -165,32 +165,24 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             type: DictRepr = expression['value']['type']['value']
             assert type['value'] in TYPES, powang_error_identifier_type(where, type['value'])
 
-
             value = evaluate_ast_expression(expression['value']['expression'])
             assert value.defined, powang_error_undefined_reference(
                 where,
                 identifier,
             )
 
-            if not (weak := type['weak']) and not value.weak.has_value:
-                raise powang_throw(powang_error_strong_nova_assign(
-                    where,
-                    identifier,
-                ))
-            elif not value.weak.has_value:
-                right_value                = PowangTypeMap(type['value'])()
-                right_value.weak.has_value = False  
-                if type['const']:
-                    right_value.const.can_change = True
+            weak = PowangType_Base.PropertyWeak(type['weak'], value.weak.has_value)
+            const = PowangType_Base.PropertyConst(type['const'], type['weak'] and not value.weak.has_value)
+            if weak:
+                right_value = PowangTypeMap(type['value'])()
             elif type['value'] == PowangSome.type:
-                right_value      = PowangSome(PowangCopyConstruct(value).data)
+                right_value = PowangSome(value.data)
                 right_value.some = value.type
             else:
-                right_value = helper_check_types(where, type['value'], value)
-
-            right_value.weak._it_is  = weak
-            right_value.const._it_is = type['const']
-            memory[identifier]      = right_value
+                right_value = PowangCopyConstruct(value)
+            right_value.weak   = weak
+            right_value.const  = const
+            memory[identifier] = right_value
             return right_value
 
         case ParserTokenType.DECLARATION_INTERPRET:
@@ -199,9 +191,14 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
                 f"redefined: {identifier}"
             ])
             value = evaluate_ast_expression(expression['value']['expression'])
-            right_value = PowangCopyConstruct(value)
+            
+            if value.type == PowangSome.type:
+                right_value = PowangTypeMap(value.some)(value.data)
+            else:
+                right_value = PowangCopyConstruct(value)
+
             memory[identifier] = right_value
-            return right_value
+            return right_value            
 
         case ParserTokenType.DECLARATION_UNDEFINED:
             identifier = expression['value']['identifier']['value']
@@ -212,15 +209,14 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             type = expression['value']['type']['value']
             assert type['value'] in TYPES, powang_error_identifier_type(where, type['value'])
             
-            right_default = PowangTypeMap(type['value'])()
-            right_default.defined = False
-            right_default.weak._it_is = type['weak']
-            right_default.weak.has_value = False
-            right_default.const._it_is = type['const']
-            right_default.const.can_change = type['weak']
-            
-            memory[identifier] = right_default
-            return right_default
+            weak = PowangType_Base.PropertyWeak(type['weak'], False)
+            const = PowangType_Base.PropertyConst(type['const'], True)
+            right_value = PowangTypeMap(type['value'])()
+            right_value.weak   = weak
+            right_value.const  = const
+            right_value.defined = False
+            memory[identifier] = right_value
+            return right_value
 
         case ParserTokenType.ASSIGNMENT:
             target = expression['value']['target']
@@ -241,26 +237,22 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             if target_value.const:
                 assert not target_value.defined or target_value.const.can_change, powang_error_format(
                     "CONST", where, "Trying to assign to a strong const", [
-                        f"{value} -> {target_value}"
+                        f"{value.type} -> {target_value.type}!"
                     ])
                 target_value.const.can_change = False
 
-            if not target_value.weak and not value.weak.has_value:
-                raise powang_throw(powang_error_strong_nova_assign(
+            if not value.weak.has_value:
+                assert target_value.weak or target_value.type == PowangNova.type, powang_throw(powang_error_strong_nova_assign(
                     where,
                     target['value'],
                 ))
-            elif not value.weak.has_value:
-                target_value.weak.has_value = False  
-                target_value.data = PowangTypeMap(target_value.type)().data # type: ignore
             elif target_value.type == PowangSome.type:
                 target_value.data = PowangCopyConstruct(value).data
                 target_value.some = value.type
-                target_value.weak.has_value = True
             else:
                 target_value.data = helper_check_types(where, target_value.type, value).data # type: ignore
-                target_value.weak.has_value = True
             target_value.defined = True
+            target_value.weak.has_value = value.weak.has_value
             return target_value
 
         case ParserTokenType.ARRAY_EXPRESSION:

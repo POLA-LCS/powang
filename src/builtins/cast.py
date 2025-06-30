@@ -90,7 +90,7 @@ def explicit_cast_map(left: PowangAny):
         return cast_result
 
 def explicit_cast_some(left: PowangAny):
-    return PowangSome.cast(left)
+    return PowangTypeMap(left.type)(left.data)
 
 def explicit_cast(type: str, left: PowangAny):
     match type:
