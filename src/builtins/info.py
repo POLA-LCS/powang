@@ -11,7 +11,7 @@ def builtin_size(*args: PowangAny):
             arg.type,
         )
         
-        if arg.type == PowangContainer.type or arg.type == PowangString.type:
+        if arg.type == PowangArray.type or arg.type == PowangString.type:
             size_result.data += len(arg.data)
         else:
             assert arg.type == PowangUserType.type, powang_error_type_match(
@@ -28,3 +28,6 @@ def builtin_size(*args: PowangAny):
             )
             return PowangNova()
     return size_result
+
+def builtin_typeof(arg: PowangAny):
+    return PowangString(arg.type)

@@ -1,12 +1,12 @@
-# Powang, multi-purpose programming language.
+# powang: The multi-purpose programming language written by me :D.
 
-![powang banner](./powang_banner.jpeg)
+![powang banner](./assets/powang_banner.jpeg)
 
 > [!WARNING]
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
 
 Hiii, this is POLA, a software engineering student, and this is my own programming language.  
-It is based on   operations but with higher level interation.
+Initally based on the lisp operators but later changed into a more natural language.
 
 ## TODO
 - [X] Comments `##`.

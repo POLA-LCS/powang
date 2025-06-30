@@ -6,29 +6,29 @@ class TokenTypeBase(Enum):
     def toStr(token_type: 'TokenTypeBase'):
         if token_type.value not in token_type._value2member_map_:
             raise ValueError(f"Unknown token type: {token_type}")
-        return ' '.join(word.upper() for word in token_type.name.split('_'))
+        return ' '.join(word.lower() for word in token_type.name.split('_'))
 
 class LexerTokenType(TokenTypeBase):
     # Literals
-    NOVA_LITERAL       = auto() # nova
-    BOOLEAN_LITERAL    = auto() # true or false
-    INTEGER_LITERAL    = auto() # 69
-    FLOATING_LITERAL   = auto() # 3.141592
-    STRING_LITERAL     = auto() # 'hello'
-    FMT_STRING_LITERAL = auto() # "hello ${12 + 23 + 34}"
+    NOVA_LITERAL     = auto() # nova
+    BOOLEAN_LITERAL  = auto() # true or false
+    INTEGER_LITERAL  = auto() # 69
+    FLOATING_LITERAL = auto() # 3.141592
+    STRING_LITERAL   = auto() # "hello"
 
     # Identifiers
-    IDENTIFIER         = auto()
-    KEYWORD            = auto()  # var, if, else, etc.
+    IDENTIFIER = auto()
+    KEYWORD    = auto() # if, else, etc.
 
     # Operators
-    OPERATOR_ADDITION       = auto()  # + OR -
-    OPERATOR_MULTIPLICATION = auto()  # * OR /
-    OPERATOR_ASSIGNMENT     = auto()  # =
+    OPERATOR_PLUS       = auto() # +
+    OPERATOR_SUMATORY   = auto() # [+]
+    OPERATOR_MINUS      = auto() # -
+    OPERATOR_INVERSE    = auto() # [-]
+    OPERATOR_CAST_AS    = auto() # as
+    OPERATOR_ASSIGNMENT = auto() # =
 
     # Group punctuation
-    EXCLAMATION       = auto() # !
-    WEAK_PREFIX       = auto() # @
     LEFT_PARENTHESIS  = auto() # (
     RIGHT_PARENTHESIS = auto() # )
     LEFT_BRACKET      = auto() # [
@@ -36,19 +36,26 @@ class LexerTokenType(TokenTypeBase):
     LEFT_BRACE        = auto() # {
     RIGHT_BRACE       = auto() # }
 
-    # Separators
-    SEMI_COLON = auto() # ;
-    COLON      = auto() # :
-    COMMA      = auto() # ,
-    DOT        = auto() # .
+    # Symbols
+    ARROW       = auto() # =>
+    EXCLAMATION = auto() # !
+    ARROBA      = auto() # @
+    STAR        = auto() # *
+    SLASH       = auto() # /
+    SEMI_COLON  = auto() # ;
+    COLON       = auto() # :
+    COMMA       = auto() # ,
+    DOT         = auto() # .
 
     # Extra
     END_OF_FILE = auto()
 
 class ParserTokenType(TokenTypeBase):
     PROGRAM               = auto()
+    UNARY_EXPRESSION      = auto()
     BINARY_EXPRESSION     = auto()
-    LIST_EXPRESSION       = auto()
+    ARRAY_EXPRESSION  = auto()
+    INDEX_EXPRESSION      = auto()
     CALL_EXPRESSION       = auto()
     BLOCK_STATEMENT       = auto()
     TYPE                  = auto()
@@ -58,6 +65,8 @@ class ParserTokenType(TokenTypeBase):
     DECLARATION_INTERPRET = auto()
     DECLARATION_UNDEFINED = auto()
     ASSIGNMENT            = auto()
+    ACCESS_EXPRESSION     = auto()
+    KEY_VALUE_PAIR        = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

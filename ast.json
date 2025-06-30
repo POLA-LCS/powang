@@ -1,0 +1,30 @@
+[
+    {
+        "type": "DECLARATION INTERPRET",
+        "value": {
+            "identifier": {
+                "type": "IDENTIFIER",
+                "value": "a"
+            },
+            "expression": {
+                "type": "NOVA LITERAL",
+                "value": "nova"
+            }
+        }
+    },
+    {
+        "type": "CALL EXPRESSION",
+        "value": {
+            "callee": {
+                "type": "IDENTIFIER",
+                "value": "print"
+            },
+            "arguments": [
+                {
+                    "type": "IDENTIFIER",
+                    "value": "a"
+                }
+            ]
+        }
+    }
+]

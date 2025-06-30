@@ -1,34 +1,41 @@
 from ..powang_types import *
-from ..error import powang_error_format
-from ..lexer.tokenizer import *
 from ..parser import *
 
-def builtin_stdin(value: PowangAny):
+def builtin_stdin(receptor: PowangAny = PowangString()):
+    assert not receptor.const or receptor.const.can_change, powang_error_constant_assign(
+        "function: stdin",
+        receptor.type,
+        bool(receptor.weak),
+    )
+    
     python_input = input()
     try:
-        if value.type == PowangBoolean.type:
-            value.data = bool(python_input)
-        elif value.type == PowangInteger.type:
-            value.data = int(python_input)
-        elif value.type == PowangNumber.type:
-            value.data = float(python_input)
-        elif value.type == PowangString.type:
-            value.data = python_input
-        elif value.type == PowangSome.type:
+        if receptor.type == PowangBoolean.type:
+            receptor.data = bool(python_input)
+        elif receptor.type == PowangInteger.type:
+            receptor.data = int(python_input)
+        elif receptor.type == PowangNumber.type:
+            receptor.data = float(python_input)
+        elif receptor.type == PowangString.type:
+            receptor.data = python_input
+        elif receptor.type == PowangSome.type:
             try:
-                value.data = float(python_input)
+                receptor.data = float(python_input)
             except ValueError:
                 try:
-                    value.data = int(python_input)
+                    receptor.data = int(python_input)
                 except ValueError:
                     if (boolean := {'true': True, 'false': False}.get(python_input)) is not None:
-                        value.data = boolean        
+                        receptor.data = boolean        
                     else:
-                        value.data = python_input
+                        receptor.data = python_input
         else:
-            raise powang_throw(powang_error_type_match('funcion: stdin', 'primitive type', value.type))
+            raise powang_throw(powang_error_type_match('function: stdin', 'primitive type', receptor.type))
     except ValueError:
-        raise powang_throw(powang_error_invalid_input(None, python_input, value.type))
-    value.defined = True
-    value.nova = False
-    return value
+        raise powang_throw(powang_error_invalid_input(None, python_input, receptor.type))
+        
+    receptor.defined = True
+    receptor.weak.has_value = True
+    if receptor.const:
+        receptor.const.can_change = False
+    return receptor
