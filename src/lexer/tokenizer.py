@@ -26,10 +26,12 @@ class Tokenizer:
             lambda x: x[1:-1]  # Remove the quotes
         ),
         
-        r'\+': (LexerTokenType.OPERATOR_PLUS , None),
-        r'-': (LexerTokenType.OPERATOR_MINUS, None),
-        r'\*': (LexerTokenType.STAR , None),
-        r'/': (LexerTokenType.SLASH, None),
+        r'\[\+\]' : (LexerTokenType.OPERATOR_SUMATORY, None),
+        r'\[\-\]' : (LexerTokenType.OPERATOR_INVERSE, None),
+        r'\+'     : (LexerTokenType.OPERATOR_PLUS , None),
+        r'-'      : (LexerTokenType.OPERATOR_MINUS, None),
+        r'\*'     : (LexerTokenType.STAR , None),
+        r'/'      : (LexerTokenType.SLASH, None),
 
         r':'   : (LexerTokenType.COLON, None),
         r'=>'  : (LexerTokenType.ARROW, None),

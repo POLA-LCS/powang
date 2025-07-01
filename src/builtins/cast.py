@@ -1,7 +1,7 @@
 from ..powang_types import *
 from ..error import *
 
-def explicit_cast_string(left: PowangAny):
+def explicit_cast_string(left: PowangAny) -> Optional[PowangString]:
     if not left.defined:
         return PowangString(f'<{left.type}: undefined>')
     if not left.weak.has_value or left.type == PowangNova.type:
@@ -43,7 +43,7 @@ def explicit_cast_string(left: PowangAny):
         return PowangString('[' + ', '.join(' => '.join([key, value]) for key, value in result_dict.items()) + ']')
     return None
 
-def explicit_cast_integer(left: PowangAny):
+def explicit_cast_integer(left: PowangAny) -> Optional[PowangInteger]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
     if (cast_result := PowangInteger.cast(left)) is not None:
         return cast_result
@@ -58,7 +58,7 @@ def explicit_cast_integer(left: PowangAny):
             ])
     return PowangInteger.cast(left)
 
-def explicit_cast_number(left: PowangAny):
+def explicit_cast_number(left: PowangAny) -> Optional[PowangNumber]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
 
     if (cast_result := PowangNumber.cast(left)) is not None:
@@ -74,7 +74,7 @@ def explicit_cast_number(left: PowangAny):
             ])
     return None
 
-def explicit_cast_array(left: PowangAny):
+def explicit_cast_array(left: PowangAny) -> Optional[PowangArray]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
     if (cast_result := PowangArray.cast(left)) is not None:
         return cast_result
@@ -84,16 +84,15 @@ def explicit_cast_array(left: PowangAny):
         return PowangArray([PowangString(char) for char in left.data])
     return None
 
-def explicit_cast_map(left: PowangAny):
+def explicit_cast_map(left: PowangAny) -> Optional[PowangMap]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
     if (cast_result := PowangMap.cast(left)) is not None:
         return cast_result
 
-def explicit_cast_some(left: PowangAny):
-    return PowangTypeMap(left.type)(left.data)
-
 def explicit_cast(type: str, left: PowangAny):
     match type:
+        case PowangBoolean.type:
+            return PowangBoolean.cast(left)
         case PowangInteger.type:
             return explicit_cast_integer(left)
         case PowangNumber.type:
@@ -102,6 +101,6 @@ def explicit_cast(type: str, left: PowangAny):
             return explicit_cast_string(left)
         case PowangArray.type:
             return explicit_cast_array(left)
-        case PowangSome.type:
-            return explicit_cast_some(left)
+        case PowangMap.type:
+            return PowangMap.cast(left)
     return None

@@ -52,16 +52,16 @@ class PowangType_Base:
     def cast(right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
         return None
 
-    def __add__(self, right: 'PowangAny') -> 'PowangAny': # type: ignore
+    def __add__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
         return PowangNova()
     
-    def __sub__(self, right: 'PowangAny') -> 'PowangAny': # type: ignore
+    def __sub__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
         return PowangNova()
     
-    def __mul__(self, right: 'PowangAny') -> 'PowangAny': # type: ignore
+    def __mul__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
         return PowangNova()
     
-    def __truediv__(self, right: 'PowangAny') -> 'PowangAny': # type: ignore
+    def __truediv__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
         return PowangNova()
 
     def __eq__(self, value: 'PowangAny') -> bool: # type: ignore
@@ -115,7 +115,7 @@ class PowangBoolean(PowangType_Base):
         elif right.type == PowangString.type or right.type == PowangArray.type:
             result.data = len(right.data) > 0
         # elif right.type == PowangNova.type:
-        #     return False
+        #     result.data = False
         # elif right.type == PowangUserType.type:
         #     result.data = right.methods['boolean']().data # type: ignore
         return result
@@ -154,14 +154,14 @@ class PowangInteger(PowangType_Base):
             return PowangInteger(self.data + right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) + right
-        return PowangNova()
+        return None
 
     def __sub__(self, right: 'PowangAny'):
         if right.type == PowangInteger.type:
             return PowangInteger(self.data - right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) - right
-        return PowangNova()
+        return None
 
     def __mul__(self, right: 'PowangAny'):
         if right.type == PowangInteger.type:
@@ -172,7 +172,7 @@ class PowangInteger(PowangType_Base):
             return PowangString(right.data * self.data)
         if right.type == PowangArray.type:
             return PowangArray(right.data * self.data)
-        return PowangNova()
+        return None
 
     def __truediv__(self, right: 'PowangAny'):
         if right.type == PowangBoolean.type:
@@ -189,7 +189,7 @@ class PowangInteger(PowangType_Base):
             return PowangArray([PowangString(right.data[i:i + self.data]) for i in range(0, len(right.data), self.data)])
         if right.type == PowangArray.type:
             return PowangArray([PowangArray([element for element in right.data[i:i + self.data]]) for i in range(0, len(right.data), self.data)])
-        return PowangNova()
+        return None
 
 class PowangNumber(PowangType_Base):
     data: float
@@ -212,21 +212,21 @@ class PowangNumber(PowangType_Base):
             return PowangNumber(self.data + right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) + right
-        return PowangNova()
+        return None
 
     def __sub__(self, right: 'PowangAny'):
         if right.type == PowangNumber.type:
             return PowangNumber(self.data - right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) - right
-        return PowangNova()
+        return None
 
     def __mul__(self, right: 'PowangAny'):
         if right.type == PowangNumber.type:
             return PowangNumber(self.data * right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) * right
-        return PowangNova()
+        return None
 
     def __truediv__(self, right: 'PowangAny'):
         if right.type == PowangNumber.type:
@@ -235,7 +235,7 @@ class PowangNumber(PowangType_Base):
             return PowangNumber(self.data / right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) / right
-        return PowangNova()
+        return None
 
 # ====== STRING =========
 class PowangString(PowangType_Base):
@@ -255,14 +255,14 @@ class PowangString(PowangType_Base):
             return PowangString(self.data + right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) + right
-        return PowangNova()
+        return None
 
     def __sub__(self, right: 'PowangAny'):
         if right.type == PowangString.type:
             return PowangString(self.data.replace(right.data, '', 1))
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) - right
-        return PowangNova()
+        return None
 
     def __mul__(self, right: 'PowangAny'):
         if right.type == PowangString.type:
@@ -278,7 +278,7 @@ class PowangString(PowangType_Base):
             return PowangBoolean.cast(self) / right
         if right.type == PowangInteger.type:
             return PowangArray([PowangString(string.data[::-1]) for string in (right / PowangString(self.data[::-1])).data][::-1]) # type: ignore
-        return PowangNova()
+        return None
     
 # ====== ARRAY =========
 class PowangArray(PowangType_Base):
@@ -300,7 +300,7 @@ class PowangArray(PowangType_Base):
             return PowangArray(self.data + right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) + right
-        return PowangNova()
+        return None
 
     def __sub__(self, right: 'PowangAny'):
         if right.type == PowangBoolean.type:
@@ -314,19 +314,19 @@ class PowangArray(PowangType_Base):
                 while element in result.data:
                     result.data.remove(element)
             return result
-        return PowangNova()
+        return None
 
     def __mul__(self, right: 'PowangAny'):
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) * right
         if right.type == PowangInteger.type:
             return right * self
-        return PowangNova()
+        return None
 
     def __truediv__(self, right: 'PowangAny'):
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) / right
-        return PowangNova()
+        return None
 
 # ====== MAP =========
 class PowangMap(PowangType_Base):

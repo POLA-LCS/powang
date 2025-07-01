@@ -152,3 +152,12 @@ def powang_error_constant_assign(
 ):  return powang_error_format('ASSIGN', where, "constant assign", [
     f"trying to assign into a {f"not changeable weak" if weak else ''} const {type}"
 ])
+
+def powang_error_unsupported_operation(
+    where    : Optional[str],
+    left     : str,
+    operator : str,
+    right    : str
+):  return powang_error_format('OPERATION', where, "Invalid operation", [
+    f"Unsupported \"{operator}\" operation between {left} and {right}",
+])

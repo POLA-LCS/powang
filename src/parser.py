@@ -33,10 +33,20 @@ class Parser:
     def ExpressionStatement(self):
         if self.next.type == LexerTokenType.END_OF_FILE:
             return None
-        expression = self.Statement()
-        if expression == {} or expression['type'] != TokenToString(ParserTokenType.BLOCK_STATEMENT):
+        if self.next.type == LexerTokenType.KEYWORD:
+            keyword = self.next.value
+            self.consume(LexerTokenType.KEYWORD)
+            match keyword:
+                case 'if':
+                    return self.helper_IfStatement()
+                case 'for':
+                    return self.helper_ForStatement()
+                case _:
+                    raise NotImplementedError(f"{self.next.value} not implemented yet.")
+        else:
+            expression = self.Statement()
             self.consume(LexerTokenType.SEMI_COLON)
-        return expression
+            return expression
 
     def Statement(self):
         expr = self.Expression()
@@ -52,6 +62,61 @@ class Parser:
             }).toDict()
 
         return expr
+    
+    def helper_IfStatement(self):
+        if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+            expr = self.Expression()
+        else:
+            expr = self.Expression()
+        block = self.BlockStatement()
+        else_block: DictRepr | None = None
+        if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'else':
+            self.consume(LexerTokenType.KEYWORD)
+            else_block = self.BlockStatement()
+        return doToken(ParserTokenType.IF_STATEMENT, {
+            "expression": expr,
+            "block": block,
+            "else": else_block,
+        }).toDict()
+        
+    def helper_ForStatement(self):
+        has_paren = False
+        if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+            self.consume(LexerTokenType.LEFT_PARENTHESIS)
+            has_paren = True
+
+        start_expression = self.Statement()
+        
+        if start_expression['type'] == ParserTokenType.DECLARATION_UNDEFINED:
+            if self.next.type == LexerTokenType.ARROW:
+                self.advance()
+                iterable_expression = self.Expression()
+                block = self.BlockStatement()
+                return doToken(ParserTokenType.FOR_EACH_STATEMENT, {
+                    "iterator": start_expression,
+                    "expression": iterable_expression,
+                    "block": block,
+                }).toDict()
+        
+        middle_expression: DictRepr | None = None
+        last_expression  : DictRepr | None = None
+
+        if self.next.type == LexerTokenType.SEMI_COLON:
+            self.advance()
+            middle_expression = self.Expression()
+            self.advance()
+            last_expression = self.Statement()
+
+        if has_paren:
+            self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+
+        block = self.BlockStatement()
+        return doToken(ParserTokenType.FOR_STATEMENT, {
+            "start_expression"  : start_expression,
+            "middle_expression": middle_expression,
+            "last_expression"  : last_expression,
+            "block": block,
+        }).toDict()
 
     def Expression(self):
         return self.Level_1_Expression()
@@ -254,8 +319,8 @@ class Parser:
         statements = []
         while self.next.type != LexerTokenType.RIGHT_BRACE:
             stmt = self.ExpressionStatement()
-            if stmt is not None:
-                statements.append(stmt)
+            assert stmt is not None, powang_error_syntax(None, "Unclosed block reached end of file")
+            statements.append(stmt)
         self.consume(LexerTokenType.RIGHT_BRACE)
         return doToken(ParserTokenType.BLOCK_STATEMENT, statements).toDict()
 
@@ -337,6 +402,9 @@ class Parser:
         token.value = token.value.encode('utf-8').decode('unicode_escape')
         return token.toDict(token.value)
 
+    def advance(self):
+        return self.consume(self.next.type)
+
     def consume(self, token_type: LexerTokenType, where: Optional[str] = None):
         token = self.next
         assert token is not None, powang_error_syntax_unexpected_end(None, self.tokenizer)
@@ -350,3 +418,14 @@ class Parser:
 
         self.next = self.tokenizer.getNextToken()
         return token
+
+    @staticmethod
+    def simulate_Assignment(target: DictRepr, expr: DictRepr):
+        return doToken(ParserTokenType.ASSIGNMENT, {
+            "target": target,
+            "expression": expr
+        }).toDict()
+
+    @staticmethod
+    def simulate_Identifier(value: str):
+        return doToken(LexerTokenType.IDENTIFIER, value).toDict()
