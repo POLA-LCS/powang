@@ -54,7 +54,7 @@ class ParserTokenType(TokenTypeBase):
     PROGRAM               = auto()
     UNARY_EXPRESSION      = auto()
     BINARY_EXPRESSION     = auto()
-    ARRAY_EXPRESSION  = auto()
+    ARRAY_EXPRESSION      = auto()
     INDEX_EXPRESSION      = auto()
     CALL_EXPRESSION       = auto()
     BLOCK_STATEMENT       = auto()
@@ -67,6 +67,9 @@ class ParserTokenType(TokenTypeBase):
     ASSIGNMENT            = auto()
     ACCESS_EXPRESSION     = auto()
     KEY_VALUE_PAIR        = auto()
+    IF_STATEMENT          = auto()
+    FOR_STATEMENT         = auto()
+    FOR_EACH_STATEMENT    = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

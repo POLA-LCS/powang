@@ -99,4 +99,10 @@ if __name__ == "__main__":
     except AssertionError as ass:
         print(ass)
         exit(1)
-    
+    except KeyboardInterrupt as kinter:
+        print()
+        print(powang_error_format("KEYBOARD", "User input", "Keyboard interrupt"))
+        exit(2)
+    except FileNotFoundError as ferror:
+        print(powang_error_format("INPUT", "File read", f"File not founded: {ferror.filename}"))
+        exit(3)

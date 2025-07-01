@@ -19,7 +19,44 @@ BUILTINS: dict[str, CallableFormat] = {
     'typeof': (1, 1, builtin_typeof ),
 }
 
-memory: dict[str, PowangAny] = {}
+Memory = dict[str, PowangAny]
+scope_stack: list[Memory] = [{}]
+
+def exists_in_memory(name: str):
+    global scope_stack
+    for scope in scope_stack[::-1]:
+        if (value := scope.get(name)) is not None:
+            return value
+    return None
+
+def pop_stack():
+    global scope_stack
+    scope_stack.pop()
+    return True
+
+def new_scope():
+    global scope_stack
+    scope_stack.append({})
+    return True
+    
+def isolate_process(process: DictRepr):
+    new_scope()
+    evaluate_ast_expression(process)
+    pop_stack()
+    return True
+
+def perform_operation(operator: str, left: PowangAny, right: PowangAny) -> PowangAny:
+    result: PowangAny | None = None
+    match operator:
+        case '+': result = left + right
+        case '-': result = left - right
+        case '*': result = left * right
+        case '/': result = left / right
+    if result is None:
+        casted = PowangCast(left.type, right)
+        assert casted is not None, powang_error_unsupported_operation('implicit operation', left.type, operator, right.type)
+        return perform_operation(operator, left, casted)
+    return result
 
 def helper_check_types(where: str, type: str, value: PowangAny) -> PowangAny:
     if type != value.type:
@@ -41,7 +78,7 @@ def parseIndexExpression(where: str, expression: DictRepr, subscript_check: bool
     index = evaluate_ast_expression(expression['value']['index'])
     
     if subscript_check:
-        assert target_value.type == PowangString.type, powang_error_format("ASSIGN", where, "string type is not subscriptable for now.")
+        assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "string type is not subscriptable for now.")
     if target_value.type == PowangArray.type:
         assert index.type == PowangInteger.type, powang_error_format(
             'INDEX', where, f"{PowangArray.type} indeces must be {PowangInteger.type}", [
@@ -94,7 +131,7 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             return PowangString(expression['value'])
 
         case LexerTokenType.IDENTIFIER:
-            assert (value := memory.get(expression['value'])) is not None, \
+            assert (value := exists_in_memory(expression['value'])) is not None, \
                 powang_error_identifier_not_found(None, expression['value'])
             return value
 
@@ -105,22 +142,20 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             match operator:
                 case '!':
                     return PowangBoolean(not PowangBoolean.cast(right).data)
-                case '+':
+                case '[-]':
+                    if right.type == PowangInteger.type:
+                        return explicit_cast_integer(PowangString(explicit_cast_string(right).data[::-1])) # type: ignore
+                    if right.type == PowangNumber.type:
+                        return explicit_cast_number(PowangString(explicit_cast_string(right).data[::-1])) # type: ignore
+                    if right.type == PowangString.type:
+                        return PowangString(right.data[::-1])
                     if right.type == PowangArray.type:
-                        result: PowangAny = right.data[0]
-                        for element in right.data[1:]:
-                            result += element
-                        return result
-                    return right
+                        return PowangArray(right.data[::-1])
                 case '-':
                     if right.type == PowangInteger.type:
                         return PowangInteger(-right.data)
                     if right.type == PowangNumber.type:
                         return PowangNumber(-right.data)
-                    if right.type == PowangString.type:
-                        return PowangString(right.data[::-1])
-                    if right.type == PowangArray.type:
-                        return PowangArray(right.data[::-1])
                     else:
                         powang_throw(powang_error_invalid_type_for_prefix_operator(None, operator, right.type))
             powang_throw(powang_error_prefix_operator(None, operator))
@@ -143,22 +178,13 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
                 return value
 
             right = evaluate_ast_expression(expression['value']['right'])
-            match expression['value']['operator']['value']:
-                case '+':
-                    return left + right
-                case '-':
-                    return left - right
-                case '*':
-                    return left * right
-                case '/':
-                    return left / right
-                case _:
-                    raise ValueError(f"Unknown operator: {expression['operator']}")
-
+            operator = expression['value']['operator']['value']
+            return perform_operation(operator, left, right)
+        
         case ParserTokenType.DECLARATION_TYPED_VAR:
             identifier: str = expression['value']['identifier']['value']
             
-            assert identifier not in memory, powang_error_format('REDEFINE', where, "Cannot redefine variables", [
+            assert identifier not in scope_stack[-1], powang_error_format('REDEFINE', where, "Cannot redefine variables", [
                 f"redefined: {identifier}"
             ])
             
@@ -179,15 +205,15 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
                 right_value = PowangSome(value.data)
                 right_value.some = value.type
             else:
-                right_value = PowangCopyConstruct(value)
+                right_value = helper_check_types(where, type['value'], value)
             right_value.weak   = weak
             right_value.const  = const
-            memory[identifier] = right_value
+            scope_stack[-1][identifier] = right_value
             return right_value
 
         case ParserTokenType.DECLARATION_INTERPRET:
             identifier = expression['value']['identifier']['value']
-            assert identifier not in memory, powang_error_format('REDEFINE', where, "Cannot redefine variables", [
+            assert identifier not in scope_stack[-1], powang_error_format('REDEFINE', where, "Cannot redefine variables", [
                 f"redefined: {identifier}"
             ])
             value = evaluate_ast_expression(expression['value']['expression'])
@@ -197,12 +223,12 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             else:
                 right_value = PowangCopyConstruct(value)
 
-            memory[identifier] = right_value
+            scope_stack[-1][identifier] = right_value
             return right_value            
 
         case ParserTokenType.DECLARATION_UNDEFINED:
             identifier = expression['value']['identifier']['value']
-            assert identifier not in memory, powang_error_format('REDEFINE', where, "Cannot redefine variables", [
+            assert identifier not in scope_stack[-1], powang_error_format('REDEFINE', where, "Cannot redefine variables", [
                 f"redefined: {identifier}"
             ])
             
@@ -215,7 +241,7 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             right_value.weak   = weak
             right_value.const  = const
             right_value.defined = False
-            memory[identifier] = right_value
+            scope_stack[-1][identifier] = right_value
             return right_value
 
         case ParserTokenType.ASSIGNMENT:
@@ -227,7 +253,7 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
                     'IMPLEMENTATION', where, "Index to that type is not implemented yet."
                 )
             else:
-                assert (target_value := memory.get(target['value'])) is not None, powang_error_identifier_not_found(
+                assert (target_value := exists_in_memory(target['value'])) is not None, powang_error_identifier_not_found(
                     where,
                     target['value'],
                 )
@@ -286,8 +312,70 @@ def evaluate_ast_expression(expression: DictRepr) -> PowangAny:
             
             for i, arg in enumerate(args):
                 assert arg.defined, powang_error_undefined_argument(callee, i + 1, arg.type,)
-            raise ValueError(f"Unknown function: {callee}")
+            raise ValueError(f"Unknown function: {callee}")        
 
+        case ParserTokenType.IF_STATEMENT:
+            new_scope()
+            expr = expression['value']['expression']
+            block = expression['value']['block']
+            else_block = expression['value']['else']
+            
+            if new_scope() and PowangBoolean.cast(evaluate_ast_expression(expr)).data:
+                new_scope()
+                for statement in block['value']:
+                    evaluate_ast_expression(statement)
+                pop_stack()
+            elif else_block is not None:
+                new_scope()
+                for statement in else_block['value']:
+                    evaluate_ast_expression(statement)
+                pop_stack()
+            pop_stack()
+            return PowangNova()
+                    
+        case ParserTokenType.FOR_STATEMENT:
+            start_expression = expression['value']['start_expression']
+            middle_expression = expression['value']['middle_expression']
+            last_expression = expression['value']['last_expression']
+            block = expression['value']['block']
+
+            if middle_expression is None:
+                middle_expression = start_expression
+                start_expression = None
+                
+            if start_expression is not None:
+                evaluate_ast_expression(start_expression)
+            while new_scope() and PowangBoolean.cast(evaluate_ast_expression(middle_expression)).data:
+                new_scope()
+                for statement in block['value']:
+                    evaluate_ast_expression(statement)
+                pop_stack()
+                if last_expression is not None:
+                    evaluate_ast_expression(last_expression)
+                pop_stack()
+            return PowangNova()
+        
+        case ParserTokenType.FOR_EACH_STATEMENT:
+            iterable_expression = expression['value']['expression']
+
+            new_scope()
+            iterable = evaluate_ast_expression(iterable_expression)
+            assert iterable.type == PowangArray.type, powang_error_format("VALUE", where, "Expression is not an iterable value", [
+                f"Expression is of type {iterable.type}"
+            ])
+            
+            iterator_identifier = expression['value']['iterator']
+            iterator = evaluate_ast_expression(iterator_identifier)
+
+            block = expression['value']['block']
+            for data in iterable.data:
+                scope_stack[-1][iterator_identifier['value']['identifier']['value']] = helper_check_types(where, iterator.type, data)
+                new_scope()
+                for statement in block['value']:
+                    evaluate_ast_expression(statement)
+                pop_stack()
+            pop_stack()
+                    
     return PowangNova()
 
 def interpret_program(program: list[DictRepr]):
