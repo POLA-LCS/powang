@@ -67,6 +67,12 @@ class PowangType_Base:
     def __eq__(self, value: 'PowangAny') -> bool: # type: ignore
         return self.data == value.data
 
+    def __lt__(self, value: 'PowangAny') -> bool: # type: ignore
+        return self.data < value.data
+
+    def __gt__(self, value: 'PowangAny') -> bool: # type: ignore
+        return self.data > value.data
+
     def __repr__(self):
         return f'PowangType({self.type} | {', '.join([key for key, value in self.properties.items() if value])}: {self.data})'
     
@@ -76,7 +82,7 @@ class PowangNova(PowangType_Base):
     type: Literal['nova'] = 'nova'
     def __init__(self, _: None = None):
         super().__init__(None)
-        self.weak.has_value = False
+        self.weak = PowangType_Base.PropertyWeak(True, False)
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -90,7 +96,7 @@ class PowangSome(PowangType_Base):
     type: Literal['some'] = 'some'
     def __init__(self, data: Any = 0):
         super().__init__(data)
-        self.some = 'some'
+        self.some = 'nova'
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -356,18 +362,35 @@ class PowangMap(PowangType_Base):
             return new_map
         return None
 
+    def __add__(self, right: 'PowangAny') -> Optional['PowangAny']:
+        if right.type == PowangMap.type:
+            new_map = PowangMap(self.data)
+            for key, value in right.data.items():
+                new_map.data[key] = value
+            return new_map
+        return None
+
 # ====== USER DEFINED FUNCTION ========= TODO
 class PowangFunction(PowangType_Base):
-    data: list[str]
+    code: list
     type: Literal['function'] = 'function'
+    return_type: 'PowangAny'
     def __init__(self,
-        min_argc: int = 0,
-        max_argc: int = 0,
-        data: list[str] = []
+        args: list,
+        code: list,
+        return_type: 'PowangAny',
     ):
-        super().__init__(data)
-        self.min_argc = min_argc
-        self.max_argc = max_argc
+        super().__init__([])
+        self.code = code
+        self.args = args
+        self.return_type = return_type
+
+    def toDict(self) -> dict:
+        return {
+            "type": (self.return_type),
+            "argc": (self.args),
+            "code": self.code,
+        }
         
 # ====== STRUCT ========= TODO
 class PowangUserType(PowangType_Base):      # user defined types

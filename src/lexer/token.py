@@ -47,6 +47,25 @@ class LexerTokenType(TokenTypeBase):
     COMMA       = auto() # ,
     DOT         = auto() # .
 
+    # Compare
+    COMPARE_TYPED_EQ  = auto() # ==:
+    COMPARE_TYPED_NEQ = auto() # !=:
+    COMPARE_TYPED_LEQ = auto() # <=:
+    COMPARE_TYPED_GEQ = auto() # >=:
+    COMPARE_TYPED_LSS = auto() # <:
+    COMPARE_TYPED_GTR = auto() # >:
+    COMPARE_EQ        = auto() # ==
+    COMPARE_NEQ       = auto() # !=
+    COMPARE_GEQ       = auto() # <=
+    COMPARE_LEQ       = auto() # >=
+    COMPARE_LSS       = auto() # <
+    COMPARE_GTR       = auto() # >
+    COMPARE_EQ_TYPE   = auto() # ::
+    COMPARE_NEQ_TYPE  = auto() # !:
+
+    AND  = auto() # &&
+    OR = auto() # ||
+
     # Extra
     END_OF_FILE = auto()
 
@@ -64,6 +83,7 @@ class ParserTokenType(TokenTypeBase):
     DECLARATION_TYPED_VAR = auto()
     DECLARATION_INTERPRET = auto()
     DECLARATION_UNDEFINED = auto()
+    DECLARATION_FUN       = auto()
     ASSIGNMENT            = auto()
     ACCESS_EXPRESSION     = auto()
     KEY_VALUE_PAIR        = auto()
