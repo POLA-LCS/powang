@@ -10,26 +10,28 @@ Initally based on the lisp operators but later changed into a more natural langu
 
 ## TODO
 - [X] Comments `##`.
-- [X] primitive types: `integer`, `number`, `string`, `container`.
+- [X] Primitive types: `nova`, `some`, `integer`, `number`, `string`, `array`, `map`.
 - [X] Standard io `stdout(...)`, `stdin(var)`.
+- [X] Type modifiers like constant "type!" and weak "@type".
 - [ ] User types.
 - - [ ] Methods.
 - - [ ] Inheritance.
-- [ ] Functions.
+- [X] Functions.
 - - [ ] Signature.
-- - [ ] Define.
+- - [X] Define.
 - - [ ] Templates.
 - [X] A better lexical analysis.
 - [ ] References.
-- [ ] Logical operators.
+- [X] Logical operators.
 - [X] Arithmetics (see [Arithmetic Operators](examples/arithmetics.po)).
 - [ ] Error handling.
-- [ ] Control flow:
-- - [ ] if.
-- - [ ] else.
+- [X] Control flow:
+- - [X] if.
+- - [X] else.
+- - [X] while.
+- - [X] for.
+- - [X] each.
 - - [ ] else if.
-- - [ ] for.
-- - [ ] each.
 
 ## Get started
 You need [Python3](https://www.python.org/).
@@ -40,5 +42,5 @@ You need [Python3](https://www.python.org/).
 - Go to `./powang`  
 - Run `powang.py --help`  
 - Create the file `main.po`   
-- Write your first hello world with `stdout 'Hello,\a32world!\n'`  
+- Write your first hello world with `stdout("Hello, world!\n");`  
 - Run it with `powang.py main.po`  
