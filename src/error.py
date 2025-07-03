@@ -71,9 +71,9 @@ def powang_error_type_match(
 
 def powang_error_strong_nova_assign(
     where : Optional[str],
-    value : str,
+    type : str,
 ):  return powang_error_format('ASSIGN', where, "Weak assign to strong value", [
-    f"trying to assign nova to the strong value: {value}"
+    f"trying to assign nova to a strong {type}"
 ])
 
 def powang_error_undefined_reference(

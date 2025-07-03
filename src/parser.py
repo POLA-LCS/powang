@@ -41,8 +41,10 @@ class Parser:
                     return self.helper_IfStatement()
                 case 'for':
                     return self.helper_ForStatement()
+                case 'fun':
+                    return self.helper_FunDeclaration()
                 case _:
-                    raise NotImplementedError(f"{self.next.value} not implemented yet.")
+                    raise NotImplementedError(f"{keyword} not implemented yet.")
         else:
             expression = self.Statement()
             self.consume(LexerTokenType.SEMI_COLON)
@@ -88,14 +90,22 @@ class Parser:
         start_expression = self.Statement()
         
         if start_expression['type'] == ParserTokenType.DECLARATION_UNDEFINED:
+            if_expression: DictRepr | None = None
             if self.next.type == LexerTokenType.ARROW:
                 self.advance()
                 iterable_expression = self.Expression()
+                if self.next.type == LexerTokenType.KEYWORD:
+                    assert self.next.value == 'if', powang_error_syntax('for each expression', f"{self.next.value} is not a valid keyword in this context", [
+                        "for each last expression only accepts if keyword"
+                    ])
+                    self.advance()
+                    if_expression = self.Expression()
                 block = self.BlockStatement()
                 return doToken(ParserTokenType.FOR_EACH_STATEMENT, {
                     "iterator": start_expression,
                     "expression": iterable_expression,
                     "block": block,
+                    "if_expression": if_expression,
                 }).toDict()
         
         middle_expression: DictRepr | None = None
@@ -118,35 +128,85 @@ class Parser:
             "block": block,
         }).toDict()
 
+    def helper_FunDeclaration(self):
+        identifier = self.Identifier()
+        self.consume(LexerTokenType.LEFT_PARENTHESIS)
+        args: list[DictRepr] = []
+        while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+            statement = self.Statement()
+            assert statement['type'] in {
+                ParserTokenType.DECLARATION_UNDEFINED,
+                # ParserTokenType.DECLARATION_TYPED_VAR
+            }, powang_error_syntax('fun declaration', "Invalid argument expression", [
+                "Expected a variable declaration",
+                f"but {TokenToString(statement['type'])} was encountered"
+            ])
+            args.append(statement)
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+        self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+        self.consume(LexerTokenType.COLON)
+        return_type = self.Type()
+        block = self.BlockStatement()
+        return doToken(ParserTokenType.DECLARATION_FUN, {
+            "identifier": identifier,
+            "args": args,
+            "return": return_type,
+            "block": block
+        }).toDict()
+
     def Expression(self):
-        return self.Level_1_Expression()
+        return self.Level_0_Expression()
+
+    def Level_0_Expression(self):
+        return self.helper_BinaryExpression(self. Level_1_Expression, (
+            LexerTokenType.AND,
+            LexerTokenType.OR,
+        ))
 
     def Level_1_Expression(self):
         return self.helper_BinaryExpression(self.Level_2_Expression, (
+            LexerTokenType.COMPARE_EQ,
+            LexerTokenType.COMPARE_NEQ,
+            LexerTokenType.COMPARE_LSS,
+            LexerTokenType.COMPARE_GTR,
+            LexerTokenType.COMPARE_GEQ,
+            LexerTokenType.COMPARE_LEQ,
+            LexerTokenType.COMPARE_EQ_TYPE,
+            LexerTokenType.COMPARE_NEQ_TYPE,
+        ))
+
+    def Level_2_Expression(self):
+        return self.helper_BinaryExpression(self.Level_3_Expression, (
             LexerTokenType.OPERATOR_PLUS,
             LexerTokenType.OPERATOR_MINUS
         ))
 
-    def Level_2_Expression(self):
-        return self.helper_BinaryExpression(self.Level_3_Expresion, (
+    def Level_3_Expression(self):
+        return self.helper_BinaryExpression(self.Level_4_Expression, (
             LexerTokenType.STAR,
             LexerTokenType.SLASH
         ))
-
-    def Level_3_Expresion(self):
+        
+    def Level_4_Expression(self):
         return self.helper_BinaryExpression(self.UnaryExpression, (
             LexerTokenType.OPERATOR_CAST_AS,
         ))
-
+        
     def helper_BinaryExpression(self, next_level: Callable[[], DictRepr], operators: tuple[LexerTokenType, ...]):
         left = next_level()
         while self.next and self.next.type in operators:
             operator = self.consume(self.next.type)
+            typed = False
+            if self.next.type == LexerTokenType.COLON:
+                self.consume(self.next.type)
+                typed = True
             right = next_level()
             left = doToken(ParserTokenType.BINARY_EXPRESSION, {
                 "left": left,
                 "operator": operator.toDict(),
-                "right": right
+                "right": right,
+                "typed": typed,
             }).toDict()
         return left
 
@@ -176,7 +236,7 @@ class Parser:
             elif self.next.type == LexerTokenType.LEFT_BRACKET:
                 expr = self.IndexExpression(expr)
             elif self.next.type == LexerTokenType.DOT:
-                expr = self.AccessExpression(expr) 
+                expr = self.AccessExpression(expr)
             else:
                 break
         return expr
@@ -213,10 +273,7 @@ class Parser:
         }).toDict()
         
     def Identifier(self):
-        if self.next.type == LexerTokenType.NOVA_LITERAL:
-            token = self.consume(LexerTokenType.NOVA_LITERAL)
-        else:
-            token = self.consume(LexerTokenType.IDENTIFIER)
+        token = self.consume(LexerTokenType.IDENTIFIER)
         return token.toDict(token.value)
         
     def Keyword(self):

@@ -5,7 +5,7 @@ from .token import LexerTokenType, LexerToken
 
 class Tokenizer:
     Keywords: set[str] = {
-        'if', 'else', 'for', 'fun', 'ret', 'use', 'type'
+        'if', 'else', 'for', 'fun', 'return', 'use', 'type'
     }
     
     RegexPatterns: dict[
@@ -26,17 +26,30 @@ class Tokenizer:
             lambda x: x[1:-1]  # Remove the quotes
         ),
         
+        r'\&\&' : (LexerTokenType.AND, None),
+        r'\|\|' : (LexerTokenType.OR, None),
+        r'::'   : (LexerTokenType.COMPARE_EQ_TYPE, None),
+        r'!:'   : (LexerTokenType.COMPARE_NEQ_TYPE, None),
+        r'=='   : (LexerTokenType.COMPARE_EQ, None),
+        r'!='   : (LexerTokenType.COMPARE_NEQ, None),
+        r'<='   : (LexerTokenType.COMPARE_GEQ, None),
+        r'>='   : (LexerTokenType.COMPARE_LEQ, None),
+        r'<'    : (LexerTokenType.COMPARE_LSS, None),
+
+        r'>>'  : (LexerTokenType.ARROW, None),
+        r'>'   : (LexerTokenType.COMPARE_GTR, None),
+        
+        r':'   : (LexerTokenType.COLON, None),
+        r'!'   : (LexerTokenType.EXCLAMATION, None),
+        r'='   : (LexerTokenType.OPERATOR_ASSIGNMENT, None),
+
+        
         r'\[\+\]' : (LexerTokenType.OPERATOR_SUMATORY, None),
         r'\[\-\]' : (LexerTokenType.OPERATOR_INVERSE, None),
         r'\+'     : (LexerTokenType.OPERATOR_PLUS , None),
         r'-'      : (LexerTokenType.OPERATOR_MINUS, None),
         r'\*'     : (LexerTokenType.STAR , None),
         r'/'      : (LexerTokenType.SLASH, None),
-
-        r':'   : (LexerTokenType.COLON, None),
-        r'=>'  : (LexerTokenType.ARROW, None),
-        r'='   : (LexerTokenType.OPERATOR_ASSIGNMENT, None),
-        r'!'   : (LexerTokenType.EXCLAMATION, None),
 
         r'\.'  : (LexerTokenType.DOT,   None),
         r','   : (LexerTokenType.COMMA, None),
@@ -55,9 +68,6 @@ class Tokenizer:
         r' as '   : (LexerTokenType.OPERATOR_CAST_AS, lambda x: x[1:-1]),
         r'\s+': (None, None),                          # Whitespace
 
-        r'true' : (LexerTokenType.BOOLEAN_LITERAL, None),
-        r'false': (LexerTokenType.BOOLEAN_LITERAL, None),
-        r'nova' : (LexerTokenType.NOVA_LITERAL,    None),
         r'\b(?:' + '|'.join(Keywords) + r')\b': (LexerTokenType.KEYWORD, None), # Keywords
         r'[a-zA-Z_][a-zA-Z0-9_]*': (LexerTokenType.IDENTIFIER, None),           # Identifiers
     }

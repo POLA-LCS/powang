@@ -8,6 +8,7 @@ def builtin_stdout(*args: PowangAny) -> PowangInteger:
     Prints out in an standard way any element given.  
     returns the amount of arguments that were passed
     """
+    
     for arg in args:
         assert (casted_arg := explicit_cast_string(arg)) is not None, powang_error_format_invalid_cast(
             "function: stdout",
@@ -33,7 +34,7 @@ def builtin_print(
         array = PowangArray([PowangString('nova')])
     elif array.type != PowangArray.type:
         array = PowangArray([array])
-    
+
     assert sep.type == PowangString.type, powang_error_type_match(
         "function print",
         PowangString.type,
