@@ -146,11 +146,12 @@ def powang_error_unsupported_operation(
     f"Unsupported \"{operator}\" operation {"between" if right is not None else "for"} {left} {f"and {right}" if right is not None else ""}",
 ])
 
-def powang_error_redefined_variable(
+def powang_error_redefined(
     where      : Optional[str],
-    identifier : str
+    identifier : str,
+    messages   : list[str] = []
 ):  return powang_error_format('REDEFINE', where, 'Name already exists in this scope', [
-    f"trying to redefine: {identifier}"]
+    f"trying to redefine: {identifier}"] + messages
 )
 
 def powang_error_identifier_names_type(
