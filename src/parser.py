@@ -43,6 +43,9 @@ class Parser:
                     return self.helper_ForStatement()
                 case 'fun':
                     return self.helper_FunDeclaration()
+                case 'return':
+                    self.advance()
+                    return doToken(ParserTokenType.RETURN_EXPRESSION, self.Expression()).toDict()
                 case _:
                     raise NotImplementedError(f"{keyword} not implemented yet.")
         else:
@@ -65,16 +68,32 @@ class Parser:
 
         return expr
     
+    def isNextKeyword(self, keyword: str):
+        return self.next.type == LexerTokenType.KEYWORD and self.next.value == keyword
+    
     def helper_IfStatement(self):
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
-            expr = self.Expression()
+              expr = self.ParenthesizedExpression()
+        else: expr = self.Expression()
+            
+        if self.next.type == LexerTokenType.LEFT_BRACE:
+            block = self.BlockStatement()
         else:
-            expr = self.Expression()
-        block = self.BlockStatement()
+            block = self.ExpressionStatement()
+            assert block is not None, powang_error_syntax('if expression', "Reached end of file")
+            block = doToken(ParserTokenType.BLOCK_STATEMENT, [block]).toDict()
+        
         else_block: DictRepr | None = None
-        if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'else':
-            self.consume(LexerTokenType.KEYWORD)
-            else_block = self.BlockStatement()
+
+        if self.isNextKeyword('else'):
+            self.advance()
+            if self.next.type == LexerTokenType.LEFT_BRACE:
+                else_block = self.BlockStatement()
+            else:
+                else_block = self.ExpressionStatement()
+                assert else_block is not None, powang_error_syntax('else expression', "Reached end of file")
+                else_block = doToken(ParserTokenType.BLOCK_STATEMENT, [else_block]).toDict()
+
         return doToken(ParserTokenType.IF_STATEMENT, {
             "expression": expr,
             "block": block,
@@ -132,18 +151,35 @@ class Parser:
         identifier = self.Identifier()
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
         args: list[DictRepr] = []
+        has_defaults = False
+        i = 1
         while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
             statement = self.Statement()
-            assert statement['type'] in {
-                ParserTokenType.DECLARATION_UNDEFINED,
-                # ParserTokenType.DECLARATION_TYPED_VAR
-            }, powang_error_syntax('fun declaration', "Invalid argument expression", [
-                "Expected a variable declaration",
-                f"but {TokenToString(statement['type'])} was encountered"
-            ])
+            if not has_defaults:
+                assert statement['type'] in {
+                    ParserTokenType.DECLARATION_UNDEFINED,
+                    ParserTokenType.DECLARATION_TYPED_VAR
+                }, powang_error_syntax('fun declaration', "Invalid argument expression", [
+                    "Expected a variable declaration",
+                    f"but {TokenToString(statement['type'])} was encountered"
+                ])
+                has_defaults = statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR
+            elif statement['type'] == ParserTokenType.DECLARATION_UNDEFINED:
+                raise powang_throw(powang_error_format('LOGIC', 'fun arguments expression', f"Missing default value", [
+                    f"expected argument {i} to have a default value",
+                    "this is not the case..."
+                ]))
+            else:
+                assert statement['type'] in {
+                    ParserTokenType.DECLARATION_TYPED_VAR
+                }, powang_error_syntax('fun declaration', "Invalid argument expression", [
+                    "Expected a variable declaration with default value",
+                    f"but {TokenToString(statement['type'])} was encountered"
+                ])
             args.append(statement)
             if self.next.type == LexerTokenType.COMMA:
                 self.advance()
+            i += 1
         self.consume(LexerTokenType.RIGHT_PARENTHESIS)
         self.consume(LexerTokenType.COLON)
         return_type = self.Type()
@@ -335,7 +371,6 @@ class Parser:
                 return identifier
         return self.Literal()
 
-
     def ParenthesizedExpression(self):
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
         expression = self.Expression()
@@ -371,14 +406,18 @@ class Parser:
             }[is_map]
         }).toDict()
 
+    def helper_getMultipleStatements(self, where: str, condition_token: LexerTokenType):
+        statements: list[DictRepr] = []
+        while self.next.type != condition_token:
+            stmt = self.ExpressionStatement()
+            assert stmt is not None, powang_error_syntax(where, "Reached end of file")
+            statements.append(stmt)
+        self.consume(condition_token)
+        return statements
+
     def BlockStatement(self):
         self.consume(LexerTokenType.LEFT_BRACE)
-        statements = []
-        while self.next.type != LexerTokenType.RIGHT_BRACE:
-            stmt = self.ExpressionStatement()
-            assert stmt is not None, powang_error_syntax(None, "Unclosed block reached end of file")
-            statements.append(stmt)
-        self.consume(LexerTokenType.RIGHT_BRACE)
+        statements = self.helper_getMultipleStatements('block expression', LexerTokenType.RIGHT_BRACE)
         return doToken(ParserTokenType.BLOCK_STATEMENT, statements).toDict()
 
     def Type(self):

@@ -100,13 +100,6 @@ def powang_error_invalid_input(
     f"into type {type}",
 ])
 
-def powang_error_prefix_operator(
-    where     : Optional[str],
-    operator  : str,
-):  return powang_error_format('PREFIX', where, 'Invalid prefix', [
-    f'"{operator}" is not a valid prefix'
-])
-
 def powang_error_invalid_type_for_prefix_operator(
     where    : Optional[str],
     operator : str,
@@ -123,26 +116,17 @@ def powang_error_index_out_of_range(
     f"index {index} out of range [0; {size})"
 ])
 
-def powang_error_format_strings_multiple_expressions(
-    string: str,
-):  return powang_error_format(
-    'FORMAT',
-    'string format',
-    'invalid format string due to multiple expressions', [
-        string,
-        ' ' * string.index(';') + '^'
-])
+def powang_error_key(
+    key   : str,
+):  return powang_error_format('KEY', None, f"Does not refers to a value: {key}")
 
-def powang_error_format_invalid_cast(
+def powang_error_invalid_cast(
     where    : Optional[str],
     cast_to  : str,
     to_cast  : str,
     explicit : bool,
-): return powang_error_format(
-    'TYPE',
-    where,
-    f'Invalid {"explicit" if explicit else ''} cast types', [
-        f"unable to cast {to_cast} to {cast_to}"
+):  return powang_error_format('TYPE', where, f'Invalid {"explicit" if explicit else ''} cast types', [
+    f"unable to cast {to_cast} to {cast_to}"
 ])
 
 def powang_error_constant_assign(
@@ -157,7 +141,25 @@ def powang_error_unsupported_operation(
     where    : Optional[str],
     left     : str,
     operator : str,
-    right    : str
+    right    : Optional[str] = None
 ):  return powang_error_format('OPERATION', where, "Invalid operation", [
-    f"Unsupported \"{operator}\" operation between {left} and {right}",
+    f"Unsupported \"{operator}\" operation {"between" if right is not None else "for"} {left} {f"and {right}" if right is not None else ""}",
 ])
+
+def powang_error_redefined_variable(
+    where      : Optional[str],
+    identifier : str
+):  return powang_error_format('REDEFINE', where, 'Name already exists in this scope', [
+    f"trying to redefine: {identifier}"]
+)
+
+def powang_error_identifier_names_type(
+    where      : Optional[str],
+    identifier : str,
+):  return powang_error_format('NAME', where, f"Function identifier names a type: {identifier}")
+
+def powang_error_not_iterable(
+    where      : Optional[str],
+    type       : str,
+    messages   : list[str] = []
+):  return powang_error_format('TYPE', where, f"Object of type {type} is not sizeable", messages)
