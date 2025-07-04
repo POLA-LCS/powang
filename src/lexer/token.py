@@ -90,6 +90,7 @@ class ParserTokenType(TokenTypeBase):
     IF_STATEMENT          = auto()
     FOR_STATEMENT         = auto()
     FOR_EACH_STATEMENT    = auto()
+    RETURN_EXPRESSION     = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

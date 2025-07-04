@@ -2,8 +2,7 @@ from typing import Union, Literal, Any, Callable, Optional
 from dataclasses import dataclass
 from .error import *
 
-
-class PowangType_Base:
+class PowangTypeBase:
     @dataclass
     class PropertyConst:
         _it_is     : bool = False
@@ -22,12 +21,14 @@ class PowangType_Base:
   
     PropertiesDict = dict[str, bool | PropertyConst | PropertyWeak | str | None]
   
-    data    : Any  = None
-    type    : Any  = None
-    defined : bool = True
-    some    : str  = ''
-    const   : PropertyConst
-    weak    : PropertyWeak
+    data      : Any  = None
+    type      : Any  = None
+    defined   : bool = True
+    some      : str  = ''
+    const     : PropertyConst
+    weak      : PropertyWeak
+    sizeable  : bool = False
+    indexable : bool = False
     
     def __init__(self, data):
         self.data    = data
@@ -49,40 +50,49 @@ class PowangType_Base:
         return hash(self.data)
 
     @staticmethod
-    def cast(right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
+    def cast(right: 'PowangAny') -> Optional['PowangAny']:
         return None
 
-    def __add__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
-        return PowangNova()
+    def size(self) -> Optional['PowangInteger']:
+        raise powang_throw(powang_error_unsupported_operation(None, self.type, 'size'))
+
+    def index(self, index: 'PowangAny') -> 'PowangAny':
+        raise powang_throw(powang_error_unsupported_operation(None, self.type, 'index'))
+
+    def iterate(self) -> 'PowangArray':
+        raise powang_throw(powang_error_unsupported_operation(None, self.type, 'iterate'))
+
+    def __add__(self, right: 'PowangAny') -> Optional['PowangAny']:
+        return None
     
-    def __sub__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
-        return PowangNova()
+    def __sub__(self, right: 'PowangAny') -> Optional['PowangAny']:
+        return None
     
-    def __mul__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
-        return PowangNova()
+    def __mul__(self, right: 'PowangAny') -> Optional['PowangAny']:
+        return None
     
-    def __truediv__(self, right: 'PowangAny') -> Optional['PowangAny']: # type: ignore
-        return PowangNova()
+    def __truediv__(self, right: 'PowangAny') -> Optional['PowangAny']:
+        return None
 
     def __eq__(self, value: 'PowangAny') -> bool: # type: ignore
         return self.data == value.data
 
-    def __lt__(self, value: 'PowangAny') -> bool: # type: ignore
+    def __lt__(self, value: 'PowangAny') -> bool:
         return self.data < value.data
 
-    def __gt__(self, value: 'PowangAny') -> bool: # type: ignore
+    def __gt__(self, value: 'PowangAny') -> bool:
         return self.data > value.data
 
     def __repr__(self):
         return f'PowangType({self.type} | {', '.join([key for key, value in self.properties.items() if value])}: {self.data})'
     
 # ====== NOVA =========
-class PowangNova(PowangType_Base):
+class PowangNova(PowangTypeBase):
     data: None
     type: Literal['nova'] = 'nova'
     def __init__(self, _: None = None):
         super().__init__(None)
-        self.weak = PowangType_Base.PropertyWeak(True, False)
+        self.weak = PowangTypeBase.PropertyWeak(True, False)
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -91,7 +101,7 @@ class PowangNova(PowangType_Base):
         return None
     
 # ====== SOME =========
-class PowangSome(PowangType_Base):
+class PowangSome(PowangTypeBase):
     data: Any
     type: Literal['some'] = 'some'
     def __init__(self, data: Any = 0):
@@ -103,7 +113,7 @@ class PowangSome(PowangType_Base):
         return PowangCopyConstruct(right)
 
 # ====== BOOL =========
-class PowangBoolean(PowangType_Base):
+class PowangBoolean(PowangTypeBase):
     data: bool
     type: Literal['boolean'] = 'boolean'
     def __init__(self, data: bool = False):
@@ -139,7 +149,7 @@ class PowangBoolean(PowangType_Base):
         return PowangBoolean(self.data and not self.cast(right).data)
 
 # ====== INTEGER =========
-class PowangInteger(PowangType_Base):
+class PowangInteger(PowangTypeBase):
     data: int
     type: Literal['integer'] = 'integer'
     def __init__(self, data: int = 0):
@@ -197,7 +207,7 @@ class PowangInteger(PowangType_Base):
             return PowangArray([PowangArray([element for element in right.data[i:i + self.data]]) for i in range(0, len(right.data), self.data)])
         return None
 
-class PowangNumber(PowangType_Base):
+class PowangNumber(PowangTypeBase):
     data: float
     type: Literal['number'] = 'number'
     def __init__(self, data: float = 0.0):
@@ -244,7 +254,7 @@ class PowangNumber(PowangType_Base):
         return None
 
 # ====== STRING =========
-class PowangString(PowangType_Base):
+class PowangString(PowangTypeBase):
     data: str
     type: Literal['string'] = 'string'
     def __init__(self, data: str = ''):
@@ -255,6 +265,17 @@ class PowangString(PowangType_Base):
         if right.type == PowangString.type:
             return PowangString(right.data)
         return None
+
+    def size(self) -> 'PowangInteger':
+        return PowangInteger(len(self.data))
+
+    def index(self, index: 'PowangAny') -> 'PowangString':
+        assert index.type == PowangInteger.type, powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type)
+        assert 0 <= index.data < (size := self.size().data), powang_error_index_out_of_range(index.data, size)
+        return PowangString(self.data[index.data])
+
+    def iterate(self) -> 'PowangArray':
+        return PowangArray([PowangString(char) for char in self.data])
 
     def __add__(self, right: 'PowangAny'):
         if right.type == PowangString.type:
@@ -287,7 +308,7 @@ class PowangString(PowangType_Base):
         return None
     
 # ====== ARRAY =========
-class PowangArray(PowangType_Base):
+class PowangArray(PowangTypeBase):
     data: list['PowangAny']
     type: Literal['array'] = 'array'
     def __init__(self, data: list['PowangAny'] = []):
@@ -300,6 +321,17 @@ class PowangArray(PowangType_Base):
         if right.type == PowangMap.type:
             return PowangArray([PowangArray([key, value]) for key, value in right.data.items()])
         return None
+
+    def size(self) -> 'PowangInteger':
+        return PowangInteger(len(self.data))
+    
+    def index(self, index: 'PowangAny') -> 'PowangAny':
+        assert index.type == PowangInteger.type, powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type)
+        assert 0 <= index.data < (size := self.size().data), powang_error_index_out_of_range(index.data, size)
+        return self.data[index.data]
+    
+    def iterate(self) -> 'PowangArray':
+        return PowangArray(self.data)
 
     def __add__(self, right: 'PowangAny'):
         if right.type == PowangArray.type:
@@ -335,11 +367,13 @@ class PowangArray(PowangType_Base):
         return None
 
 # ====== MAP =========
-class PowangMap(PowangType_Base):
+class PowangMap(PowangTypeBase):
     data: dict['PowangAny', 'PowangAny']
     type: Literal['map'] = 'map'
     def __init__(self, data: dict['PowangAny', 'PowangAny'] = {}):
         super().__init__(data)
+        self.sizeable = True
+        self.indexable = True
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -362,6 +396,16 @@ class PowangMap(PowangType_Base):
             return new_map
         return None
 
+    def size(self) -> PowangInteger:
+        return PowangInteger(len(self.data))
+    
+    def index(self, index: 'PowangAny') -> 'PowangAny':
+        assert (value := self.data.get(index)) is not None, powang_error_key(str(index))
+        return value
+
+    def iterate(self) -> 'PowangArray':
+        return PowangArray([PowangArray([key, value]) for key, value in self.data.items()])
+
     def __add__(self, right: 'PowangAny') -> Optional['PowangAny']:
         if right.type == PowangMap.type:
             new_map = PowangMap(self.data)
@@ -369,45 +413,26 @@ class PowangMap(PowangType_Base):
                 new_map.data[key] = value
             return new_map
         return None
-
-# ====== USER DEFINED FUNCTION ========= TODO
-class PowangFunction(PowangType_Base):
-    code: list
-    type: Literal['function'] = 'function'
-    return_type: 'PowangAny'
-    def __init__(self,
-        args: list,
-        code: list,
-        return_type: 'PowangAny',
-    ):
-        super().__init__([])
-        self.code = code
-        self.args = args
-        self.return_type = return_type
-
-    def toDict(self) -> dict:
-        return {
-            "type": (self.return_type),
-            "argc": (self.args),
-            "code": self.code,
-        }
-        
-# ====== STRUCT ========= TODO
-class PowangUserType(PowangType_Base):      # user defined types
-    name: str
-    data: dict[str, 'PowangAny']            # properties
-    methods: dict[str, PowangFunction] = {} # methods
     
-    type: Literal['type'] = 'type'
+# ====== USER DEFINED FUNCTION ========= TODO
+class PowangFunction(PowangTypeBase):
+    data: list[dict]
+    type: Literal['function'] = 'function'
     def __init__(self,
-        name: str,
-        data: dict[str, 'PowangAny'],
-        methods: dict[str, PowangFunction] = {}, *,
-        properties: PowangType_Base.PropertiesDict = {}
+        args: list[dict],
+        data: list[dict],
+        return_type: 'PowangAny' = PowangNova()
     ):
         super().__init__(data)
-        self.methods = methods
-        self.name = name
+        self.args = args
+        self.return_type = return_type
+        
+    def __repr__(self) -> str:
+        return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg['value']['type']['value']}" for arg in self.args)}): {self.return_type.type}"
+
+# ====== STRUCT ========= TODO
+class PowangUserType(PowangTypeBase):      # user defined types
+   pass
 
 # ====== ANY =========
 PowangAny = Union[
@@ -419,6 +444,7 @@ PowangAny = Union[
     PowangString,    # str
     PowangArray,     # list
     PowangMap,       # dict
+    PowangFunction,  # FunctionType
     PowangUserType,  # object
 ]
 
@@ -431,12 +457,16 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangBoolean.type   : PowangBoolean,
         PowangString.type    : PowangString,
         PowangArray.type     : PowangArray,
-        PowangMap.type     : PowangMap,
+        PowangMap.type       : PowangMap,
+        PowangFunction.type  : PowangFunction,
         PowangUserType.type  : PowangUserType,
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:
-    return PowangTypeMap(any.type)(any.data)
+    value = PowangTypeMap(any.type)(any.data)
+    value.weak = any.weak
+    value.const = any.const
+    return value
 
 def PowangCast(type: str, any: PowangAny) -> PowangAny | None:
     return PowangTypeMap(type).cast(any) # type: ignore

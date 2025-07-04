@@ -1,7 +1,7 @@
 from ..powang_types import *
 from ..error import *
 
-def explicit_cast_string(left: PowangAny) -> Optional[PowangString]:
+def explicitCastString(left: PowangAny) -> Optional[PowangString]:
     if not left.defined:
         return PowangString(f'<{left.type}: undefined>')
     if not left.weak.has_value or left.type == PowangNova.type:
@@ -12,7 +12,7 @@ def explicit_cast_string(left: PowangAny) -> Optional[PowangString]:
 
     if left.type == PowangSome.type:
         defined_some = PowangTypeMap(left.some)(left.data)
-        assert (cast_result := explicit_cast_string(defined_some)) is not None, powang_error_format_invalid_cast(
+        assert (cast_result := explicitCastString(defined_some)) is not None, powang_error_invalid_cast(
             None, PowangString.type, left.type, True
         )
         return cast_result
@@ -23,24 +23,24 @@ def explicit_cast_string(left: PowangAny) -> Optional[PowangString]:
     if left.type == PowangArray.type:
         result_list: list[str] = []
         for item in left.data:
-            cast_result = explicit_cast_string(item)
+            cast_result = explicitCastString(item)
             if cast_result is None: return None
             result_list.append(cast_result.data)
         return PowangString('[' + ', '.join(result_list) + ']')
     if left.type == PowangMap.type:
         result_dict: dict[str, str] = {}
         for key, value in left.data.items():
-            key_cast = explicit_cast_string(key)
+            key_cast = explicitCastString(key)
             if key_cast is None: return None
 
-            value_cast = explicit_cast_string(value)
+            value_cast = explicitCastString(value)
             if value_cast is None: return None
 
             result_dict[key_cast.data] = value_cast.data
         return PowangString('[' + ', '.join(' => '.join([key, value]) for key, value in result_dict.items()) + ']')
     return None
 
-def explicit_cast_integer(left: PowangAny) -> Optional[PowangInteger]:
+def explicitCastInteger(left: PowangAny) -> Optional[PowangInteger]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
     if (cast_result := PowangInteger.cast(left)) is not None:
         return cast_result
@@ -55,7 +55,7 @@ def explicit_cast_integer(left: PowangAny) -> Optional[PowangInteger]:
             ])
     return PowangInteger.cast(left)
 
-def explicit_cast_number(left: PowangAny) -> Optional[PowangNumber]:
+def explicitCastNumber(left: PowangAny) -> Optional[PowangNumber]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
 
     if (cast_result := PowangNumber.cast(left)) is not None:
@@ -71,7 +71,7 @@ def explicit_cast_number(left: PowangAny) -> Optional[PowangNumber]:
             ])
     return None
 
-def explicit_cast_array(left: PowangAny) -> Optional[PowangArray]:
+def explicitCastArray(left: PowangAny) -> Optional[PowangArray]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
     if (cast_result := PowangArray.cast(left)) is not None:
         return cast_result
@@ -81,23 +81,23 @@ def explicit_cast_array(left: PowangAny) -> Optional[PowangArray]:
         return PowangArray([PowangString(char) for char in left.data])
     return None
 
-def explicit_cast_map(left: PowangAny) -> Optional[PowangMap]:
+def explicitCastMap(left: PowangAny) -> Optional[PowangMap]:
     assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
     if (cast_result := PowangMap.cast(left)) is not None:
         return cast_result
 
-def explicit_cast(type: str, left: PowangAny):
+def explicitCast(type: str, left: PowangAny):
     match type:
         case PowangBoolean.type:
             return PowangBoolean.cast(left)
         case PowangInteger.type:
-            return explicit_cast_integer(left)
+            return explicitCastInteger(left)
         case PowangNumber.type:
-            return explicit_cast_number(left)
+            return explicitCastNumber(left)
         case PowangString.type:
-            return explicit_cast_string(left)
+            return explicitCastString(left)
         case PowangArray.type:
-            return explicit_cast_array(left)
+            return explicitCastArray(left)
         case PowangMap.type:
             return PowangMap.cast(left)
     return None

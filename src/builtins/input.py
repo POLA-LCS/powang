@@ -1,9 +1,9 @@
 from ..powang_types import *
 from ..parser import *
 
-def builtin_stdin(receptor: PowangAny = PowangString()):
+def builtin_input(receptor: PowangAny = PowangString()):
     assert not receptor.const or receptor.const.can_change, powang_error_constant_assign(
-        "function: stdin",
+        "function: input",
         receptor.type,
         bool(receptor.weak),
     )
@@ -20,17 +20,21 @@ def builtin_stdin(receptor: PowangAny = PowangString()):
             receptor.data = python_input
         elif receptor.type == PowangSome.type:
             try:
-                receptor.data = float(python_input)
+                receptor.data = int(python_input)
+                receptor.some = PowangInteger.type
             except ValueError:
                 try:
-                    receptor.data = int(python_input)
+                    receptor.data = float(python_input)
+                    receptor.some = PowangNumber.type
                 except ValueError:
                     if (boolean := {'true': True, 'false': False}.get(python_input)) is not None:
                         receptor.data = boolean        
+                        receptor.some = PowangBoolean.type
                     else:
                         receptor.data = python_input
+                        receptor.some = PowangString.type
         else:
-            raise powang_throw(powang_error_type_match('function: stdin', 'primitive type', receptor.type))
+            raise powang_throw(powang_error_type_match('function: input', 'primitive type', receptor.type))
     except ValueError:
         raise powang_throw(powang_error_invalid_input(None, python_input, receptor.type))
         

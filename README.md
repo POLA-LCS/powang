@@ -11,7 +11,7 @@ Initally based on the lisp operators but later changed into a more natural langu
 ## TODO
 - [X] Comments `##`.
 - [X] Primitive types: `nova`, `some`, `integer`, `number`, `string`, `array`, `map`.
-- [X] Standard io `stdout(...)`, `stdin(var)`.
+- [X] Standard io `output(...)`, `input(var)`.
 - [X] Type modifiers like constant "type!" and weak "@type".
 - [ ] User types.
 - - [ ] Methods.
@@ -42,5 +42,5 @@ You need [Python3](https://www.python.org/).
 - Go to `./powang`  
 - Run `powang.py --help`  
 - Create the file `main.po`   
-- Write your first hello world with `stdout("Hello, world!\n");`  
+- Write your first hello world with `output("Hello, world!\n");`  
 - Run it with `powang.py main.po`  

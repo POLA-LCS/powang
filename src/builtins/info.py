@@ -11,22 +11,13 @@ def builtin_size(*args: PowangAny):
             arg.type,
         )
         
-        if arg.type == PowangArray.type or arg.type == PowangString.type:
-            size_result.data += len(arg.data)
-        else:
-            assert arg.type == PowangUserType.type, powang_error_type_match(
-                'function: size',
-                'sizeable type',
-                arg.type,
-            )
-            assert 'size' in arg.methods, powang_error_identifier_not_found(
-                'User Type Method',
-                'size', [
-                    f'trying to get the size of a user type "{arg.name}"',
-                    "but was not founded"
-                ]
-            )
-            return PowangNova()
+        if arg.type == PowangSome.type:
+            arg = PowangTypeMap(arg.some)(arg.data)
+        
+        assert (size := arg.size()) is not None, powang_error_not_iterable('function: size', arg.type, [
+            f"in argument {i + 1}"
+        ])
+        size_result.data += size.data
     return size_result
 
 def builtin_typeof(arg: PowangAny):
