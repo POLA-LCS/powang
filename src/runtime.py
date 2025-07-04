@@ -26,7 +26,7 @@ BUILTINS: dict[str, CallableFormat] = {
 
 class ScopeStack:
     variables: list[dict[str, PowangAny]] = [{}]
-    functions: list[dict[str, PowangFunction]] = [{}]
+    functions: list[dict[str, list[PowangFunction]]] = [{}]
 
     @staticmethod
     def get_variable(name: str):
@@ -36,7 +36,7 @@ class ScopeStack:
         return None
 
     @staticmethod
-    def get_function(name: str) -> PowangFunction | None:
+    def get_functions(name: str) -> list[PowangFunction] | None:
         for scope in ScopeStack.functions[::-1]:
             if (func := scope.get(name)) is not None:
                 return func
@@ -49,7 +49,7 @@ class ScopeStack:
 
     @staticmethod
     def new_function(name: str, value: PowangFunction):
-        ScopeStack.functions[-1][name] = value
+        ScopeStack.functions[-1].setdefault(name, []).append(value)
         return value
 
     @staticmethod
@@ -193,7 +193,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
     if expression == {}:
         return PowangNova()
 
-    from icecream import ic
+    # from icecream import ic
 
     where = TokenToString(expression['type'])
     expr_value = expression['value']
@@ -361,10 +361,29 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 assert len(call_parameters) >= call_min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
                 return call_func(*call_parameters)
 
-            elif (func := ScopeStack.get_function(call_callee)) is not None:
+            elif (match_functions := ScopeStack.get_functions(call_callee)) is not None:
+                candidate: PowangFunction | None = match_functions[0]
+                for match_func in match_functions[1:]:
+                    match_arguments = True
+                    for match_arg, param in zip(match_func.args, call_parameters):
+                        if not match_arg['value']['type']['value']['weak'] and not param.weak.has_value:
+                            match_arguments = False
+                            break
+                        if match_arg['value']['type']['value']['value'] != param.type:
+                            match_arguments = False
+                            break
+                        
+                    if match_arguments:
+                        candidate = match_func
+                        break
+                    
+                assert candidate is not None, powang_error_format('TYPE', where, "There's no function that matches the parameter list", [
+                    ', '.join([param.type for param in call_parameters])
+                ])
+                    
                 min_argc: int = 0
                 ScopeStack.push()
-                for i, call_arg in enumerate(func.args):
+                for i, call_arg in enumerate(candidate.args):
                     call_argument = evaluateAstExpression(call_arg)
                     if call_arg['type'] == ParserTokenType.DECLARATION_UNDEFINED:
                         min_argc += 1
@@ -372,7 +391,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     if i < len(call_parameters):
                         assignWithChecks('function call', call_argument, call_parameters[i])
 
-                assert len(call_parameters) <= len(func.args), powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
+                assert len(call_parameters) <= len(candidate.args), powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
                 assert len(call_parameters) >= min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
 
                 for i, call_arg in enumerate(call_parameters):
@@ -380,11 +399,11 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 
                 return_value: PowangAny = PowangNova()
                 ScopeStack.push()
-                for call_statement in func.data:
+                for call_statement in candidate.data:
                     return_value = evaluateAstExpression(call_statement)
                 ScopeStack.pop()
 
-                call_final_result = PowangCopyConstruct(func.return_type)
+                call_final_result = PowangCopyConstruct(candidate.return_type)
                 assignWithChecks('function return type', call_final_result, return_value)
 
                 ScopeStack.pop()
@@ -463,9 +482,18 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
         case ParserTokenType.DECLARATION_FUN:
             return_type = getUndefinedVariable(where, expr_value['return']['value'])
             fun_identifier = getValidIdentifier(where, expr_value['identifier'])
+            fun_args = expr_value['args']
             assert fun_identifier not in TYPES, powang_error_identifier_names_type(where, fun_identifier)
+            functions: list[PowangFunction] | None = ScopeStack.get_functions(fun_identifier)
+            if functions is not None:
+                for func in functions:
+                    if len(func.args) == len(fun_args):
+                        for found_arg, new_arg in zip(func.args, fun_args):
+                            assert found_arg['value']['type'] != new_arg['value']['type'], powang_error_redefined(where, fun_identifier, [
+                                f"remember, return types doesn't determine function signatures"
+                            ])
             ScopeStack.new_function(fun_identifier, PowangFunction(
-                expr_value['args'],
+                fun_args,
                 expr_value['block']['value'],
                 return_type
             ))
