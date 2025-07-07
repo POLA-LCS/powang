@@ -1,17 +1,19 @@
 from .lexer import *
 from .powang_types import *
 
-TYPES: set[str] = {
-    PowangNova.type,
-    PowangSome.type,
+NATI_TYPES: set[str] = {
+    PowangNova.type   ,
+    PowangSome.type   ,
     PowangInteger.type,
-    PowangNumber.type,
+    PowangNumber.type ,
     PowangBoolean.type,
-    PowangString.type,
-    PowangArray.type,
-    PowangMap.type,
-    PowangUserType.type,
+    PowangString.type ,
+    PowangArray.type  ,
+    PowangMap.type    ,
 }
+
+USER_TYPES = set[str]()
+TYPE_ALIAS: dict[str, DictRepr] = {}
 
 class Parser:
     def __init__(self, data: str):
@@ -44,8 +46,62 @@ class Parser:
                 case 'fun':
                     return self.helper_FunDeclaration()
                 case 'return':
-                    self.advance()
                     return doToken(ParserTokenType.RETURN_EXPRESSION, self.Expression()).toDict()
+                case 'type':
+                    identifier = self.Identifier()
+                    if self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
+                        self.advance()
+                        type = self.Type()
+                        TYPE_ALIAS[identifier['value']] = type['value']
+                        return None
+                    assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
+                        TokenToString(ParserTokenType.TYPE_DECLARATION),
+                        identifier['value'], [
+                            "a powang native type"
+                        ]
+                    )
+                    assert identifier['value'] not in TYPE_ALIAS, powang_error_redefined(
+                        TokenToString(ParserTokenType.TYPE_DECLARATION),
+                        identifier['value'], [
+                            f"a type alias for {TYPE_ALIAS[identifier['value']]['value']}"
+                        ]
+                    )
+                    assert identifier['value'] not in {'true', 'false'}, powang_error_redefined(
+                        TokenToString(ParserTokenType.TYPE_DECLARATION),
+                        identifier['value'], [
+                            f"which is a literal boolean value"
+                        ]
+                    )
+                    
+                    self.consume(LexerTokenType.LEFT_BRACE)
+                    properties: list[tuple[bool, DictRepr]] = []
+                    methods   : list[tuple[bool, DictRepr]] = []
+                    while self.next.type != LexerTokenType.RIGHT_BRACE:
+                        assert self.next.type in {
+                            LexerTokenType.OPERATOR_PLUS,
+                            LexerTokenType.OPERATOR_MINUS
+                        },  powang_error_syntax_unexpected_token(
+                            TokenToString(ParserTokenType.TYPE_DECLARATION),
+                            TokenToString(self.next.type),
+                            'privacy operator + or -'
+                        )
+                        
+                        is_public: bool = self.next.type == LexerTokenType.OPERATOR_PLUS
+                        self.advance()
+                        statement = self.ExpressionStatement()
+                        assert statement is not None, powang_error_syntax('type declaration', "Reached end of file")
+                        if statement['type'] in {
+                            ParserTokenType.DECLARATION_UNDEFINED,
+                            ParserTokenType.DECLARATION_TYPED_VAR
+                        }:  properties.append((is_public, statement))
+                        elif statement['type'] == ParserTokenType.DECLARATION_FUN:
+                            methods.append((is_public, statement))
+                    self.advance()
+                    return doToken(ParserTokenType.TYPE_DECLARATION, {
+                        "identifier" : identifier,
+                        "properties" : properties,
+                        "methods"    : methods,
+                    }).toDict()
                 case _:
                     raise NotImplementedError(f"{keyword} not implemented yet.")
         else:
@@ -153,6 +209,7 @@ class Parser:
         args: list[DictRepr] = []
         has_defaults = False
         i = 1
+        min_argc: int = 0
         while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
             statement = self.Statement()
             if not has_defaults:
@@ -163,7 +220,10 @@ class Parser:
                     "Expected a variable declaration",
                     f"but {TokenToString(statement['type'])} was encountered"
                 ])
-                has_defaults = statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR
+                if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
+                    has_defaults = True
+                else:
+                    min_argc += 1
             elif statement['type'] == ParserTokenType.DECLARATION_UNDEFINED:
                 raise powang_throw(powang_error_format('LOGIC', 'fun arguments expression', f"Missing default value", [
                     f"expected argument {i} to have a default value",
@@ -182,12 +242,13 @@ class Parser:
             i += 1
         self.consume(LexerTokenType.RIGHT_PARENTHESIS)
         self.consume(LexerTokenType.COLON)
-        return_type = self.Type()
+        return_expr = self.Type()
         block = self.BlockStatement()
         return doToken(ParserTokenType.DECLARATION_FUN, {
             "identifier": identifier,
             "args": args,
-            "return": return_type,
+            "min_argc": min_argc,
+            "return": return_expr,
             "block": block
         }).toDict()
 
@@ -273,6 +334,15 @@ class Parser:
                 expr = self.IndexExpression(expr)
             elif self.next.type == LexerTokenType.DOT:
                 expr = self.AccessExpression(expr)
+                if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+                    call_expression = self.CallExpression(expr['value']['property'])
+                    expr = doToken(
+                        ParserTokenType.METHOD_CALL, {
+                            "owner"    : expr['value']['target'],
+                            "method"   : call_expression['value']['callee'],
+                            "arguments": call_expression['value']['arguments'] 
+                        }
+                    ).toDict()
             else:
                 break
         return expr
@@ -427,13 +497,15 @@ class Parser:
             self.consume(LexerTokenType.ARROBA)
             weak = True
             
-        type = self.Identifier()['value']
-        assert type in TYPES, powang_error_identifier_type(None, type)
+        type_identifier: str = self.Identifier()['value']
+        if type_identifier in TYPE_ALIAS:
+            type_identifier = TYPE_ALIAS[type_identifier]['value']
+
         if self.next.type == LexerTokenType.EXCLAMATION:
             self.consume(LexerTokenType.EXCLAMATION)
             const = True
         return doToken(ParserTokenType.TYPE, {
-            "value": type,
+            "value": type_identifier,
             "weak": weak,
             "const": const,    
         }).toDict()

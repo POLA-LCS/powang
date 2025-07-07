@@ -10,7 +10,10 @@ def builtin_output(*args: PowangAny) -> PowangInteger:
     """
     
     for arg in args:
-        assert (casted_arg := explicitCastString(arg)) is not None, powang_error_invalid_cast(
+        casted_arg = explicitCastString(arg)
+        if arg.type == PowangUserType.type and casted_arg is None:
+            casted_arg = PowangString(f"<type: {arg.type_name}>")
+        assert casted_arg is not None, powang_error_invalid_cast(
             "function: output",
             PowangString.type,
             arg.type,
