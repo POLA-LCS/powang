@@ -13,8 +13,8 @@ Initally based on the lisp operators but later changed into a more natural langu
 - [X] Primitive types: `nova`, `some`, `integer`, `number`, `string`, `array`, `map`.
 - [X] Standard io `output(...)`, `input(var)`.
 - [X] Type modifiers like constant "type!" and weak "@type".
-- [ ] User types.
-- - [ ] Methods.
+- [X] User types.
+- - [X] Methods.
 - - [ ] Inheritance.
 - [X] Functions.
 - - [ ] Signature.
@@ -31,7 +31,7 @@ Initally based on the lisp operators but later changed into a more natural langu
 - - [X] while.
 - - [X] for.
 - - [X] each.
-- - [ ] else if.
+- - [X] else if.
 
 ## Get started
 You need [Python3](https://www.python.org/).
