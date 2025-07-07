@@ -77,7 +77,7 @@ def main(args: list[str]):
                         }
                     elif isinstance(raw_ast, (LexerTokenType, ParserTokenType)):
                         return TokenToString(raw_ast).upper()
-                    elif isinstance(raw_ast, list):
+                    elif isinstance(raw_ast, (list, tuple)):
                         return [make_json_serializable(item) for item in raw_ast]
                     else:
                         return raw_ast

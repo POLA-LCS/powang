@@ -1,28 +1,30 @@
 from typing import Union, Literal, Any, Callable, Optional
 from dataclasses import dataclass
+from .lexer.token import DictRepr
 from .error import *
 
 class PowangTypeBase:
     @dataclass
     class PropertyConst:
-        _it_is     : bool = False
+        it_is     : bool = False
         can_change : bool = False
 
         def __bool__(self) -> bool:
-            return self._it_is
+            return self.it_is
 
     @dataclass
     class PropertyWeak:
-        _it_is    : bool = False
+        it_is    : bool = False
         has_value : bool = True
 
         def __bool__(self) -> bool:
-            return self._it_is
+            return self.it_is
   
     PropertiesDict = dict[str, bool | PropertyConst | PropertyWeak | str | None]
   
     data      : Any  = None
     type      : Any  = None
+    type_name : Any  = None
     defined   : bool = True
     some      : str  = ''
     const     : PropertyConst
@@ -365,7 +367,7 @@ class PowangArray(PowangTypeBase):
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) / right
         return None
-
+    
 # ====== MAP =========
 class PowangMap(PowangTypeBase):
     data: dict['PowangAny', 'PowangAny']
@@ -416,23 +418,40 @@ class PowangMap(PowangTypeBase):
     
 # ====== USER DEFINED FUNCTION ========= TODO
 class PowangFunction(PowangTypeBase):
-    data: list[dict]
+    data: list[DictRepr]
     type: Literal['function'] = 'function'
     def __init__(self,
-        args: list[dict],
-        data: list[dict],
-        return_type: 'PowangAny' = PowangNova()
+        args: list[DictRepr],
+        data: list[DictRepr],
+        return_expr: DictRepr
     ):
         super().__init__(data)
         self.args = args
-        self.return_type = return_type
+        self.return_expr = return_expr
+        self.min_argc = len(self.args)
         
     def __repr__(self) -> str:
-        return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg['value']['type']['value']}" for arg in self.args)}): {self.return_type.type}"
+        return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg['value']['type']['value']}" for arg in self.args)}): {self.return_expr['type']}"
 
-# ====== STRUCT ========= TODO
-class PowangUserType(PowangTypeBase):      # user defined types
-   pass
+# ====== USER TYPES =========
+class PowangUserType(PowangTypeBase): # user defined types
+    type_name: str = 'object'
+    data: dict[str, 'PowangAny'] = {}  # public props
+    type: Literal['type'] = 'type'
+ 
+    private_props  : dict[str, 'PowangAny']
+    public_meths : dict[str, list[PowangFunction]]
+    private_meths: dict[str, list[PowangFunction]]
+    def __init__(self,
+        public_props : dict[str, 'PowangAny']          = {},
+        private_props: dict[str, 'PowangAny']          = {},
+        public_meths : dict[str, list[PowangFunction]] = {},
+        private_meths: dict[str, list[PowangFunction]] = {},
+    ):
+        super().__init__(public_props)
+        self.private_props = private_props
+        self.public_meths = public_meths
+        self.private_meths = private_meths
 
 # ====== ANY =========
 PowangAny = Union[
@@ -468,5 +487,17 @@ def PowangCopyConstruct(any: PowangAny) -> PowangAny:
     value.const = any.const
     return value
 
-def PowangCast(type: str, any: PowangAny) -> PowangAny | None:
+def PowangCopyConstructUserType(anyType: PowangUserType) -> PowangUserType:
+    value = PowangUserType(
+        anyType.data,
+        anyType.private_props,
+        anyType.public_meths,
+        anyType.private_meths,
+    )
+    value.type_name = anyType.type_name
+    value.weak = anyType.weak
+    value.const = anyType.const
+    return value
+
+def PowangTypeCast(type: str, any: PowangAny) -> PowangAny | None:
     return PowangTypeMap(type).cast(any) # type: ignore

@@ -3,7 +3,7 @@ from ..error import *
 
 def explicitCastString(left: PowangAny) -> Optional[PowangString]:
     if not left.defined:
-        return PowangString(f'<{left.type}: undefined>')
+        return PowangString(f'<{left.type if left.type != PowangUserType.type else left.type_name}: undefined>')
     if not left.weak.has_value or left.type == PowangNova.type:
         return PowangString('nova')
 
@@ -37,7 +37,7 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
             if value_cast is None: return None
 
             result_dict[key_cast.data] = value_cast.data
-        return PowangString('[' + ', '.join(' => '.join([key, value]) for key, value in result_dict.items()) + ']')
+        return PowangString('[' + ', '.join(' >> '.join([key, value]) for key, value in result_dict.items()) + ']')
     return None
 
 def explicitCastInteger(left: PowangAny) -> Optional[PowangInteger]:
