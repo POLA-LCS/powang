@@ -23,6 +23,8 @@ BUILTINS: dict[str, CallableFormat] = {
     # INFO
     'size'  : (1, -1, builtin_size  ),
     'typeof': (1,  1, builtin_typeof),
+    
+    'system': (1, -1, builtin_system),
 }
 
 class ScopeType(Enum):

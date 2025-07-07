@@ -3,7 +3,7 @@ from ..parser import *
 
 def builtin_input(receptor: PowangAny = PowangString()):
     assert not receptor.const or receptor.const.can_change, powang_error_constant_assign(
-        "function: input",
+        "builtin: input",
         receptor.type,
         bool(receptor.weak),
     )
@@ -34,7 +34,7 @@ def builtin_input(receptor: PowangAny = PowangString()):
                         receptor.data = python_input
                         receptor.some = PowangString.type
         else:
-            raise powang_throw(powang_error_type_match('function: input', 'primitive type', receptor.type))
+            raise powang_throw(powang_error_type_match('builtin: input', 'primitive type', receptor.type))
     except ValueError:
         raise powang_throw(powang_error_invalid_input(None, python_input, receptor.type))
         
@@ -43,3 +43,9 @@ def builtin_input(receptor: PowangAny = PowangString()):
     if receptor.const:
         receptor.const.can_change = False
     return receptor
+
+def builtin_system(prompt: PowangAny):
+    assert prompt.type == PowangString.type, powang_error_type_match("builtin: system", PowangString.type, prompt.type)
+    
+    from subprocess import run
+    return PowangInteger(run(prompt.data, shell=True).returncode)
