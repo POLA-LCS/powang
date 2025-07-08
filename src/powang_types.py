@@ -24,7 +24,7 @@ class PowangTypeBase:
   
     data      : Any  = None
     type      : Any  = None
-    type_name : Any  = None
+    type_name : str  = ''
     defined   : bool = True
     some      : str  = ''
     const     : PropertyConst
@@ -38,6 +38,7 @@ class PowangTypeBase:
 
         self.const = self.PropertyConst()
         self.weak  = self.PropertyWeak()
+        self.type_name = self.type
 
     @property
     def properties(self):
@@ -431,9 +432,11 @@ class PowangFunction(PowangTypeBase):
         self.min_argc = len(self.args)
         
     def __repr__(self) -> str:
-        return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg['value']['type']['value']}" for arg in self.args)}): {self.return_expr['type']}"
+        return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg}" for arg in self.args)}): {self.return_expr['value']}"
 
 # ====== USER TYPES =========
+CONSTRUCTOR_METHOD_NAME: Literal['constructor'] = 'constructor'
+
 class PowangUserType(PowangTypeBase): # user defined types
     type_name: str = 'object'
     data: dict[str, 'PowangAny'] = {}  # public props
@@ -452,6 +455,25 @@ class PowangUserType(PowangTypeBase): # user defined types
         self.private_props = private_props
         self.public_meths = public_meths
         self.private_meths = private_meths
+
+    def getConstructors(self) -> list[PowangFunction]:
+        assert (constructors := self.getMethods(CONSTRUCTOR_METHOD_NAME, False)) is not None, powang_error_development(
+            'method call', 'Constructor not founded', [
+                "Somehow the type has no constructors..."
+            ]
+        )
+        return constructors
+
+    def getMethods(self, method_name: str, private: bool) -> Optional[list[PowangFunction]]:
+        public_methods = self.public_meths.get(method_name)
+        if private and (match_methods := self.private_meths.get(method_name)) is not None:
+            return match_methods + public_methods if public_methods is not None else []
+        return public_methods
+
+    def getProperty(self, property_name: str, private: bool) -> Optional['PowangAny']:
+        if private and (match_property := self.private_props.get(property_name)) is not None:
+            return match_property
+        return self.data.get(property_name)
 
 # ====== ANY =========
 PowangAny = Union[

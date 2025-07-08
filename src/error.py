@@ -164,3 +164,9 @@ def powang_error_not_iterable(
     type       : str,
     messages   : list[str] = []
 ):  return powang_error_format('TYPE', where, f"Object of type {type} is not sizeable", messages)
+
+def powang_error_development(
+    where      : Optional[str],
+    resume     : str,
+    messages   : list[str] = [],
+):  return powang_error_format('DEVELOPMENT', where, resume, messages)

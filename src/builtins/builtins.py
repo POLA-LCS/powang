@@ -1,0 +1,21 @@
+from .output import *
+from .input import *
+from .info import *
+
+from .cast import * # HELPER
+
+BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
+    # OUTPUT
+    'output': (1, -1, builtin_output),
+    'format': (1, -1, builtin_format),
+    'printf': (1, -1, builtin_printf),
+
+    # INPUT
+    'input' : (0,  1, builtin_input ),
+
+    # INFO
+    'size'  : (1, -1, builtin_size  ),
+    'typeof': (1,  1, builtin_typeof),
+    
+    'system': (1, -1, builtin_system),
+}
