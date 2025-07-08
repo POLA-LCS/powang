@@ -23,7 +23,7 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
     undefined_weak = PowangTypeBase.PropertyWeak(type_expression['weak'], False)
     undefined_const = PowangTypeBase.PropertyConst(type_expression['const'], True)
     undefined_right_value.weak   = undefined_weak
-    undefined_right_value.const  = undefined_const   
+    undefined_right_value.const  = undefined_const
     return undefined_right_value
 
 def checkUserTypes(where: str, target_value: PowangUserType, right_value: PowangAny) -> PowangUserType:
@@ -42,7 +42,7 @@ def checkUserTypes(where: str, target_value: PowangUserType, right_value: Powang
     return constructor_return
 
 def checkReturnsNova(where: str, target_value: PowangAny, right_value: PowangAny) -> bool:
-    if not target_value.weak.it_is:
+    if not target_value.weak.it_is and target_value.type != PowangNova.type:
         assert right_value.weak.has_value, powang_error_strong_nova_assign(where, target_value.type)
 
     elif not right_value.weak.has_value:
@@ -286,7 +286,8 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             if binary_operator == 'as':
                 if binary_right not in NATI_TYPES:
                     assert (user_type := ScopeStack.get_userType(binary_right)) is not None, powang_error_identifier_type(where, binary_right)
-                    return checkTypes(where, PowangCopyConstructUserType(user_type), binary_left)
+                    check_result = checkUserTypes(where, user_type, binary_left)
+                    return check_result
 
                 # EXPLICIT CASTING
                 assert (binary_casted := explicitCast(binary_right, binary_left)) is not None, powang_error_invalid_cast(
@@ -298,13 +299,11 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 binary_value = PowangCopyConstruct(binary_casted)
                 return binary_value
             elif binary_operator in {'::', '!:'}:
-                if binary_right not in NATI_TYPES:
-                    binary_right = evaluateAstExpression(expr_value['right']).type
                 match binary_operator:
                     case '::':
-                        return PowangBoolean(binary_left.type == binary_right)
+                        return PowangBoolean(binary_left.type_name == binary_right)
                     case '!:':
-                        return PowangBoolean(binary_left.type != binary_right)
+                        return PowangBoolean(binary_left.type_name != binary_right)
             elif binary_operator == '&&':
                 if not PowangBoolean.cast(binary_left).data:
                     return PowangBoolean(False)
@@ -352,12 +351,8 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     PowangUserType.type: right_value.type_name
                 }.get(right_value.type, right_value.type),
             })
-            if interpret_variable.type == PowangUserType.type:
-                assert (default_constructor := interpret_variable.getMethods(CONSTRUCTOR_METHOD_NAME, False)) is not None, powang_error_identifier_not_found(
-                    where, 'default constructor')
-                interpret_variable = callMethod(where, interpret_variable, CONSTRUCTOR_METHOD_NAME, default_constructor[0], [])
-            else:
-                assignWithChecks(where, interpret_variable, right_value)
+
+            assignWithChecks(where, interpret_variable, right_value)
             ScopeStack.new_variable(expr_value['identifier']['value'], interpret_variable)
             return interpret_variable
 
@@ -504,6 +499,15 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     assert is_different, powang_error_redefined(where, fun_identifier, [
                         f"remember, type qualifiers such as const does not determine function signatures, same with return types"
                     ])
+
+
+            if expr_value['return'] is None:
+                expr_value['return'] = doToken(ParserTokenType.TYPE, {
+                    'value': PowangNova.type,
+                    'const': False,
+                    'weak': False,
+                }).toDict()
+
             new_function = PowangFunction(
                 expr_value['args'],
                 expr_value['block']['value'],
@@ -520,7 +524,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             ScopeStack.important.pop()
             ScopeStack.return_value = evaluateAstExpression(expr_value)
             return PowangNova()
-            
+
         case ParserTokenType.TYPE_DECLARATION:
             identifier = getValidIdentifier(where, expr_value['identifier'])
             USER_TYPES.add(identifier)
@@ -542,7 +546,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 evaluateAstExpression(method)
                 if public:
                     public_meths.setdefault(method_identifier, []).append(ScopeStack.functions[-1][method_identifier][-1])
-                else:           
+                else:
                     private_meths.setdefault(method_identifier, []).append(ScopeStack.functions[-1][method_identifier][-1])
             ScopeStack.pop()
             USER_TYPES.remove(identifier)
@@ -563,21 +567,21 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             assert target.weak.has_value, powang_error_format("VALUE", where, f"Invalid access", [
                 f"Trying to access property {property_identifier} from a nova weak {target.type_name}"
             ])
-            
+
             is_private: bool = len(ScopeStack.method_call_stack) > 0
             property_value = target.getProperty(property_identifier, is_private)
             assert property_value is not None, powang_error_identifier_not_found(where, property_identifier, [
                 "perhaps it is a private property?"
-            ] if is_private else [])
+            ] if not is_private else [])
             return property_value
 
         case ParserTokenType.METHOD_CALL:
             owner_value = evaluateAstExpression(expr_value['owner'])
             assert owner_value.type == PowangUserType.type, powang_error_format('IMPLEMENTATION', where,
                 "Currently only user types can perform a method call.", [
-                    f"but trying to call from a {owner_value.type}"      
+                    f"but trying to call from a {owner_value.type}"
             ])
-            
+
             assert (match_methods := owner_value.getMethods(expr_value['method']['value'], len(ScopeStack.method_call_stack) > 0)) is not None, powang_error_identifier_not_found(
                 where, f"method: {expr_value['method']['value']}", [
                     "perhaps is a private method?"

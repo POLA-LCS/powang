@@ -75,6 +75,7 @@ class Parser:
                     
                     self.consume(LexerTokenType.LEFT_BRACE)
                     properties: list[tuple[bool, DictRepr]] = []
+                    has_default_constructor: bool = False
                     methods   : list[tuple[bool, DictRepr]] = []
                     while self.next.type != LexerTokenType.RIGHT_BRACE:
                         assert self.next.type in {
@@ -98,13 +99,12 @@ class Parser:
                             fun_identifier = statement['value']['identifier']
                             fun_return     = statement['value']['return']
                             if fun_identifier['value'] == CONSTRUCTOR_METHOD_NAME:
+                                assert is_public, powang_error_format('LOGIC', 'constructor declaration', "Type constructor must be public")
+                                if len(statement['value']['args']) == 0:
+                                    has_default_constructor = True
                                 # Sets the default constructor return type to the object type
                                 if fun_return is None:
-                                    statement['value']['return'] = doToken(ParserTokenType.TYPE, {
-                                        'value': identifier['value'],
-                                        'weak': False,
-                                        'const': False,
-                                    }).toDict()
+                                    statement['value']['return'] = self.simulate_Type(identifier['value'], False, False)
                                 else:
                                     # Check if the return type matches the object type
                                     assert fun_return['value']['value'] == identifier['value'], powang_error_format(
@@ -116,16 +116,28 @@ class Parser:
                                 
                                 # Return "this" default return
                                 statement['value']['block']['value'].append(
-                                    doToken(ParserTokenType.RETURN_EXPRESSION, doToken(
-                                        LexerTokenType.IDENTIFIER, 'this'
-                                    ).toDict()
+                                    doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')
                                 ).toDict())
                             methods.append((is_public, statement))
                     self.advance()
+
+                    from icecream import ic
+
+                    if not has_default_constructor:
+                        methods.append((True, doToken(ParserTokenType.DECLARATION_FUN, {
+                            'identifier': self.simulate_Identifier(CONSTRUCTOR_METHOD_NAME),
+                            'args': [],
+                            'min_argc': 0,
+                            'return': self.simulate_Type(identifier['value'], False, False),
+                            'block': doToken(ParserTokenType.BLOCK_STATEMENT, [
+                                doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')).toDict(),
+                            ]).toDict()
+                        }).toDict()))
+
                     return doToken(ParserTokenType.TYPE_DECLARATION, {
-                        "identifier" : identifier,
-                        "properties" : properties,
-                        "methods"    : methods,
+                        'identifier' : identifier,
+                        'properties' : properties,
+                        'methods'    : methods,
                     }).toDict()
                 case _:
                     raise NotImplementedError(f"{keyword} not implemented yet.")
@@ -528,9 +540,15 @@ class Parser:
         if type_identifier in TYPE_ALIAS:
             type_identifier = TYPE_ALIAS[type_identifier]['value']
 
+        if weak: assert type_identifier != PowangNova.type, powang_error_format(
+            "LOGIC", 'type notation', "A nova type can't be weak", [
+                "this has no sense"
+        ])
+
         if self.next.type == LexerTokenType.EXCLAMATION:
             self.consume(LexerTokenType.EXCLAMATION)
             const = True
+            
         return doToken(ParserTokenType.TYPE, {
             "value": type_identifier,
             "weak": weak,
@@ -624,3 +642,11 @@ class Parser:
     @staticmethod
     def simulate_Identifier(value: str):
         return doToken(LexerTokenType.IDENTIFIER, value).toDict()
+    
+    @staticmethod
+    def simulate_Type(identifier: str, weak: bool, const: bool):
+        return doToken(ParserTokenType.TYPE, {
+            'value': identifier,
+            'weak': weak,
+            'const': const,
+        }).toDict()
