@@ -95,6 +95,31 @@ class Parser:
                             ParserTokenType.DECLARATION_TYPED_VAR
                         }:  properties.append((is_public, statement))
                         elif statement['type'] == ParserTokenType.DECLARATION_FUN:
+                            fun_identifier = statement['value']['identifier']
+                            fun_return     = statement['value']['return']
+                            if fun_identifier['value'] == CONSTRUCTOR_METHOD_NAME:
+                                # Sets the default constructor return type to the object type
+                                if fun_return is None:
+                                    statement['value']['return'] = doToken(ParserTokenType.TYPE, {
+                                        'value': identifier['value'],
+                                        'weak': False,
+                                        'const': False,
+                                    }).toDict()
+                                else:
+                                    # Check if the return type matches the object type
+                                    assert fun_return['value']['value'] == identifier['value'], powang_error_format(
+                                        'LOGIC', 'constructor declaration', 'Return type must be the object type', [
+                                            f'expected {identifier['value']}',
+                                            f'but {fun_return['value']['value']} was encountered'
+                                        ]
+                                    )
+                                
+                                # Return "this" default return
+                                statement['value']['block']['value'].append(
+                                    doToken(ParserTokenType.RETURN_EXPRESSION, doToken(
+                                        LexerTokenType.IDENTIFIER, 'this'
+                                    ).toDict()
+                                ).toDict())
                             methods.append((is_public, statement))
                     self.advance()
                     return doToken(ParserTokenType.TYPE_DECLARATION, {
@@ -241,8 +266,10 @@ class Parser:
                 self.advance()
             i += 1
         self.consume(LexerTokenType.RIGHT_PARENTHESIS)
-        self.consume(LexerTokenType.COLON)
-        return_expr = self.Type()
+        return_expr = None
+        if self.next.type == LexerTokenType.COLON:
+            self.advance()
+            return_expr = self.Type()
         block = self.BlockStatement()
         return doToken(ParserTokenType.DECLARATION_FUN, {
             "identifier": identifier,

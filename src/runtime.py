@@ -1,164 +1,85 @@
 from icecream import ic
-from re import match
+
 from .parser import *
 from .error import *
+from .builtins import *
+from .scopestack import ScopeType, ScopeStack
 
-from .builtins.output import *
-from .builtins.input import *
-from .builtins.info import *
+def getValidIdentifier(where: str, identifier: DictRepr) -> str:
+    identifier_name = evaluateAstExpression(identifier, True)
+    assert isinstance(identifier_name, str), powang_error_syntax_unexpected_token(
+        where, identifier_name.type, TokenToString(LexerTokenType.IDENTIFIER))
+    return identifier_name
 
-from .builtins.cast import * # HELPER
+def getUndefinedVariable(where: str, type_expression: DictRepr):
+    if type_expression['value'] in NATI_TYPES:
+        undefined_right_value = PowangTypeMap(type_expression['value'])()
+    else:
+        assert (user_type := ScopeStack.get_userType(type_expression['value'])) is not None, powang_error_identifier_type(
+            where, type_expression['value']
+        )
+        undefined_right_value = PowangCopyConstructUserType(user_type)
+    undefined_right_value.defined = False
+    undefined_weak = PowangTypeBase.PropertyWeak(type_expression['weak'], False)
+    undefined_const = PowangTypeBase.PropertyConst(type_expression['const'], True)
+    undefined_right_value.weak   = undefined_weak
+    undefined_right_value.const  = undefined_const   
+    return undefined_right_value
 
-CallableFormat = tuple[int, int, Callable[(...), PowangAny]]
+def checkUserTypes(where: str, target_value: PowangUserType, right_value: PowangAny) -> PowangUserType:
+    if checkReturnsNova(where, target_value, right_value):
+        return target_value
 
-BUILTINS: dict[str, CallableFormat] = {
-    # OUTPUT
-    'output': (1, -1, builtin_output),
-    'format': (1, -1, builtin_format),
-    'printf': (1, -1, builtin_printf),
+    if right_value.type == PowangUserType.type and target_value.type_name == right_value.type_name:
+        return right_value
+    if right_value.type != PowangArray.type:
+        right_value = PowangArray([right_value])
+    user_type_copy = PowangCopyConstructUserType(ScopeStack.get_existingUserType(target_value.type_name))
+    constructor_methods = user_type_copy.getConstructors()
+    constructor_candidate = getFunctionCandidate(constructor_methods, right_value.data)
+    constructor_return = callMethod(where, user_type_copy, CONSTRUCTOR_METHOD_NAME, constructor_candidate, right_value.data)
+    assert constructor_return.type == PowangUserType.type and constructor_return.type_name == user_type_copy.type_name, powang_error_type_match(where, target_value.type_name, constructor_return.type_name)
+    return constructor_return
 
-    # INPUT
-    'input' : (0,  1, builtin_input ),
+def checkReturnsNova(where: str, target_value: PowangAny, right_value: PowangAny) -> bool:
+    if not target_value.weak.it_is:
+        assert right_value.weak.has_value, powang_error_strong_nova_assign(where, target_value.type)
 
-    # INFO
-    'size'  : (1, -1, builtin_size  ),
-    'typeof': (1,  1, builtin_typeof),
-    
-    'system': (1, -1, builtin_system),
-}
-
-class ScopeType(Enum):
-    GLOBAL   = auto()
-    FUNCTION = auto()
-    TYPE     = auto()
-
-    @staticmethod
-    def toStr(token_type: 'ScopeType'):
-        if token_type.value not in token_type._value2member_map_:
-            raise ValueError(f"Unknown scope type: {token_type}")
-        return ' '.join(word.lower() for word in token_type.name.split('_'))
-
-class ScopeStack:
-    return_value: PowangAny | None = None
-    important: list[ScopeType] = [ScopeType.GLOBAL]
-    method_call_stack: list[PowangUserType] = []
-
-    variables: list[dict[str, PowangAny          ]]  = [{}]
-    functions: list[dict[str, list[PowangFunction]]] = [{}]
-    userTypes: list[dict[str, PowangUserType     ]]  = [{}]
-
-    @staticmethod
-    def get_variable(name: str) -> Optional[PowangAny]:
-        for scope in ScopeStack.variables[::-1]:
-            if (value := scope.get(name)) is not None:
-                return value
-        return None
-
-    @staticmethod
-    def get_functions(name: str) -> list[PowangFunction] | None:
-        for scope in ScopeStack.functions[::-1]:
-            if (func := scope.get(name)) is not None:
-                return func
-        return None
-
-    @staticmethod
-    def get_userType(name: str) -> PowangUserType | None:
-        for scope in ScopeStack.userTypes[::-1]:
-            if (type := scope.get(name)) is not None:
-                return type
-        return None
-    
-    @staticmethod
-    def get_existingUserType(name: str) -> PowangUserType:
-        assert (value := ScopeStack.get_userType(name)) is not None, powang_error_identifier_not_found("user type get", name, [
-            "user type doesn't exists"
-        ])
-        return value
-
-    @staticmethod
-    def new_variable(name: str, value: PowangAny):
-        ScopeStack.variables[-1][name] = value
-        return value
-
-    @staticmethod
-    def new_function(name: str, value: PowangFunction):
-        ScopeStack.functions[-1].setdefault(name, []).append(value)
-        return value
-
-    @staticmethod
-    def new_userType(name: str, value: PowangUserType):
-        ScopeStack.userTypes[-1][name] = value
-        return value
-        
-    @staticmethod
-    def pop():
-        if len(ScopeStack.variables) == len(ScopeStack.important):
-            ScopeStack.important.pop()
-        ScopeStack.variables.pop()
-        ScopeStack.functions.pop()
-        ScopeStack.userTypes.pop()
+    elif not right_value.weak.has_value:
         return True
+    return False
 
-    @staticmethod
-    def push(scope_type: ScopeType | None = None):
-        if scope_type is not None:
-            ScopeStack.important.append(scope_type)
-        ScopeStack.variables.append({})
-        ScopeStack.functions.append({})
-        ScopeStack.userTypes.append({})
-        return True
+def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> PowangAny:
+    if checkReturnsNova(where, target_value, right_value):
+        return target_value
 
-def callFunction(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
-    ScopeStack.push(ScopeType.FUNCTION)
-    for i, call_arg in enumerate(candidate.args):
-        call_argument = evaluateAstExpression(call_arg)
-
-        if i < len(call_parameters):
-            assignWithChecks('function call', call_argument, call_parameters[i])
-
-    assert len(call_parameters) <= len(candidate.args), powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
-    assert len(call_parameters) >= candidate.min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
-
-    for i, call_arg in enumerate(call_parameters):
-        assert call_arg.defined, powang_error_undefined_argument(callee, i + 1, call_arg.type)
-
-    return_value: PowangAny = PowangNova()
-    ScopeStack.push(ScopeType.FUNCTION)
-    for call_statement in candidate.data:
-        evaluateAstExpression(call_statement)
-        if ScopeStack.return_value is not None:
-            return_value = ScopeStack.return_value
-            ScopeStack.return_value = None
-            break
-    ScopeStack.pop()
-
-    return_expression_value = getUndefinedVariable(where, candidate.return_expr)
-    assignWithChecks('function return type', return_expression_value, return_value)
-
-    ScopeStack.pop()
-    return return_expression_value
+    if target_value.type != right_value.type and target_value.type != PowangSome.type:
+        assert (casted_right_value := PowangTypeCast(target_value.type, right_value)) is not None, powang_error_type_match(
+            where,
+            target_value.type,
+            right_value.type)
+        return PowangCopyConstruct(casted_right_value)
+    return PowangCopyConstruct(right_value)
 
 def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny):
     if right_value.type == PowangSome.type:
         right_value = PowangTypeMap(right_value.some)(right_value.data)
-        
+
     if target_value.const:
         assert not target_value.defined or target_value.const.can_change, powang_error_format(
             "CONST", where, "Trying to assign to a strong const", [
-                f"{right_value.type} -> {target_value.type}!"
-            ])
+                f"{right_value.type} -> {target_value.type}!"])
         target_value.const.can_change = False
 
     if target_value.type == PowangSome.type:
         target_value.data = PowangTypeMap(right_value.type)(right_value.data).data
         target_value.some = right_value.type
     elif target_value.type == PowangUserType.type:
-        check_result = checkTypes(where, target_value, right_value, target_value.weak.it_is)
-        assert check_result.type == PowangUserType.type, powang_error_format("DEVELOPMENT", where, "Somehow the \"new\" method returns something different from the type")
+        check_result = checkUserTypes(where, target_value, right_value)
         target_value.data = check_result.data
         target_value.private_props = check_result.private_props
     else:
-        check_result = checkTypes(where, target_value, right_value, target_value.weak.it_is)
+        check_result = checkTypes(where, target_value, right_value)
         target_value.data = check_result.data # type: ignore
     target_value.defined = True
     target_value.weak.has_value = right_value.weak.has_value
@@ -169,18 +90,12 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
         left = PowangTypeMap(left.some)(left.data)
     if right.type == PowangSome.type:
         right = PowangTypeMap(right.some)(right.data)
-
     if operator in {'+', '-', '*', '/'}:
         assert left.type != PowangNova.type and left.weak.has_value, powang_error_unsupported_operation(
-            'operation', f'nova weak {left.type}', operator, right.type
-        )
-
+            'operation', f'nova weak {left.type}', operator, right.type)
         assert right.type != PowangNova.type and right.weak.has_value, powang_error_unsupported_operation(
-            'operation', left.type, operator, f'nova weak {right.type}'
-        )
-
+            'operation', left.type, operator, f'nova weak {right.type}')
     result: PowangAny | None = None
-
     match operator:
         case '+' : result = left + right
         case '-' : result = left - right
@@ -215,7 +130,6 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
                 case '>':
                     result.data = left > right
             return result
-
     if result is None:
         if typed:
             casted = PowangTypeCast(right.type, left)
@@ -225,84 +139,28 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
             casted = PowangTypeCast(left.type, right)
             assert casted is not None, powang_error_unsupported_operation('implicit operation', left.type, operator, right.type)
         return performOperation(operator, left, casted, typed)
-
     return result
-
-def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny, target_is_weak: bool) -> PowangAny:
-    if not target_is_weak and target_value.type != PowangNova.type:
-        assert right_value.weak.has_value, powang_error_strong_nova_assign(where, target_value.type)
-    elif not right_value.weak.has_value:
-        return PowangNova()
-
-    if target_value.type == PowangUserType.type:
-        if right_value.type == PowangUserType.type and target_value.type_name == right_value.type_name:
-            right_value = PowangCopyConstructUserType(right_value)
-        else:
-            if right_value.type != PowangArray.type:
-                right_value = PowangArray([right_value])
-            user_type = ScopeStack.get_existingUserType(target_value.type_name)
-            right_value = callMethod(where, PowangCopyConstructUserType(user_type), 'new', right_value.data, False)
-            assert right_value.type_name == target_value.type_name, powang_error_format('LOGIC', where, "Type constructors must return the same type")
-        return right_value
-
-    if target_value.type != PowangSome.type and target_value.type != right_value.type:
-        assert (casted_right_value := PowangTypeCast(target_value.type, right_value)) is not None, powang_error_type_match(
-            where,
-            target_value.type,
-            right_value.type
-        )
-        return PowangCopyConstruct(casted_right_value)
-    return PowangCopyConstruct(right_value)
 
 def getIndexedValue(where: str, expression: DictRepr, subscript_check: bool):
     target_value = evaluateAstExpression(expression['target'])
     assert target_value.defined, powang_error_undefined_reference(
         TokenToString(ParserTokenType.ASSIGNMENT),
-        expression['target']['value']
-    )
-
+        expression['target']['value'])
     if target_value.type == PowangSome.type:
         target_value = PowangTypeMap(target_value.some)(target_value.data)
-
     index = evaluateAstExpression(expression['index'])
-
     if subscript_check:
         assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "string type is not subscriptable for now.")
-
     return target_value.index(index)
 
-def getValidIdentifier(where: str, identifier: DictRepr) -> str:
-    identifier_name = evaluateAstExpression(identifier, True)
-    assert isinstance(identifier_name, str), powang_error_syntax_unexpected_token(
-        where, identifier_name.type, TokenToString(LexerTokenType.IDENTIFIER)
-    )
-    return identifier_name
-
-def getUndefinedVariable(where: str, type_expression: DictRepr):
-    if type_expression['value'] in NATI_TYPES:
-        undefined_right_value = PowangTypeMap(type_expression['value'])()
-    else:
-        assert (user_type := ScopeStack.get_userType(type_expression['value'])) is not None, powang_error_identifier_type(
-            where, type_expression['value']
-        )
-        undefined_right_value = PowangCopyConstructUserType(user_type)
-    undefined_right_value.defined = False
-    undefined_weak = PowangTypeBase.PropertyWeak(type_expression['weak'], False)
-    undefined_const = PowangTypeBase.PropertyConst(type_expression['const'], True)
-    undefined_right_value.weak   = undefined_weak
-    undefined_right_value.const  = undefined_const   
-    return undefined_right_value
-
-def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters: list[PowangAny], strict: bool = False):
+def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters: list[PowangAny]):
     candidates: list[int] = [0] * len(match_functions)
     max_index: int = 0
-
     for func_index, match_func in enumerate(match_functions):
         if len(call_parameters) == len(match_func.args):
-            candidates[func_index] += 2
+            candidates[func_index] += 3
         elif len(call_parameters) == match_func.min_argc:
-            candidates[func_index] += 1
-
+            candidates[func_index] += 2
         for match_arg, param in zip(match_func.args, call_parameters):
             match_arg_type = match_arg['value']['type']['value']['value']
             if match_arg_type == param.type_name:
@@ -318,7 +176,6 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
                     candidates[func_index] -= 1
             else:
                 candidates[func_index] += 1
-
             if match_arg['value']['type']['value']['weak']:
                 if param.weak:
                     candidates[func_index] += 1
@@ -326,25 +183,43 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
                     candidates[func_index] += 2
             elif not param.weak.it_is:
                 candidates[func_index] += 1
-
         if max(candidates) == candidates[func_index]:
             max_index = func_index
-
     return match_functions[max_index]
 
-def callMethod(where: str, owner: PowangUserType, method_name: str, arguments: list[PowangAny], private: bool = True):
-    if private:
-        if (match_methods := owner.private_meths.get(method_name)) is None:
-            assert (match_methods := owner.public_meths.get(method_name)) is not None, powang_error_identifier_not_found(
-                where, method_name
-            )
-    else:
-        assert (match_methods := owner.public_meths.get(method_name)) is not None, powang_error_identifier_not_found(
-            where, method_name
-        )
-    candidate = getFunctionCandidate(match_methods, arguments)
+def callFunction(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
+    ScopeStack.push(ScopeType.FUNCTION)
+    for i, call_arg in enumerate(candidate.args):
+        call_argument = evaluateAstExpression(call_arg)
+
+        if i < len(call_parameters):
+            assignWithChecks('function call', call_argument, call_parameters[i])
+
+    assert len(call_parameters) <= len(candidate.args), powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
+    assert len(call_parameters) >= candidate.min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
+
+    for i, call_arg in enumerate(call_parameters):
+        assert call_arg.defined, powang_error_undefined_argument(callee, i + 1, call_arg.type)
+
+    return_value: PowangAny = PowangNova()
+    ScopeStack.push(ScopeType.FUNCTION)
+    for call_statement in candidate.data:
+        evaluateAstExpression(call_statement)
+        if ScopeStack.return_value is not None:
+            return_value = ScopeStack.return_value
+            ScopeStack.return_value = None
+            break
+    ScopeStack.pop()
+
+    return_expression_value = getUndefinedVariable(where, candidate.return_expr)
+    assignWithChecks('function return type', return_expression_value, return_value)
+
+    ScopeStack.pop()
+    return return_expression_value
+
+def callMethod(where: str, owner: PowangUserType, method_name: str, method: PowangFunction, arguments: list[PowangAny]):
     ScopeStack.method_call_stack.append(owner)
-    return_value = callFunction(where, method_name, candidate, arguments)
+    return_value = callFunction(where, method_name, method, arguments)
     ScopeStack.method_call_stack.pop()
     return return_value
 
@@ -411,7 +286,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             if binary_operator == 'as':
                 if binary_right not in NATI_TYPES:
                     assert (user_type := ScopeStack.get_userType(binary_right)) is not None, powang_error_identifier_type(where, binary_right)
-                    return checkTypes(where, PowangCopyConstructUserType(user_type), binary_left, False)
+                    return checkTypes(where, PowangCopyConstructUserType(user_type), binary_left)
 
                 # EXPLICIT CASTING
                 assert (binary_casted := explicitCast(binary_right, binary_left)) is not None, powang_error_invalid_cast(
@@ -477,7 +352,12 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     PowangUserType.type: right_value.type_name
                 }.get(right_value.type, right_value.type),
             })
-            assignWithChecks(where, interpret_variable, right_value)
+            if interpret_variable.type == PowangUserType.type:
+                assert (default_constructor := interpret_variable.getMethods(CONSTRUCTOR_METHOD_NAME, False)) is not None, powang_error_identifier_not_found(
+                    where, 'default constructor')
+                interpret_variable = callMethod(where, interpret_variable, CONSTRUCTOR_METHOD_NAME, default_constructor[0], [])
+            else:
+                assignWithChecks(where, interpret_variable, right_value)
             ScopeStack.new_variable(expr_value['identifier']['value'], interpret_variable)
             return interpret_variable
 
@@ -496,8 +376,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 )
 
             assign_value = evaluateAstExpression(expr_value['expression'])
-            assignWithChecks(where, assign_target_value, assign_value)
-            return assign_value
+            return assignWithChecks(where, assign_target_value, assign_value)
 
         case ParserTokenType.ARRAY_EXPRESSION:
             array_expr_elements = expr_value['elements']
@@ -679,19 +558,17 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             assert target.type == PowangUserType.type, powang_error_syntax(where, "Invalid access", [
                 f"{target.type} cannot be accessed in any way or has no properties"
             ])
-            
-            assert target.defined, powang_error_undefined_reference(where, expr_value['target']['value'])
             property_identifier = getValidIdentifier(where, expr_value['property'])
-            if len(ScopeStack.method_call_stack) > 0:
-                if (property_value := target.private_props.get(property_identifier)) is None:
-                    assert (property_value := target.data.get(property_identifier)) is not None, \
-                        powang_error_identifier_not_found(where, property_identifier)
-            else:
-                assert (property_value := target.data.get(property_identifier)) is not None, \
-                    powang_error_identifier_not_found(
-                        where, property_identifier, [
-                            "perhaps it is a private property?"
-                    ])
+            assert target.defined, powang_error_undefined_reference(where, expr_value['target']['value'])
+            assert target.weak.has_value, powang_error_format("VALUE", where, f"Invalid access", [
+                f"Trying to access property {property_identifier} from a nova weak {target.type_name}"
+            ])
+            
+            is_private: bool = len(ScopeStack.method_call_stack) > 0
+            property_value = target.getProperty(property_identifier, is_private)
+            assert property_value is not None, powang_error_identifier_not_found(where, property_identifier, [
+                "perhaps it is a private property?"
+            ] if is_private else [])
             return property_value
 
         case ParserTokenType.METHOD_CALL:
@@ -701,13 +578,18 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     f"but trying to call from a {owner_value.type}"      
             ])
             
+            assert (match_methods := owner_value.getMethods(expr_value['method']['value'], len(ScopeStack.method_call_stack) > 0)) is not None, powang_error_identifier_not_found(
+                where, f"method: {expr_value['method']['value']}", [
+                    "perhaps is a private method?"
+                ])
             call_parameters = [evaluateAstExpression(call_arg) for call_arg in expr_value['arguments']]
+            method_candidate = getFunctionCandidate(match_methods, call_parameters)
             return callMethod(
                 where,
                 owner_value,
                 expr_value['method']['value'],
+                method_candidate,
                 call_parameters,
-                len(ScopeStack.method_call_stack) > 0
             )
     return PowangNova()
 
