@@ -121,8 +121,6 @@ class Parser:
                             methods.append((is_public, statement))
                     self.advance()
 
-                    from icecream import ic
-
                     if not has_default_constructor:
                         methods.append((True, doToken(ParserTokenType.DECLARATION_FUN, {
                             'identifier': self.simulate_Identifier(CONSTRUCTOR_METHOD_NAME),
@@ -348,6 +346,7 @@ class Parser:
 
     def UnaryExpression(self):
         return self.helper_UnaryExpression((
+            LexerTokenType.EXCLAMATION,
             LexerTokenType.OPERATOR_MINUS,
             LexerTokenType.OPERATOR_PLUS,
             LexerTokenType.OPERATOR_SUMATORY,
@@ -372,23 +371,36 @@ class Parser:
             elif self.next.type == LexerTokenType.LEFT_BRACKET:
                 expr = self.IndexExpression(expr)
             elif self.next.type == LexerTokenType.DOT:
-                expr = self.AccessExpression(expr)
-                if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+                self.advance() # DOT
+                # FAKE METHOD CALL
+                if self.next.type == LexerTokenType.DOT:
+                    self.advance() # DOT
+                    expr = self.AccessExpression(expr)
                     call_expression = self.CallExpression(expr['value']['property'])
                     expr = doToken(
-                        ParserTokenType.METHOD_CALL, {
-                            "owner"    : expr['value']['target'],
-                            "method"   : call_expression['value']['callee'],
-                            "arguments": call_expression['value']['arguments'] 
+                        ParserTokenType.CALL_EXPRESSION, {
+                            "callee"   : call_expression['value']['callee'],
+                            "arguments": [expr['value']['target']] + call_expression['value']['arguments']
                         }
                     ).toDict()
+                else:
+                    expr = self.AccessExpression(expr)
+                    if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+                        call_expression = self.CallExpression(expr['value']['property'])
+                        expr = doToken(
+                            ParserTokenType.METHOD_CALL, {
+                                "owner"    : expr['value']['target'],
+                                "method"   : call_expression['value']['callee'],
+                                "arguments": call_expression['value']['arguments'] 
+                            }
+                        ).toDict()
             else:
                 break
         return expr
 
     def CallExpression(self, callee: DictRepr):
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
-        args = []
+        args: list[DictRepr] = []
         while self.next is not None and self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
             args.append(self.Expression())
             # if self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
@@ -410,7 +422,6 @@ class Parser:
         }).toDict()
 
     def AccessExpression(self, target: DictRepr):
-        self.consume(LexerTokenType.DOT)
         prop = self.Identifier()
         return doToken(ParserTokenType.ACCESS_EXPRESSION, {
             "target": target,

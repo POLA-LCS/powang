@@ -94,15 +94,18 @@ def main(args: list[str]):
             powang_throw(f"ln: {program_parser.tokenizer.row + 1} | " + ass.args[0])
             
 if __name__ == "__main__":
+    exit_code: int = 0
     try:
-        exit(main(argv[1:]))
+        result = main(argv[1:])
+        if result is not None:
+            exit_code = result
     except AssertionError as ass:
         print(ass)
-        exit(1)
     except KeyboardInterrupt as kinter:
         print()
         print(powang_error_format("KEYBOARD", "User input", "Keyboard interrupt"))
-        exit(2)
     except FileNotFoundError as ferror:
         print(powang_error_format("INPUT", "File read", f"File not founded: {ferror.filename}"))
-        exit(3)
+    while (keys := list(FILE_STREAMS.keys())):
+        FILE_STREAMS.pop(keys[-1])
+    exit(exit_code)

@@ -87,6 +87,7 @@ class ParserTokenType(TokenTypeBase):
     ASSIGNMENT              = auto()
     ACCESS_EXPRESSION       = auto()
     METHOD_CALL             = auto()
+    FAKE_METHOD_CALL        = auto()
     KEY_VALUE_PAIR          = auto()
     IF_STATEMENT            = auto()
     FOR_STATEMENT           = auto()
