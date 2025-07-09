@@ -15,11 +15,11 @@ class ScopeType(Enum):
 class ScopeStack:
     return_value: PowangAny | None = None
     important: list[ScopeType] = [ScopeType.GLOBAL]
-    method_call_stack: list[PowangUserType] = []
+    method_call_stack: list[PowangObjectType] = []
 
     variables: list[dict[str, PowangAny          ]]  = [{}]
     functions: list[dict[str, list[PowangFunction]]] = [{}]
-    userTypes: list[dict[str, PowangUserType     ]]  = [{}]
+    ObjectTypes: list[dict[str, PowangObjectType     ]]  = [{}]
 
     @staticmethod
     def get_variable(name: str) -> Optional[PowangAny]:
@@ -36,18 +36,18 @@ class ScopeStack:
         return None
 
     @staticmethod
-    def get_userType(name: str) -> PowangUserType | None:
-        for scope in ScopeStack.userTypes[::-1]:
+    def get_ObjectType(name: str) -> PowangObjectType | None:
+        for scope in ScopeStack.ObjectTypes[::-1]:
             if (type := scope.get(name)) is not None:
                 return type
         return None
     
     @staticmethod
-    def get_existingUserType(name: str) -> PowangUserType:
-        assert (value := ScopeStack.get_userType(name)) is not None, powang_error_identifier_not_found("user type get", name, [
+    def get_existingObjectType(name: str) -> PowangObjectType:
+        assert (value := ScopeStack.get_ObjectType(name)) is not None, powang_error_identifier_not_found("object type", name, [
             "user type doesn't exists"
         ])
-        return value
+        return PowangCopyConstructObjectType(value)
 
     @staticmethod
     def new_variable(name: str, value: PowangAny):
@@ -60,8 +60,8 @@ class ScopeStack:
         return value
 
     @staticmethod
-    def new_userType(name: str, value: PowangUserType):
-        ScopeStack.userTypes[-1][name] = value
+    def new_ObjectType(name: str, value: PowangObjectType):
+        ScopeStack.ObjectTypes[-1][name] = value
         return value
         
     @staticmethod
@@ -70,7 +70,7 @@ class ScopeStack:
             ScopeStack.important.pop()
         ScopeStack.variables.pop()
         ScopeStack.functions.pop()
-        ScopeStack.userTypes.pop()
+        ScopeStack.ObjectTypes.pop()
         return True
 
     @staticmethod
@@ -79,5 +79,5 @@ class ScopeStack:
             ScopeStack.important.append(scope_type)
         ScopeStack.variables.append({})
         ScopeStack.functions.append({})
-        ScopeStack.userTypes.append({})
+        ScopeStack.ObjectTypes.append({})
         return True

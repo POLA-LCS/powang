@@ -43,9 +43,3 @@ def builtin_input(receptor: PowangAny = PowangString()):
     if receptor.const:
         receptor.const.can_change = False
     return receptor
-
-def builtin_system(prompt: PowangAny):
-    assert prompt.type == PowangString.type, powang_error_type_match("builtin: system", PowangString.type, prompt.type)
-    
-    from subprocess import run
-    return PowangInteger(run(prompt.data, shell=True).returncode)

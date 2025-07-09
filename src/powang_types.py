@@ -135,7 +135,7 @@ class PowangBoolean(PowangTypeBase):
             result.data = len(right.data) > 0
         # elif right.type == PowangNova.type:
         #     result.data = False
-        # elif right.type == PowangUserType.type:
+        # elif right.type == PowangObjectType.type:
         #     result.data = right.methods['boolean']().data # type: ignore
         return result
 
@@ -437,7 +437,7 @@ class PowangFunction(PowangTypeBase):
 # ====== USER TYPES =========
 CONSTRUCTOR_METHOD_NAME: Literal['constructor'] = 'constructor'
 
-class PowangUserType(PowangTypeBase): # user defined types
+class PowangObjectType(PowangTypeBase): # user defined types
     type_name: str = 'object'
     data: dict[str, 'PowangAny'] = {}  # public props
     type: Literal['type'] = 'type'
@@ -475,6 +475,16 @@ class PowangUserType(PowangTypeBase): # user defined types
             return match_property
         return self.data.get(property_name)
 
+from typing import TextIO
+class PowangFileStream(PowangTypeBase):
+    data: str
+    type: Literal['file'] = 'file'
+
+    def __init__(self, data: PowangString, mode: PowangString):
+        super().__init__(data)
+        self.mode = mode
+        self.text_io: Optional[TextIO] = None
+
 # ====== ANY =========
 PowangAny = Union[
     PowangNova,      # None
@@ -486,7 +496,7 @@ PowangAny = Union[
     PowangArray,     # list
     PowangMap,       # dict
     PowangFunction,  # FunctionType
-    PowangUserType,  # object
+    PowangObjectType,  # object
 ]
 
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
@@ -500,17 +510,19 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangArray.type     : PowangArray,
         PowangMap.type       : PowangMap,
         PowangFunction.type  : PowangFunction,
-        PowangUserType.type  : PowangUserType,
+        PowangObjectType.type  : PowangObjectType,
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:
+    if any.type == PowangObjectType.type:
+        return PowangCopyConstructObjectType(any)
     value = PowangTypeMap(any.type)(any.data)
     value.weak = any.weak
     value.const = any.const
     return value
 
-def PowangCopyConstructUserType(anyType: PowangUserType) -> PowangUserType:
-    value = PowangUserType(
+def PowangCopyConstructObjectType(anyType: PowangObjectType) -> PowangObjectType:
+    value = PowangObjectType(
         anyType.data,
         anyType.private_props,
         anyType.public_meths,

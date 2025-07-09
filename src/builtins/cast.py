@@ -3,7 +3,7 @@ from ..error import *
 
 def explicitCastString(left: PowangAny) -> Optional[PowangString]:
     if not left.defined:
-        return PowangString(f'<{left.type if left.type != PowangUserType.type else left.type_name}: undefined>')
+        return PowangString(f'<{left.type if left.type != PowangObjectType.type else left.type_name}: undefined>')
     if not left.weak.has_value or left.type == PowangNova.type:
         return PowangString('nova')
 
