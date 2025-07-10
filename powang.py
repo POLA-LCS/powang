@@ -1,13 +1,4 @@
 from src import *
-import json
-
-def get_file_content(path: str) -> str:
-    with open(path, 'r', encoding='utf-8') as file:
-        content = file.read()
-        if not content.endswith('\n'):
-            content = content + '\n'
-        return content
-
 from sys import argv
 
 def print_usage():
@@ -21,6 +12,9 @@ def print_usage():
 
 def inicialize_repl():
     print('repl not implemented yet')
+
+import pathlib
+PATHS['ABSOLUTE'] = pathlib.Path(__file__).resolve()
 
 def arguments_handler(args: list[str]):
     input_file: str | None = None
@@ -46,6 +40,8 @@ def arguments_handler(args: list[str]):
             raise powang_throw(powang_error_format('USAGE', None, 'Input already provided', [input_file]))
         else:
             input_file = arg
+    
+            
     if ast_output is not None:
         assert ast_output, powang_error_format('USAGE', None, 'dump output was nos provided')
     return input_file, ast_output
@@ -61,37 +57,12 @@ def main(args: list[str]):
     input_file, ast_output = result
 
     if input_file:
+        PATHS['RELATIVE'] = Path(input_file).resolve()
         content = get_file_content(input_file)
-
-        program_parser = Parser(content)
-        try:
-            program_raw_ast = program_parser.parse()
-            interpretation_result = interpret_program(program_raw_ast)
-
-            if ast_output:
-                def make_json_serializable(raw_ast):
-                    if isinstance(raw_ast, dict):
-                        return {
-                            key: make_json_serializable(value)
-                            for key, value in raw_ast.items()
-                        }
-                    elif isinstance(raw_ast, (LexerTokenType, ParserTokenType)):
-                        return TokenToString(raw_ast).upper()
-                    elif isinstance(raw_ast, (list, tuple)):
-                        return [make_json_serializable(item) for item in raw_ast]
-                    else:
-                        return raw_ast
-                    
-                ast_dict = make_json_serializable(program_raw_ast)
-
-                with open(ast_output, 'w', encoding='utf-8') as json_ast:
-                    json_ast.write(json.dumps(ast_dict, indent=4, ensure_ascii=False))
-                    
-            if isinstance(interpretation_result, (int, float)):
-                return int(interpretation_result)
-            return -1
-        except AssertionError as ass:
-            powang_throw(f"ln: {program_parser.tokenizer.row + 1} | " + ass.args[0])
+        interpretation_result = interpret_program(content, ast_output)
+        if isinstance(interpretation_result, (int, float)):
+            return int(interpretation_result)
+        return -1
             
 if __name__ == "__main__":
     exit_code: int = 0

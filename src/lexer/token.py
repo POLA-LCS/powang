@@ -28,6 +28,11 @@ class LexerTokenType(TokenTypeBase):
     OPERATOR_CAST_AS    = auto() # as
     OPERATOR_ASSIGNMENT = auto() # =
 
+    OPERATOR_ASSIGNMENT_PLUS  = auto() # +=
+    OPERATOR_ASSIGNMENT_MINUS = auto() # -=
+    OPERATOR_ASSIGNMENT_STAR  = auto() # *=
+    OPERATOR_ASSIGNMENT_SLASH = auto() # /=
+
     # Group punctuation
     LEFT_PARENTHESIS  = auto() # (
     RIGHT_PARENTHESIS = auto() # )
@@ -37,7 +42,7 @@ class LexerTokenType(TokenTypeBase):
     RIGHT_BRACE       = auto() # }
 
     # Symbols
-    ARROW       = auto() # =>
+    ARROW       = auto() # >>
     EXCLAMATION = auto() # !
     ARROBA      = auto() # @
     STAR        = auto() # *
@@ -95,6 +100,7 @@ class ParserTokenType(TokenTypeBase):
     RETURN_EXPRESSION       = auto()
     TYPE_ALIAS              = auto()
     TYPE_DECLARATION        = auto()
+    USE_EXPRESSION          = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

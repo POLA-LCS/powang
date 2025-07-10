@@ -1,0 +1,88 @@
+type high_array {
+	- data: array = [];
+	- datatypes: array = [];
+	
+	- fun checkType(item: some!): boolean {
+		return item :: T;
+	}
+	
+	- fun assertType(where: string!, item: some!): nova {
+		if T :: 
+		if this.datatypes == ["any"] return nova;
+		if !this.checkType(item) {
+			error("tarray element type is not the same.",
+				"in {0}"..format(where),
+				"expected {0}"..format(this.datatypes),
+				"encountered {0}"..format(typeof(item)),
+			);
+		}
+	}
+
+	+ fun constructor(data: array!) {
+		if size(data) > 0 {
+			return this.constructor([typeof(data[0])], data);
+		}
+	}
+
+	+ fun constructor(datatype: string!, data: array = []) {
+		return this.constructor([datatype], data);
+	}
+
+	+ fun constructor(datatypes: array!, data: array = []) {
+		for datatype: string! >> datatypes {
+			if datatype == "numeric" {
+				this.datatypes += ["integer", "number"];
+			} else {
+				this.datatypes += [datatype];
+			}
+		}
+		for item: @some >> data {
+			this.assertType("constructor", item);
+			this.data += [item];
+		}
+	}
+	
+	+ fun push(element: some) {
+		this.assertType("push", element);
+		this.data += [element];
+	}
+
+	+ fun pop(size: integer = 1): array {
+		if size <= 0 {
+			error("pop size must be greater than zero", "in pop");
+		}
+		
+		popped: array = [];
+		for i: integer = size(this.data) - 1; i >= size(this.data) - size; i -= 1 {
+			popped += [this.data[i]];
+		}
+		this.data = this.data - size;
+
+		return popped;
+	}
+
+	+ fun split(by: integer): tarray {
+		return [this.data / by];
+	}
+
+	+ fun toString(): string {
+		return format("[{1} | {0/, }]", this.data, this.datatypes);
+	}
+
+	+ fun index(idx: integer): some {
+		if idx < 0 || idx >= size(this.data) {
+			error("Index out of range",
+				"[0; {1}) but encountered {0}"..format(idx as string, size(this.data))
+			);
+		}
+		return this.data[idx];
+	}
+
+	+ fun iter(): array! {
+		return this.data;
+	}
+
+	+ fun getType(): array! {
+		return this.datatypes;
+	}
+}

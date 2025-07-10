@@ -39,11 +39,15 @@ class Tokenizer:
         r'>>'  : (LexerTokenType.ARROW, None),
         r'>'   : (LexerTokenType.COMPARE_GTR, None),
         
+        r'\+='    : (LexerTokenType.OPERATOR_ASSIGNMENT_PLUS, None),
+        r'\-='    : (LexerTokenType.OPERATOR_ASSIGNMENT_MINUS, None),
+        r'\*='    : (LexerTokenType.OPERATOR_ASSIGNMENT_STAR, None),
+        r'\/='    : (LexerTokenType.OPERATOR_ASSIGNMENT_SLASH, None),
+        
         r':'   : (LexerTokenType.COLON, None),
         r'!'   : (LexerTokenType.EXCLAMATION, None),
         r'='   : (LexerTokenType.OPERATOR_ASSIGNMENT, None),
 
-        
         r'\[\+\]' : (LexerTokenType.OPERATOR_SUMATORY, None),
         r'\[\-\]' : (LexerTokenType.OPERATOR_INVERSE, None),
         r'\+'     : (LexerTokenType.OPERATOR_PLUS , None),
