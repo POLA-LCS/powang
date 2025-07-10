@@ -440,7 +440,7 @@ CONSTRUCTOR_METHOD_NAME: Literal['constructor'] = 'constructor'
 class PowangObjectType(PowangTypeBase): # user defined types
     type_name: str = 'object'
     data: dict[str, 'PowangAny'] = {}  # public props
-    type: Literal['type'] = 'type'
+    type: Literal['object'] = 'object'
  
     private_props  : dict[str, 'PowangAny']
     public_meths : dict[str, list[PowangFunction]]
@@ -466,8 +466,8 @@ class PowangObjectType(PowangTypeBase): # user defined types
 
     def getMethods(self, method_name: str, private: bool) -> Optional[list[PowangFunction]]:
         public_methods = self.public_meths.get(method_name)
-        if private and (match_methods := self.private_meths.get(method_name)) is not None:
-            return match_methods + public_methods if public_methods is not None else []
+        if private and (private_methods := self.private_meths.get(method_name)) is not None:
+            return private_methods + (public_methods if public_methods is not None else [])
         return public_methods
 
     def getProperty(self, property_name: str, private: bool) -> Optional['PowangAny']:
@@ -487,30 +487,30 @@ class PowangFileStream(PowangTypeBase):
 
 # ====== ANY =========
 PowangAny = Union[
-    PowangNova,      # None
-    PowangSome,      # Any
-    PowangBoolean,   # bool
-    PowangInteger,   # int
-    PowangNumber,    # float
-    PowangString,    # str
-    PowangArray,     # list
-    PowangMap,       # dict
-    PowangFunction,  # FunctionType
-    PowangObjectType,  # object
+    PowangNova,       # None
+    PowangSome,       # Any
+    PowangBoolean,    # bool
+    PowangInteger,    # int
+    PowangNumber,     # float
+    PowangString,     # str
+    PowangArray,      # list
+    PowangMap,        # dict
+    PowangFunction,   # FunctionType
+    PowangObjectType, # object
 ]
 
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
     return {
-        PowangNova.type      : PowangNova,
-        PowangSome.type      : PowangSome,
-        PowangInteger.type   : PowangInteger,
-        PowangNumber.type    : PowangNumber,
-        PowangBoolean.type   : PowangBoolean,
-        PowangString.type    : PowangString,
-        PowangArray.type     : PowangArray,
-        PowangMap.type       : PowangMap,
-        PowangFunction.type  : PowangFunction,
-        PowangObjectType.type  : PowangObjectType,
+        PowangNova.type       : PowangNova,
+        PowangSome.type       : PowangSome,
+        PowangInteger.type    : PowangInteger,
+        PowangNumber.type     : PowangNumber,
+        PowangBoolean.type    : PowangBoolean,
+        PowangString.type     : PowangString,
+        PowangArray.type      : PowangArray,
+        PowangMap.type        : PowangMap,
+        PowangFunction.type   : PowangFunction,
+        PowangObjectType.type : PowangObjectType,
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:

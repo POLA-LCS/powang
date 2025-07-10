@@ -15,6 +15,10 @@ NATI_TYPES: set[str] = {
 USER_TYPES = set[str]()
 TYPE_ALIAS: dict[str, DictRepr] = {}
 
+from pathlib import Path
+
+PATHS = dict[str, Path]()
+
 class Parser:
     def __init__(self, data: str):
         self.data = data
@@ -54,89 +58,27 @@ class Parser:
                         type = self.Type()
                         TYPE_ALIAS[identifier['value']] = type['value']
                         return None
-                    assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
-                        TokenToString(ParserTokenType.TYPE_DECLARATION),
-                        identifier['value'], [
-                            "a powang native type"
-                        ]
-                    )
-                    assert identifier['value'] not in TYPE_ALIAS, powang_error_redefined(
-                        TokenToString(ParserTokenType.TYPE_DECLARATION),
-                        identifier['value'], [
-                            f"a type alias for {TYPE_ALIAS[identifier['value']]['value']}"
-                        ]
-                    )
-                    assert identifier['value'] not in {'true', 'false'}, powang_error_redefined(
-                        TokenToString(ParserTokenType.TYPE_DECLARATION),
-                        identifier['value'], [
-                            f"which is a literal boolean value"
-                        ]
-                    )
-                    
-                    self.consume(LexerTokenType.LEFT_BRACE)
-                    properties: list[tuple[bool, DictRepr]] = []
-                    has_default_constructor: bool = False
-                    methods   : list[tuple[bool, DictRepr]] = []
-                    while self.next.type != LexerTokenType.RIGHT_BRACE:
-                        assert self.next.type in {
-                            LexerTokenType.OPERATOR_PLUS,
-                            LexerTokenType.OPERATOR_MINUS
-                        },  powang_error_syntax_unexpected_token(
-                            TokenToString(ParserTokenType.TYPE_DECLARATION),
-                            TokenToString(self.next.type),
-                            'privacy operator + or -'
-                        )
-                        
-                        is_public: bool = self.next.type == LexerTokenType.OPERATOR_PLUS
-                        self.advance()
-                        statement = self.ExpressionStatement()
-                        assert statement is not None, powang_error_syntax('type declaration', "Reached end of file")
-                        if statement['type'] in {
-                            ParserTokenType.DECLARATION_UNDEFINED,
-                            ParserTokenType.DECLARATION_TYPED_VAR
-                        }:  properties.append((is_public, statement))
-                        elif statement['type'] == ParserTokenType.DECLARATION_FUN:
-                            fun_identifier = statement['value']['identifier']
-                            fun_return     = statement['value']['return']
-                            if fun_identifier['value'] == CONSTRUCTOR_METHOD_NAME:
-                                assert is_public, powang_error_format('LOGIC', 'constructor declaration', "Type constructor must be public")
-                                if len(statement['value']['args']) == 0:
-                                    has_default_constructor = True
-                                # Sets the default constructor return type to the object type
-                                if fun_return is None:
-                                    statement['value']['return'] = self.simulate_Type(identifier['value'], False, False)
-                                else:
-                                    # Check if the return type matches the object type
-                                    assert fun_return['value']['value'] == identifier['value'], powang_error_format(
-                                        'LOGIC', 'constructor declaration', 'Return type must be the object type', [
-                                            f'expected {identifier['value']}',
-                                            f'but {fun_return['value']['value']} was encountered'
-                                        ]
-                                    )
-                                
-                                # Return "this" default return
-                                statement['value']['block']['value'].append(
-                                    doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')
-                                ).toDict())
-                            methods.append((is_public, statement))
-                    self.advance()
+                    return self.helper_typeObjectDeclaration(identifier)
+                case 'use':
+                    if self.next.type == LexerTokenType.IDENTIFIER:
+                          module_path = PATHS['ABSOLUTE'].parent / 'modules' / self.Identifier()['value']
+                    else: module_path = PATHS['RELATIVE'].parent / Path(self.StringLiteral()['value'])
 
-                    if not has_default_constructor:
-                        methods.append((True, doToken(ParserTokenType.DECLARATION_FUN, {
-                            'identifier': self.simulate_Identifier(CONSTRUCTOR_METHOD_NAME),
-                            'args': [],
-                            'min_argc': 0,
-                            'return': self.simulate_Type(identifier['value'], False, False),
-                            'block': doToken(ParserTokenType.BLOCK_STATEMENT, [
-                                doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')).toDict(),
-                            ]).toDict()
-                        }).toDict()))
+                    self.consume(LexerTokenType.SEMI_COLON)
+                    modules: list[str] = []
 
-                    return doToken(ParserTokenType.TYPE_DECLARATION, {
-                        'identifier' : identifier,
-                        'properties' : properties,
-                        'methods'    : methods,
-                    }).toDict()
+                    try:
+                        if module_path.is_dir():
+                            for path in module_path.iterdir():
+                                with open(path) as file:
+                                    modules.append(file.read())
+                        else:
+                            assert module_path != Path(__name__), powang_error_format("IMPORT", 'module using', "Is importing the same module")
+                            with open(module_path) as file:
+                                modules = [file.read()]
+                    except FileNotFoundError:
+                        assert False, powang_error_format("MODULE", 'using', f"Can't find the module: {module_path}")
+                    return doToken(ParserTokenType.USE_EXPRESSION, modules).toDict()
                 case _:
                     raise NotImplementedError(f"{keyword} not implemented yet.")
         else:
@@ -144,8 +86,116 @@ class Parser:
             self.consume(LexerTokenType.SEMI_COLON)
             return expression
 
+    def helper_typeObjectDeclaration(self, identifier: DictRepr):
+        assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
+            TokenToString(ParserTokenType.TYPE_DECLARATION),
+            identifier['value'], [
+                "a powang native type"
+            ]
+        )
+        assert identifier['value'] not in TYPE_ALIAS, powang_error_redefined(
+            TokenToString(ParserTokenType.TYPE_DECLARATION),
+            identifier['value'], [
+                f"a type alias for {TYPE_ALIAS[identifier['value']]['value']}"
+            ]
+        )
+        assert identifier['value'] not in {'true', 'false'}, powang_error_redefined(
+            TokenToString(ParserTokenType.TYPE_DECLARATION),
+            identifier['value'], [
+                f"which is a literal boolean value"
+            ]
+        )
+        
+        self.consume(LexerTokenType.LEFT_BRACE)
+        properties: list[tuple[bool, DictRepr]] = []
+        has_default_constructor: bool = False
+        methods   : list[tuple[bool, DictRepr]] = []
+        while self.next.type != LexerTokenType.RIGHT_BRACE:
+            assert self.next.type in {
+                LexerTokenType.OPERATOR_PLUS,
+                LexerTokenType.OPERATOR_MINUS
+            },  powang_error_syntax_unexpected_token(
+                TokenToString(ParserTokenType.TYPE_DECLARATION),
+                TokenToString(self.next.type),
+                'privacy operator + or -'
+            )
+            
+            is_public: bool = self.next.type == LexerTokenType.OPERATOR_PLUS
+            self.advance()
+            statement = self.ExpressionStatement()
+            assert statement is not None, powang_error_syntax('type declaration', "Reached end of file")
+            if statement['type'] in {
+                ParserTokenType.DECLARATION_UNDEFINED,
+                ParserTokenType.DECLARATION_TYPED_VAR
+            }:  properties.append((is_public, statement))
+            elif statement['type'] == ParserTokenType.DECLARATION_FUN:
+                fun_identifier = statement['value']['identifier']
+                fun_return     = statement['value']['return']
+                if fun_identifier['value'] == CONSTRUCTOR_METHOD_NAME:
+                    assert is_public, powang_error_format('LOGIC', 'constructor declaration', "Type constructor must be public")
+                    if len(statement['value']['args']) == 0:
+                        has_default_constructor = True
+                    # Sets the default constructor return type to the object type
+                    if fun_return is None:
+                        statement['value']['return'] = self.simulate_Type(identifier['value'], False, False)
+                    else:
+                        # Check if the return type matches the object type
+                        assert fun_return['value']['value'] == identifier['value'], powang_error_format(
+                            'LOGIC', 'constructor declaration', 'Return type must be the object type', [
+                                f'expected {identifier['value']}',
+                                f'but {fun_return['value']['value']} was encountered'
+                            ]
+                        )
+                    
+                    # Return "this" default return
+                    statement['value']['block']['value'].append(
+                        doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')
+                    ).toDict())
+                methods.append((is_public, statement))
+        self.advance()
+
+        if not has_default_constructor:
+            methods.append((True, doToken(ParserTokenType.DECLARATION_FUN, {
+                'identifier': self.simulate_Identifier(CONSTRUCTOR_METHOD_NAME),
+                'args': [],
+                'min_argc': 0,
+                'return': self.simulate_Type(identifier['value'], False, False),
+                'block': doToken(ParserTokenType.BLOCK_STATEMENT, [
+                    doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')).toDict(),
+                ]).toDict()
+            }).toDict()))
+
+        return doToken(ParserTokenType.TYPE_DECLARATION, {
+            'identifier' : identifier,
+            'properties' : properties,
+            'methods'    : methods,
+        }).toDict()
+
     def Statement(self):
-        expr = self.Expression()
+        expr = self.Expression()        
+
+        if self.next.type in {
+            LexerTokenType.OPERATOR_ASSIGNMENT_PLUS,
+            LexerTokenType.OPERATOR_ASSIGNMENT_MINUS,
+            LexerTokenType.OPERATOR_ASSIGNMENT_STAR,
+            LexerTokenType.OPERATOR_ASSIGNMENT_SLASH,
+        }:
+            operator = self.advance()
+            value = self.Expression()
+            return doToken(ParserTokenType.ASSIGNMENT, {
+                "target": expr,
+                "expression": doToken(ParserTokenType.BINARY_EXPRESSION, {
+                    "left": expr,
+                    "operator": LexerToken({
+                        LexerTokenType.OPERATOR_ASSIGNMENT_PLUS: LexerTokenType.OPERATOR_PLUS,
+                        LexerTokenType.OPERATOR_ASSIGNMENT_MINUS: LexerTokenType.OPERATOR_MINUS,
+                        LexerTokenType.OPERATOR_ASSIGNMENT_STAR: LexerTokenType.STAR,
+                        LexerTokenType.OPERATOR_ASSIGNMENT_SLASH: LexerTokenType.SLASH,
+                    }[operator.type], operator.value[:-1]).toDict(),
+                    "right": value,
+                    "typed": False,
+                }).toDict(),
+            }).toDict()
 
         # Si el próximo token es "=", esto es una asignación
         if self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
@@ -154,9 +204,8 @@ class Parser:
 
             return doToken(ParserTokenType.ASSIGNMENT, {
                 "target": expr,
-                "expression": value
+                "expression": value,
             }).toDict()
-
         return expr
     
     def isNextKeyword(self, keyword: str):

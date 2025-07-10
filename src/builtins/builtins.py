@@ -11,6 +11,7 @@ BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
     'output': (1, -1, builtin_output),
     'format': (1, -1, builtin_format),
     'printf': (1, -1, builtin_printf),
+    'error' : (1, -1, builtin_error),
 
     # INPUT
     'input' : (0,  1, builtin_input ),
@@ -24,5 +25,6 @@ BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
     # FILE IO
     'open' : (1, 2, builtin_open),
     'close': (1, 1, builtin_close),
-    'write': (1, -1, builtin_write)
+    'write': (1, 1, builtin_write),
+    'read' : (1, 1, builtin_read),
 }

@@ -62,7 +62,7 @@ def builtin_format(
         return string_args[index]
 
     result = PowangString()
-    result.data = PowangString(re.sub(r"\{(\d+)\*([^}]*)\}", replace_handler_iterate, format_string.data)).data
+    result.data = PowangString(re.sub(r"\{(\d+)\/([^}]*)\}", replace_handler_iterate, format_string.data)).data
     result.data = PowangString(re.sub(r"\{(\d+)\}", replace_handler, result.data)).data
     return result
     
@@ -70,3 +70,12 @@ def builtin_printf(
     format_string: PowangString | PowangAny,
     *args: PowangAny,
 ):  return builtin_output(builtin_format(format_string, *args))
+
+def builtin_error(
+    message: PowangString | PowangAny,
+    *args: PowangString,
+):  
+    assert message.type == PowangString.type, powang_error_type_match('builtin: error, message', PowangString.type, message.type)
+    for arg in args:
+        assert arg.type == PowangString.type, powang_error_type_match('builtin: error, argument', PowangString.type, arg.type)
+    raise powang_throw(powang_error_format("USER", 'builtin: error', message.data, [arg.data for arg in args]))

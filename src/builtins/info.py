@@ -21,4 +21,6 @@ def builtin_size(*args: PowangAny):
     return size_result
 
 def builtin_typeof(arg: PowangAny):
+    if arg.type == PowangSome.type:
+        return PowangString(arg.some)    
     return PowangString(arg.type)

@@ -1,0 +1,41 @@
+type high_map {
+	- data: map = [];
+
+	+ fun constructor(data: map) {
+		this.data = data;
+	}
+
+	+ fun constructor(data: array) {
+		for key_value: array! >> data {
+			this.data += [
+				key_value[0] >> key_value[1]
+			];
+		}
+	}
+
+	+ fun add(key: some, value: @some = nova): nova {
+		this.data += [key >> value];
+	}
+
+	+ fun get(key: some): @some {
+		for key_value: array! >> this.data as array {
+			if key == key_value[0] {
+				return key_value[1];
+			}
+		}
+		return nova;
+	}
+
+	+ fun pop(key: some): boolean {
+		if this.get(key) != nova {
+			new_dict: array = [];
+			element: some;
+			for key_value: array! >> this.data as array if key != key_value[0] {
+				new_dict += key_value;
+			}
+			this.data = new_dict as map;
+			return true;
+		}
+		return false;
+	}
+}
