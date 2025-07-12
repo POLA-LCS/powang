@@ -250,7 +250,7 @@ class Parser:
         
         if start_expression['type'] == ParserTokenType.DECLARATION_UNDEFINED:
             if_expression: DictRepr | None = None
-            if self.next.type == LexerTokenType.ARROW:
+            if self.next.type == LexerTokenType.RIGHT_ARROW:
                 self.advance()
                 iterable_expression = self.Expression()
                 if self.next.type == LexerTokenType.KEYWORD:
@@ -379,7 +379,7 @@ class Parser:
     def helper_BinaryExpression(self, next_level: Callable[[], DictRepr], operators: tuple[LexerTokenType, ...]):
         left = next_level()
         while self.next and self.next.type in operators:
-            operator = self.consume(self.next.type)
+            operator = self.advance()
             typed = False
             if self.next.type == LexerTokenType.COLON:
                 self.consume(self.next.type)
@@ -538,7 +538,7 @@ class Parser:
                     self.consume(LexerTokenType.COLON)
                     return self.VariableDeclaration(identifier)
                 return identifier
-        return self.Literal()
+        return self.Literal('primary expression')
 
     def ParenthesizedExpression(self):
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
@@ -555,7 +555,7 @@ class Parser:
             expr = self.Expression()
             if is_map:
                 expr = self.helper_KeyValuePair(expr)
-            elif self.next.type == LexerTokenType.ARROW:
+            elif self.next.type == LexerTokenType.RIGHT_ARROW:
                 assert len(elements) == 0, powang_error_syntax('Container Expression', 'Trying to do a mix up of array and map', [
                     "the array has elements before pair key-value appeared"
                 ])
@@ -590,50 +590,53 @@ class Parser:
         return doToken(ParserTokenType.BLOCK_STATEMENT, statements).toDict()
 
     def Type(self):
-        weak = False
-        const = False
+        weak = const = False
+
+        # TODO: Try the walrus notation for the weak = True and const = True
         if self.next.type == LexerTokenType.ARROBA:
-            self.consume(LexerTokenType.ARROBA)
+            self.advance('type prefix')
             weak = True
-            
+
         type_identifier: str = self.Identifier()['value']
-        if type_identifier in TYPE_ALIAS:
-            type_identifier = TYPE_ALIAS[type_identifier]['value']
 
         if weak: assert type_identifier != PowangNova.type, powang_error_format(
             "LOGIC", 'type notation', "A nova type can't be weak", [
                 "this has no sense"
         ])
-
-        if self.next.type == LexerTokenType.EXCLAMATION:
-            self.consume(LexerTokenType.EXCLAMATION)
-            const = True
             
+        if self.next.type == LexerTokenType.EXCLAMATION:
+            self.advance('type postfix')
+            const = True
+
+        if type_identifier in TYPE_ALIAS:
+            alias = TYPE_ALIAS[type_identifier]
+            if weak: assert not alias['weak'], powang_error_format('LOGIC', 'type notation', 'Weak notation in a weak type alias', [
+                f"type alias {type_identifier} already refers to a weak {alias['value']}"
+            ])
+            weak = alias['weak']
+            if const: assert not alias['CONST'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
+                f"type alias {type_identifier} already refers to a constant {alias['value']}"
+            ])
+            const = alias['weak']
+            type_identifier = alias['value']
+        
         return doToken(ParserTokenType.TYPE, {
             "value": type_identifier,
             "weak": weak,
             "const": const,    
-        }).toDict()
-
-    def TypedIdentifier(self):
-        identifier = self.Identifier()
-        self.consume(LexerTokenType.COLON)
-        type = self.Type()
-        return doToken(ParserTokenType.PAIR_TYPE_IDENTIFIER, {
-            'identifier': identifier,
-            'type': type,
+            "reference": None # TODO
         }).toDict()
 
     def helper_KeyValuePair(self, key: DictRepr):
-        self.consume(LexerTokenType.ARROW)
+        self.consume(LexerTokenType.RIGHT_ARROW)
         value = self.Expression()
         return doToken(ParserTokenType.KEY_VALUE_PAIR, {
             "key": key,
             "value": value,
         }).toDict()
 
-    def Literal(self):
-        assert self.next is not None, powang_error_syntax_unexpected_end(None, self.tokenizer)
+    def Literal(self, where: Optional[str] = None):
+        assert self.next is not None, powang_error_syntax_unexpected_end(where, self.tokenizer)
         match self.next.type:
             case LexerTokenType.NOVA_LITERAL:
                 return self.NovaLiteral()
@@ -646,9 +649,9 @@ class Parser:
             case LexerTokenType.STRING_LITERAL:
                 return self.StringLiteral()
         raise powang_throw(powang_error_syntax_unexpected_token(
-            None,
+            where,
             LexerTokenType.toStr(self.next.type),
-            'Literal',
+            'literal',
         ))
 
     def NovaLiteral(self):
@@ -675,8 +678,8 @@ class Parser:
         token.value = token.value.encode('utf-8').decode('unicode_escape')
         return token.toDict(token.value)
 
-    def advance(self):
-        return self.consume(self.next.type)
+    def advance(self, where: Optional[str] = None):
+        return self.consume(self.next.type, where)
 
     def consume(self, token_type: LexerTokenType, where: Optional[str] = None):
         token = self.next
