@@ -42,7 +42,7 @@ class LexerTokenType(TokenTypeBase):
     RIGHT_BRACE       = auto() # }
 
     # Symbols
-    ARROW       = auto() # >>
+    RIGHT_ARROW       = auto() # >>
     EXCLAMATION = auto() # !
     ARROBA      = auto() # @
     STAR        = auto() # *

@@ -5,6 +5,8 @@ from .builtins import *
 from .scopestack import ScopeType, ScopeStack
 from .lexer import *
 
+from icecream import ic as log
+
 def getValidIdentifier(where: str, identifier: DictRepr) -> str:
     identifier_name = evaluateAstExpression(identifier, True)
     assert isinstance(identifier_name, str), powang_error_syntax_unexpected_token(
@@ -12,6 +14,8 @@ def getValidIdentifier(where: str, identifier: DictRepr) -> str:
     return identifier_name
 
 def getUndefinedVariable(where: str, type_expression: DictRepr):
+    if type_expression['value'] in TYPE_ALIAS:
+        type_expression = TYPE_ALIAS[type_expression['value']]
     if type_expression['value'] in NATI_TYPES:
         undefined_right_value = PowangTypeMap(type_expression['value'])()
     else:
@@ -68,10 +72,9 @@ def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> P
     return PowangCopyConstruct(right_value)
 
 def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny, force_object_assign: bool):
-
     if right_value.type == PowangSome.type:
         right_value = PowangTypeMap(right_value.some)(right_value.data)
-
+    
     if target_value.const:
         assert not target_value.defined or target_value.const.can_change, powang_error_format(
             "CONST", where, "Trying to assign to a strong const", [
@@ -238,16 +241,16 @@ def callFunction(where: str, callee: str, candidate: PowangFunction, call_parame
     for call_statement in candidate.data:
         evaluateAstExpression(call_statement)
         if ScopeStack.return_value is not None:
-            return_value = ScopeStack.return_value
+            return_value = PowangCopyConstruct(ScopeStack.return_value)
             ScopeStack.return_value = None
             break
     ScopeStack.pop()
-
+    
     return_expression_value = getUndefinedVariable(where, candidate.return_expr)
     assignWithChecks(f'function return: {callee}', return_expression_value, return_value,
         areSameObjectType(return_expression_value, return_value)
     )
-
+    
     ScopeStack.pop()
     return return_expression_value
 
@@ -304,9 +307,9 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     return PowangBoolean(not PowangBoolean.cast(unary_right).data)
                 case '[-]':
                     if unary_right.type == PowangInteger.type:
-                        return explicitCastinteger(PowangString(explicitCaststring(unary_right).data[::-1])) # type: ignore
+                        return explicitCastinteger(PowangString(explicitCastString(unary_right).data[::-1])) # type: ignore
                     if unary_right.type == PowangNumber.type:
-                        return explicitCastnumber(PowangString(explicitCaststring(unary_right).data[::-1])) # type: ignore
+                        return explicitCastNumber(PowangString(explicitCastString(unary_right).data[::-1])) # type: ignore
                     if unary_right.type == PowangString.type:
                         return PowangString(unary_right.data[::-1])
                     if unary_right.type == PowangArray.type:
@@ -321,69 +324,59 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
 
         case ParserTokenType.BINARY_EXPRESSION:
             binary_operator = expr_value['operator']['value']
-            binary_right = expr_value['right']['value']
-            binary_left = expr_value['left']['value']
-            left_as_type: Optional[str] = getValidType(binary_left)
-            right_as_type: Optional[str] = getValidType(binary_right)
-            
-            if binary_operator == 'as':
-                assert left_as_type is None, powang_error_format('VALUE', where, f"You can't cast the literal type: {binary_left}")
-                binary_left_value = evaluateAstExpression(expr_value['left'])
-                if binary_left_value.type == PowangSome.type:
-                    binary_left_value = PowangTypeMap(binary_left_value.some)(binary_left_value.data)
-                    
-                if right_as_type is None:
-                    assert (user_type := ScopeStack.get_ObjectType(binary_right)) is not None, powang_error_identifier_type(where, binary_right)
-                    check_result = checkObjectTypes(where, user_type, binary_left_value)
-                    return check_result
-
-                # EXPLICIT CASTING
-                assert (binary_casted := explicitCast(right_as_type, binary_left_value)) is not None, powang_error_invalid_cast(
-                    None,
-                    right_as_type,
-                    binary_left_value.type,
-                    True,
-                )
-                binary_value = PowangCopyConstruct(binary_casted)
-                return binary_value
-
+            binary_left = evaluateAstExpression(expr_value['left'])
             if binary_operator in {'::', '!:'}:
-                if left_as_type is None:
-                    binary_left_value = evaluateAstExpression(expr_value['left'])
-                if right_as_type is None:
-                    binary_right_value = evaluateAstExpression(expr_value['right'])
                 
-                type_condition: bool = (
-                    left_as_type
-                    if left_as_type is not None else
-                    binary_left_value.type_name # type: ignore
-                ) == (
-                    right_as_type
-                    if right_as_type else
-                    binary_right_value.type_name # type: ignore
-                )
+                type_condition: bool = True
+                if expr_value['right']['type'] == ParserTokenType.TYPE:
+                    if expr_value['right']['value']['weak']:
+                        type_condition = type_condition and binary_left.weak.it_is
+                    if expr_value['right']['value']['const']:
+                        type_condition = type_condition and binary_left.const.it_is
+                else:
+                    binary_right = evaluateAstExpression(expr_value['right'])
+                    if binary_right.weak:
+                        type_condition = type_condition and binary_left.weak.it_is
+                    if binary_right.const:
+                        type_condition = type_condition and binary_left.const.it_is
 
                 if binary_operator == '::':
                     return PowangBoolean(type_condition)
                 return PowangBoolean(not type_condition)
+                
+            binary_right = expr_value['right']['value']
+            if binary_operator == 'as':
+                if binary_left.type == PowangSome.type:
+                    binary_left = PowangTypeMap(binary_left.some)(binary_left.data)
                     
-            elif binary_operator in {'&&', '||'}:
-                assert left_as_type is None, powang_error_unsupported_operation(where, f'type: {left_as_type}', '&& or || operator', None)
-                assert right_as_type is None, powang_error_unsupported_operation(where, f'type: {left_as_type}', '&& or || operator', None)
+                if binary_right in TYPE_ALIAS:
+                    binary_right = TYPE_ALIAS[binary_right]['value']
+                if binary_right not in NATI_TYPES:
+                    assert (user_type := ScopeStack.get_ObjectType(binary_right)) is not None, powang_error_identifier_type(where, binary_right)
+                    check_result = checkObjectTypes(where, user_type, binary_left)
+                    return check_result
 
+                # EXPLICIT CASTING
+                assert (binary_casted := explicitCast(binary_right, binary_left)) is not None, powang_error_invalid_cast(
+                    None,
+                    binary_right,
+                    binary_left.type,
+                    True,
+                )
+                binary_value = PowangCopyConstruct(binary_casted)
+                return binary_value
+ 
+            binary_right = evaluateAstExpression(expr_value['right'])
+            if binary_operator in {'&&', '||'}:
                 if binary_operator == '&&':
                     if not PowangBoolean.cast(binary_left).data:
                         return PowangBoolean(False)
-                    return PowangBoolean.cast(evaluateAstExpression(expr_value['right']))
+                    return PowangBoolean.cast(binary_right)
                 if PowangBoolean.cast(binary_left).data:
                     return PowangBoolean(True)
-                return PowangBoolean.cast(evaluateAstExpression(expr_value['right']))
+                return PowangBoolean.cast(binary_right)
 
-            assert left_as_type is None, powang_error_unsupported_operation(where, f'type: {left_as_type}', 'any value operator', None)
-            assert right_as_type is None, powang_error_unsupported_operation(where, f'type: {left_as_type}', 'any value operator', None)
-            binary_left_value = evaluateAstExpression(expr_value['left'])
-            binary_right_value = evaluateAstExpression(expr_value['right'])
-            return performOperation(binary_operator, binary_left_value, binary_right_value, expr_value['typed'])
+            return performOperation(binary_operator, binary_left, binary_right, expr_value['typed'])
 
         case ParserTokenType.DECLARATION_UNDEFINED:
             undefined_identifier = getValidIdentifier(where, expr_value['identifier'])
@@ -481,20 +474,19 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             if_block = expr_value['block']
             if_else_block = expr_value['else']
 
-            result: PowangAny = PowangNova()
-            if ScopeStack.push() and PowangBoolean.cast(evaluateAstExpression(if_expr)).data:
+            if ScopeStack.push() and not PowangBoolean.cast(evaluateAstExpression(if_expr)).data:
+                if if_else_block is not None:
+                      if_block['value'] = if_else_block['value']
+                else: if_block = None
+                    
+            if if_block is not None:
                 ScopeStack.push()
                 for if_statement in if_block['value']:
-                    result = evaluateAstExpression(if_statement)
-                ScopeStack.pop()
-            elif if_else_block is not None:
-                ScopeStack.push()
-                for if_statement in if_else_block['value']:
                     evaluateAstExpression(if_statement)
+                    if ScopeStack.return_value is not None:
+                        break
                 ScopeStack.pop()
             ScopeStack.pop()
-            ScopeStack.pop()
-            return result
 
         case ParserTokenType.FOR_STATEMENT:
             for_start_expression = expr_value['start_expression']
@@ -526,7 +518,6 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                     if for_last_expression is not None:
                         evaluateAstExpression(for_last_expression)
                 ScopeStack.pop()
-            return PowangNova()
 
         case ParserTokenType.FOR_EACH_STATEMENT:
             for_each_iterable_expression = expr_value['expression']
@@ -546,7 +537,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 if not running:
                     break
 
-                ScopeStack.push()
+                ScopeStack.push() # iterator assignment
                 iterator = evaluateAstExpression(for_each_iterator_expression)
                 assignWithChecks('for each', iterator, current_item, False)
                 if expr_value['if_expression'] is not None:
@@ -554,7 +545,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                         ScopeStack.pop()
                         continue
 
-                ScopeStack.push()
+                ScopeStack.push() # for block statement
                 for for_each_statement in for_each_block['value']:
                     evaluateAstExpression(for_each_statement)
                     if ScopeStack.return_value is not None:
@@ -588,7 +579,6 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                         f"remember, type qualifiers such as const does not determine function signatures, same with return types"
                     ])
 
-
             if expr_value['return'] is None:
                 expr_value['return'] = doToken(ParserTokenType.TYPE, {
                     'value': PowangNova.type,
@@ -611,8 +601,9 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
 
             ScopeStack.important.pop()
             return_expr_value = evaluateAstExpression(expr_value)
+            if return_expr_value.type == PowangSome.type:
+                return_expr_value = PowangTypeMap(return_expr_value.some)(return_expr_value.data)
             ScopeStack.return_value = PowangCopyConstruct(return_expr_value)
-            return PowangNova()
 
         case ParserTokenType.TYPE_DECLARATION:
             identifier = getValidIdentifier(where, expr_value['identifier'])
