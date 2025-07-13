@@ -326,13 +326,14 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             binary_operator = expr_value['operator']['value']
             binary_left = evaluateAstExpression(expr_value['left'])
             if binary_operator in {'::', '!:'}:
-                
                 type_condition: bool = True
-                if expr_value['right']['type'] == ParserTokenType.TYPE:
-                    if expr_value['right']['value']['weak']:
-                        type_condition = type_condition and binary_left.weak.it_is
-                    if expr_value['right']['value']['const']:
-                        type_condition = type_condition and binary_left.const.it_is
+                if expr_value['right']['type'] == LexerTokenType.IDENTIFIER:
+                    type_condition = expr_value['right']['value'] == binary_left.type_name
+
+                    # if expr_value['right']['value']['weak']:
+                    #     type_condition = type_condition and binary_left.weak.it_is
+                    # if expr_value['right']['value']['const']:
+                    #     type_condition = type_condition and binary_left.const.it_is
                 else:
                     binary_right = evaluateAstExpression(expr_value['right'])
                     if binary_right.weak:
