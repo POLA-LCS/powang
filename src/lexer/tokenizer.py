@@ -5,7 +5,7 @@ from .token import LexerTokenType, LexerToken
 
 class Tokenizer:
     Keywords: set[str] = {
-        'if', 'else', 'for', 'fun', 'return', 'use', 'type'
+        'if', 'else', 'for', 'fun', 'return', 'use', 'type', 'extern'
     }
     
     RegexPatterns: dict[

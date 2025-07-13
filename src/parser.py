@@ -53,32 +53,16 @@ class Parser:
                     return doToken(ParserTokenType.RETURN_EXPRESSION, self.Expression()).toDict()
                 case 'type':
                     identifier = self.Identifier()
-                    if self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
+                    if self.next.type == LexerTokenType.RIGHT_ARROW:
                         self.advance()
                         type = self.Type()
                         TYPE_ALIAS[identifier['value']] = type['value']
                         return None
-                    return self.helper_typeObjectDeclaration(identifier)
+                    return self.helper_TypeObjectDeclaration(identifier)
                 case 'use':
-                    if self.next.type == LexerTokenType.IDENTIFIER:
-                          module_path = PATHS['ABSOLUTE'].parent / 'modules' / self.Identifier()['value']
-                    else: module_path = PATHS['RELATIVE'].parent / Path(self.StringLiteral()['value'])
-
-                    self.consume(LexerTokenType.SEMI_COLON)
-                    modules: list[str] = []
-
-                    try:
-                        if module_path.is_dir():
-                            for path in module_path.iterdir():
-                                with open(path) as file:
-                                    modules.append(file.read())
-                        else:
-                            assert module_path != Path(__name__), powang_error_format("IMPORT", 'module using', "Is importing the same module")
-                            with open(module_path) as file:
-                                modules = [file.read()]
-                    except FileNotFoundError:
-                        assert False, powang_error_format("MODULE", 'using', f"Can't find the module: {module_path}")
-                    return doToken(ParserTokenType.USE_EXPRESSION, modules).toDict()
+                    return self.helper_UseModule()
+                case 'extern':
+                    return self.helper_ExternSignature()
                 case _:
                     raise NotImplementedError(f"{keyword} not implemented yet.")
         else:
@@ -86,7 +70,50 @@ class Parser:
             self.consume(LexerTokenType.SEMI_COLON)
             return expression
 
-    def helper_typeObjectDeclaration(self, identifier: DictRepr):
+    def helper_ExternSignature(self):
+        if self.isNextKeyword('fun'):
+            self.advance()
+            powang_mapping = self.helper_FunDeclaration()
+            assert powang_mapping['value']['block']['value'] is None, powang_error_syntax('extern function', "Expected function signature but function definition was encountered")
+        else:
+            assert self.isNextKeyword('type'), powang_error_syntax('extern signature', "There's only external functions and types", [
+                f"encountered: {TokenToString(self.next.type)}"
+            ])
+            self.advance()
+            identifier = self.Identifier()
+            powang_mapping = self.helper_TypeObjectDeclaration(identifier, True)
+            assert powang_mapping['value']['properties'] is None, powang_error_syntax('extern type', "Expected type signature but type definition was encountered")
+            powang_mapping['value']['properties'] = []
+            powang_mapping['value']['methods'] = []
+        self.consume(LexerTokenType.RIGHT_ARROW, 'extern mapping')
+        python_value = self.StringLiteral()
+        return doToken(ParserTokenType.EXTERN_REFERENCE, {
+            "powang": powang_mapping,
+            "python": python_value['value'],
+        }).toDict()
+
+    def helper_UseModule(self):
+        if self.next.type == LexerTokenType.IDENTIFIER:
+                module_path = PATHS['ABSOLUTE'].parent / 'modules' / self.Identifier()['value']
+        else: module_path = PATHS['RELATIVE'].parent / Path(self.StringLiteral()['value'])
+
+        self.consume(LexerTokenType.SEMI_COLON)
+        modules: list[str] = []
+
+        try:
+            if module_path.is_dir():
+                for path in module_path.iterdir():
+                    with open(path) as file:
+                        modules.append(file.read())
+            else:
+                assert module_path != Path(__name__), powang_error_format("IMPORT", 'module using', "Is importing the same module")
+                with open(module_path) as file:
+                    modules = [file.read()]
+        except FileNotFoundError:
+            assert False, powang_error_format("MODULE", 'using', f"Can't find the module: {module_path}")
+        return doToken(ParserTokenType.USE_EXPRESSION, modules).toDict()
+
+    def helper_TypeObjectDeclaration(self, identifier: DictRepr, is_signature: bool = False):
         assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
@@ -106,10 +133,17 @@ class Parser:
             ]
         )
         
-        self.consume(LexerTokenType.LEFT_BRACE)
+        if is_signature:
+            return doToken(ParserTokenType.TYPE_DECLARATION, {
+                'identifier' : identifier,
+                'properties' : None,
+                'methods'    : None,
+            }).toDict()  
+        
         properties: list[tuple[bool, DictRepr]] = []
-        has_default_constructor: bool = False
         methods   : list[tuple[bool, DictRepr]] = []
+        self.consume(LexerTokenType.LEFT_BRACE)
+        has_default_constructor: bool = False
         while self.next.type != LexerTokenType.RIGHT_BRACE:
             assert self.next.type in {
                 LexerTokenType.OPERATOR_PLUS,
@@ -329,7 +363,10 @@ class Parser:
         if self.next.type == LexerTokenType.COLON:
             self.advance()
             return_expr = self.Type()
-        block = self.BlockStatement()
+        if self.next.type == LexerTokenType.LEFT_BRACE:
+            block = self.BlockStatement()
+        else:
+            block = doToken(ParserTokenType.BLOCK_STATEMENT, None).toDict()
         return doToken(ParserTokenType.DECLARATION_FUN, {
             "identifier": identifier,
             "args": args,
