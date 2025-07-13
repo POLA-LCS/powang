@@ -1,0 +1,5 @@
+extern fun sqrt(x: number): number >> "math.sqrt";
+extern fun log(x: number, base: number = 10): number >> "math.log";
+extern fun cos(angle: number): number >> "math.cos";
+extern fun sin(angle: number): number >> "math.sin";
+extern fun tan(angle: number): number >> "math.tan";

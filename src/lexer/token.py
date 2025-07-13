@@ -101,6 +101,7 @@ class ParserTokenType(TokenTypeBase):
     TYPE_ALIAS              = auto()
     TYPE_DECLARATION        = auto()
     USE_EXPRESSION          = auto()
+    EXTERN_REFERENCE         = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

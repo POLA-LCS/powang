@@ -1,11 +1,39 @@
-
 from .parser import *
 from .error import *
 from .builtins import *
 from .scopestack import ScopeType, ScopeStack
 from .lexer import *
 
-from icecream import ic as log
+import math
+
+EXTERNAL_FUNCTIONS: dict[str, tuple[PowangFunction, Callable]] = {}
+EXTERNAL_TYPES: dict[str, tuple[PowangObjectType, object]] = {}
+EXTERNAL_MODULES: set[str] = {
+    "math",
+}
+
+def getPowangFromPython(python_data: Any) -> PowangAny:
+    if python_data is None:
+        return PowangNova()
+    if isinstance(python_data, (list, tuple)):
+        return PowangArray([getPowangFromPython(d) for d in python_data])
+    if isinstance(python_data, dict):
+        return PowangMap({getPowangFromPython(key): getPowangFromPython(value) for key, value in python_data.items()})
+    powang_type: Optional[Callable[(...), PowangAny]] = {
+        int   : PowangInteger,
+        float : PowangNumber,
+        str   : PowangString,
+    }.get(type(python_data))
+    if powang_type is None:
+        return PowangNova()
+    return powang_type(python_data)
+
+def getPythonFromPowang(powang_data: PowangAny):
+    if powang_data.type == PowangArray.type:
+        return [getPythonFromPowang(d) for d in powang_data.data]
+    if powang_data.type == PowangMap.type:
+        return {getPythonFromPowang(key): getPythonFromPowang(value) for key, value in powang_data.data.items()}
+    return powang_data.data
 
 def getValidIdentifier(where: str, identifier: DictRepr) -> str:
     identifier_name = evaluateAstExpression(identifier, True)
@@ -74,7 +102,7 @@ def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> P
 def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny, force_object_assign: bool):
     if right_value.type == PowangSome.type:
         right_value = PowangTypeMap(right_value.some)(right_value.data)
-    
+
     if target_value.const:
         assert not target_value.defined or target_value.const.can_change, powang_error_format(
             "CONST", where, "Trying to assign to a strong const", [
@@ -219,7 +247,7 @@ def areSameObjectType(left: PowangAny, right: PowangAny):
         left.type_name == right.type_name
     )
 
-def callFunction(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
+def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
     ScopeStack.push(ScopeType.FUNCTION)
     for i, call_arg in enumerate(candidate.args):
         call_argument = evaluateAstExpression(call_arg)
@@ -235,6 +263,10 @@ def callFunction(where: str, callee: str, candidate: PowangFunction, call_parame
 
     for i, call_arg in enumerate(call_parameters):
         assert call_arg.defined, powang_error_undefined_argument(callee, i + 1, call_arg.type)
+    return None
+
+def callFunction(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
+    checkFunctionArguments(where, callee, candidate, call_parameters)
 
     return_value: PowangAny = PowangNova()
     ScopeStack.push(ScopeType.FUNCTION)
@@ -245,12 +277,12 @@ def callFunction(where: str, callee: str, candidate: PowangFunction, call_parame
             ScopeStack.return_value = None
             break
     ScopeStack.pop()
-    
+
     return_expression_value = getUndefinedVariable(where, candidate.return_expr)
     assignWithChecks(f'function return: {callee}', return_expression_value, return_value,
         areSameObjectType(return_expression_value, return_value)
     )
-    
+
     ScopeStack.pop()
     return return_expression_value
 
@@ -344,12 +376,12 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 if binary_operator == '::':
                     return PowangBoolean(type_condition)
                 return PowangBoolean(not type_condition)
-                
+
             binary_right = expr_value['right']['value']
             if binary_operator == 'as':
                 if binary_left.type == PowangSome.type:
                     binary_left = PowangTypeMap(binary_left.some)(binary_left.data)
-                    
+
                 if binary_right in TYPE_ALIAS:
                     binary_right = TYPE_ALIAS[binary_right]['value']
                 if binary_right not in NATI_TYPES:
@@ -366,7 +398,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 )
                 binary_value = PowangCopyConstruct(binary_casted)
                 return binary_value
- 
+
             binary_right = evaluateAstExpression(expr_value['right'])
             if binary_operator in {'&&', '||'}:
                 if binary_operator == '&&':
@@ -457,6 +489,19 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             call_callee = getValidIdentifier(where, expr_value['callee'])
             call_parameters = [evaluateAstExpression(call_arg) for call_arg in expr_value['arguments']]
 
+            if call_callee in EXTERNAL_FUNCTIONS:
+                function, external = EXTERNAL_FUNCTIONS[call_callee]
+                checkFunctionArguments(where, call_callee, function, call_parameters)
+                ScopeStack.pop()
+
+                if len(call_parameters) > 0:
+                    powang_data: list = [getPythonFromPowang(param) for param in call_parameters]
+                    external_return: Any = external(*powang_data)
+                else:
+                    external_return: Any = external()
+
+                return getPowangFromPython(external_return)
+
             if call_callee in BUILTINS:
                 call_min_argc, call_max_argc, call_func = BUILTINS[call_callee]
                 if call_max_argc != -1:
@@ -464,7 +509,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 assert len(call_parameters) >= call_min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
                 return call_func(*call_parameters)
 
-            elif (match_functions := ScopeStack.get_functions(call_callee)) is not None:
+            if (match_functions := ScopeStack.get_functions(call_callee)) is not None:
                 candidate = getFunctionCandidate(match_functions, call_parameters)
                 return callFunction(where, call_callee, candidate, call_parameters)
             raise powang_throw(powang_error_identifier_not_found(where, call_callee))
@@ -479,7 +524,7 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 if if_else_block is not None:
                       if_block['value'] = if_else_block['value']
                 else: if_block = None
-                    
+
             if if_block is not None:
                 ScopeStack.push()
                 for if_statement in if_block['value']:
@@ -682,6 +727,53 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
         case ParserTokenType.USE_EXPRESSION:
             for i, use in enumerate(expr_value):
                 interpret_program(use, None)
+
+        case ParserTokenType.EXTERN_REFERENCE:
+            powang = expr_value['powang']
+            python = expr_value['python']
+
+            attributes = python.split('.')
+
+            def getExtern(owner, attributes: list):
+                extern = owner.__getattribute__(attributes[0])
+                if len(attributes) > 1:
+                    return getExtern(extern, attributes[1:])
+                return extern
+
+            assert attributes[0] in EXTERNAL_MODULES, powang_error_format('MODULE', "extern" , 'Module is not allowed in the extern enviroment', [
+                f'module: {attributes[0]}'
+            ])
+
+            extern = globals()[attributes[0]]
+            if len(attributes) > 1:
+                extern = getExtern(extern, attributes[1:])
+
+            extern_signature = evaluateAstExpression(powang)
+
+            if powang['type'] == ParserTokenType.DECLARATION_FUN:
+                assert extern_signature.type == PowangFunction.type, powang_error_format('DEVELOPMENT', 'extern function', "Somehow you get here without a function")
+                EXTERNAL_FUNCTIONS[powang['value']['identifier']['value']] = (extern_signature, extern)
+            else:
+                # TODO: EXTERNAL TYPES
+                # assert extern_signature.type == PowangObjectType.type, powang_error_format('DEVELOPMENT', 'extern type', "Somehow you get here without a type")
+
+                # assert isinstance(extern, type), powang_error_format('EXTERN', 'extern type', f"{python} is not a object type", [
+                #     f"encountered: {type(extern)}"
+                # ])
+                
+                # from types import MemberDescriptorType, MethodDescriptorType
+                # properties: list[MemberDescriptorType] = []
+                # methods: list[MethodDescriptorType] = []                
+
+                # for key, value in extern.__dict__.items():
+                #     if not(key.startswith('__') or key.endswith('__')):
+                #         if type(value) == MethodDescriptorType:
+                #             methods.append(value)
+                #         else:
+                #             properties.append(value)
+                            
+                # EXTERNAL_TYPES[powang['value']['identifier']['value']] = (extern_signature, extern)
+                pass
     return PowangNova()
 
 def get_file_content(path: str) -> str:
@@ -711,7 +803,7 @@ def interpret_program(content: str, ast_output: str | None):
                     return [make_json_serializable(item) for item in raw_ast]
                 else:
                     return raw_ast
-                    
+
             ast_dict = make_json_serializable(program_raw_ast)
 
             with open(ast_output, 'w', encoding='utf-8') as json_ast:
