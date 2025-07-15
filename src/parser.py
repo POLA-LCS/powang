@@ -651,7 +651,7 @@ class Parser:
                 f"type alias {type_identifier} already refers to a weak {alias['value']}"
             ])
             weak = alias['weak']
-            if const: assert not alias['CONST'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
+            if const: assert not alias['const'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
                 f"type alias {type_identifier} already refers to a constant {alias['value']}"
             ])
             const = alias['weak']

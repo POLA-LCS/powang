@@ -222,7 +222,7 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
             elif match_arg_type == param.type:
                 candidates[func_index] += 3
             elif match_arg_type == PowangSome.type:
-                candidates[func_index] += 2
+                candidates[func_index] += 1
             elif match_arg_type in NATI_TYPES:
                 if PowangTypeCast(match_arg_type, param) is not None:
                     candidates[func_index] += 1
@@ -239,6 +239,7 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
                 candidates[func_index] += 1
         if max(candidates) == candidates[func_index]:
             max_index = func_index
+    
     return match_functions[max_index]
 
 def areSameObjectType(left: PowangAny, right: PowangAny):
@@ -360,7 +361,9 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
             if binary_operator in {'::', '!:'}:
                 type_condition: bool = True
                 if expr_value['right']['type'] == LexerTokenType.IDENTIFIER:
-                    type_condition = expr_value['right']['value'] == binary_left.type_name
+                    type_condition = expr_value['right']['value'] == (
+                        binary_left.type_name if binary_left.type != PowangSome.type else binary_left.some
+                    )
 
                     # if expr_value['right']['value']['weak']:
                     #     type_condition = type_condition and binary_left.weak.it_is
