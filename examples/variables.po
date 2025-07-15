@@ -1,0 +1,62 @@
+## This is a Powang example file
+## Variables
+
+## Datatypes
+## nova    -> Represents the abscense of a value.
+## boolean -> The classic true and false.
+## integer -> An integer number       | int64.
+## number  -> A floating point number | float64.
+## string  -> Not a array of chars, a string.
+## - Indexable.
+## - Sizeable.
+## array   -> A container with no item type assosiated.
+## - Indexable.
+## - Sizeable.
+## - Iterable.
+## map     -> A pair of key values 
+## - Indexable.
+
+## Declarations
+## Undefined
+undefined_variable: integer;
+output(undefined_variable "\n"); ## <integer: undefined>
+
+## Typed
+defined_variable: string = "Holaaa";
+output(defined_variable "\n"); ## Holaaa
+
+## Infered
+infered_variable := [10 20 30]; ## The commas are optional and just helps with ambiguity
+output(infered_variable "\n"); ## [10, 20, 30]
+
+## Implicit cast and explicit cast
+integer_variable: integer = 2.5; ## This implicitly cast into 2
+number_variable: number = 2;   ## This implicitly cast into 2.0
+## string_variable: string = 25  ## This throws a type error
+string_variable: string = 25 as string; ## This does not
+
+printf("{0} -> {1}\n", integer_variable typeof(integer_variable)); ## integer
+printf("{0} -> {1}\n", number_variable  typeof(number_variable )); ## number
+printf("{0} -> {1}\n", string_variable  typeof(string_variable )); ## string
+
+## Weak types
+## A weak type is a type that can have either the value of its type or nova
+weak_variable: @string = nova;
+printf("Weak: {0}\n" weak_variable "\n");
+
+weak_variable = "Holaaa";
+printf("Weak: {0}\n" weak_variable "\n");
+
+weak_variable = nova;
+printf("Weak: {0}\n" weak_variable "\n");
+
+## Const
+## Just a constant variable, cant be changed or reassigned so
+## const_integer: integer! = 10; ## const_integer = 20; ## throws const error
+## const_array: array! = 10; ## const_array += [20]; ## also throws const error
+
+## Undefined const variables can be defined but no reassigned
+undefined_const: number!;
+undefined_const = 6.9; ## This does not throws an error 
+output(undefined_const);
+## undefined_const = 4.2; ## This does
