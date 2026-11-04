@@ -75,6 +75,7 @@ Rules:
 - A reference lives for one call. It cannot be stored, returned, or sent to a task.
 - Arguments are still evaluated in the caller, and the parameter's operations use the
   normal type checks.
+References are call-scoped: they cannot be stored, returned, or sent to a task.
 
 ## Get started
 You need [Python3](https://www.python.org/) 3.12 or newer.
