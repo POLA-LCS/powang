@@ -66,12 +66,29 @@ dependency.
   builtin completion. It runs over standard input and output, so any LSP client can
   use it with the command `python tools/powang_lsp.py` from the repository root.
 
-Example Visual Studio Code configuration:
+The repository ships a ready-to-install Visual Studio Code extension under
+`editors/vscode/`. It contributes the `powang` language, the grammar and the
+language configuration (brackets, comments, indentation). To use it:
 
-```json
-{
-  "powang.lsp.command": ["python", "tools/powang_lsp.py"]
-}
+1. Open VS Code.
+2. Press `Ctrl+Shift+P`, run `Developer: Install Extension from Location...`, and
+   select the `editors/vscode` folder.
+3. Reload the window. Every `.po` file now opens with highlighting.
+
+The workspace `.vscode/settings.json` already maps `*.po` to `powang` and points at
+the grammar and the LSP server. It also recommends the **TextMate Languages** and
+**LSP Client** extensions, which VS Code prompts you to install on first open.
+
+For diagnostics and completion, install the **LSP Client** extension and let the
+workspace settings start `python tools/powang_lsp.py` from the repository root. The
+server publishes parser and type-checker diagnostics and keyword and builtin
+completion.
+
+For Vim, copy `syntax/powang.vim` into `~/.vim/syntax/` (or `~/vimfiles/syntax/`
+on Windows) and add:
+
+```vim
+autocmd BufRead,BufNewFile *.po set filetype=powang
 ```
 
 The server is intentionally small. It reports diagnostics and completions only; hover,
