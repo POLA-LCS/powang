@@ -55,11 +55,7 @@ Initally based on the lisp operators but later changed into a more natural langu
 
 ## Editor support
 
-Syntax highlighting, diagnostics and completion are provided without any third-party
-runtime dependency for the core tools. Some editor integrations need a small helper
-extension.
-
-### Syntax highlighting (no extensions needed for Vim and Sublime)
+### Syntax highlighting
 
 The repository ships a complete Visual Studio Code extension under `editors/vscode/`
 that contributes the `powang` language and its TextMate grammar. To use it:
@@ -103,20 +99,23 @@ It publishes parser and type-checker diagnostics and offers keyword and builtin
 completion.
 
 For Visual Studio Code, install the **Generic LSP Client (v2)** extension
-(marketplace id `zsol.vscode-glspc`). The workspace `.vscode/settings.json`
-already configures it:
+(marketplace id `zsol.vscode-glspc`). Then add this to your user or workspace
+`settings.json`:
 
 ```json
 {
   "files.associations": { "*.po": "powang" },
-  "glspc.server.command": "python ${workspaceFolder}/tools/powang_lsp.py",
-  "glspc.server.filetypes": ["powang"],
-  "glspc.server.rootUri": "${workspaceFolder}"
+  "glspc.server.command": "python",
+  "glspc.server.commandArguments": [
+    "C:/Users/you/Dev/Python/powang/tools/powang_lsp.py"
+  ],
+  "glspc.server.languageId": ["powang"]
 }
 ```
 
-Open the workspace in VS Code, install the recommended extension when prompted, and
-reload. Diagnostics and completion appear automatically for `.po` files.
+Replace the path with your actual checkout location. Open the workspace in VS Code,
+install the recommended extension when prompted, and reload. Diagnostics and
+completion appear automatically for `.po` files.
 
 If the extension is not available in your marketplace, any other generic LSP client
 extension works with the same command: `python tools/powang_lsp.py` from the
