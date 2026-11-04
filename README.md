@@ -53,7 +53,29 @@ Initally based on the lisp operators but later changed into a more natural langu
 | [`examples/tasks.po`](examples/tasks.po) | spawn and wait |
 | [`examples/references.po`](examples/references.po) | reference parameters that mutate the caller |
 
-## References
+## Editor support
+
+Syntax highlighting and diagnostics are provided without any third-party runtime
+dependency.
+
+- `syntax/powang.tmLanguage.json`: TextMate grammar usable in Visual Studio Code,
+  Sublime Text, GitHub Linguist and any editor that reads TextMate grammars.
+- `syntax/powang.vim`: Vim syntax file.
+- `tools/powang_lsp.py`: a minimal Language Server Protocol server. It publishes
+  diagnostics from the parser and the gradual type checker, and offers keyword and
+  builtin completion. It runs over standard input and output, so any LSP client can
+  use it with the command `python tools/powang_lsp.py` from the repository root.
+
+Example Visual Studio Code configuration:
+
+```json
+{
+  "powang.lsp.command": ["python", "tools/powang_lsp.py"]
+}
+```
+
+The server is intentionally small. It reports diagnostics and completions only; hover,
+rename and goto-definition are left for a future release.
 
 A parameter declared `&type` receives a reference to a variable, and the caller passes
 `&variable`. Reads and writes inside the function reach the caller's variable:
