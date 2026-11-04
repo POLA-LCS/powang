@@ -99,8 +99,8 @@ It publishes parser and type-checker diagnostics and offers keyword and builtin
 completion.
 
 For Visual Studio Code, install the **Generic LSP Client (v2)** extension
-(marketplace id `zsol.vscode-glspc`). Then add this to your user or workspace
-`settings.json`:
+(marketplace id `zsol.vscode-glspc`). Then add this to your **User** `settings.json`
+(not the workspace `.vscode/settings.json`, the extension reads user settings only):
 
 ```json
 {
@@ -113,9 +113,11 @@ For Visual Studio Code, install the **Generic LSP Client (v2)** extension
 }
 ```
 
-Replace the path with your actual checkout location. Open the workspace in VS Code,
-install the recommended extension when prompted, and reload. Diagnostics and
-completion appear automatically for `.po` files.
+Replace the path with your actual checkout location. The workspace `.vscode/settings.json`
+already maps `*.po` to `powang` via `files.associations`. The LSP configuration goes
+in your user settings because the extension reads user settings only. Open the workspace
+in VS Code, install the recommended extension when prompted, and reload. Diagnostics
+and completion appear automatically for `.po` files.
 
 If the extension is not available in your marketplace, any other generic LSP client
 extension works with the same command: `python tools/powang_lsp.py` from the
