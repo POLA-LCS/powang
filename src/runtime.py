@@ -266,7 +266,7 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
 
     if target_value.type == PowangSome.type:
         # PowangCopyConstruct handles types whose constructor signature is not
-        # (data,) — e.g. PowangFunction(args, data, return_expr).
+        # (data,) - e.g. PowangFunction(args, data, return_expr).
         target_value.data = PowangCopyConstruct(right_value).data
         target_value.some = right_value.type
 
