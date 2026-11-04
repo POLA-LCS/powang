@@ -110,6 +110,11 @@ def getPythonFromPowang(powang_data: PowangAny):
                 f"task {powang_data.task_id} cannot cross the extern boundary",
             ]
         ))
+    if powang_data.type == PowangReference.type:
+        raise powang_throw(powang_error_format(
+            'REFERENCE', 'extern boundary', "References cannot cross the extern boundary", [
+                "references live only for the duration of a Powang call",
+            ]))
     if powang_data.type == PowangFunction.type:
         ## A function value crossing into Python becomes a real callable. The
         ## HTTP server (and any other host callback) can then invoke Powang
@@ -263,6 +268,13 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
                 f"{right_value.type} -> {target_value.type}!"])
         target_value.const.can_change = False
 
+
+    if right_value.type == PowangReference.type:
+        raise powang_throw(powang_error_format(
+            'REFERENCE', where, "References cannot be stored", [
+                "a reference only lives for the duration of one call",
+                "use &variable directly as a &parameter argument",
+            ]))
 
     if target_value.type == PowangSome.type:
         # PowangCopyConstruct handles types whose constructor signature is not
@@ -447,6 +459,31 @@ def areSameObjectType(left: PowangAny, right: PowangAny):
 
 def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
     for i, call_arg in enumerate(candidate.args):
+        argument_value = call_arg.get('value') if isinstance(call_arg, dict) else None
+        param_type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
+        param_type = param_type_node.get('value') if isinstance(param_type_node, dict) else None
+        is_reference = isinstance(param_type, dict) and bool(param_type.get('reference'))
+
+        if is_reference:
+            if i >= len(call_parameters):
+                continue
+            parameter_name = argument_value.get('identifier', {}).get('value')
+            argument = call_parameters[i]
+            assert argument.type == PowangReference.type, powang_error_format(
+                'REFERENCE', 'function call', "Expected a reference argument", [
+                    f"parameter '{parameter_name}' is declared as &{param_type.get('value')}",
+                    "pass it as &variable",
+                    f"but {argument.type} was encountered",
+                ])
+            expected = param_type.get('value')
+            assert argument.target_type in {expected, PowangSome.type}, powang_error_format(
+                'REFERENCE', 'function call', "Reference type does not match", [
+                    f"expected &{expected}",
+                    f"but &{argument.target_type} was encountered",
+                ])
+            ScopeStack.new_variable(parameter_name, argument)
+            continue
+
         call_argument = evaluateAstExpression(call_arg)
 
         if i < len(call_parameters):
@@ -814,6 +851,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if is_identifier:
                 return expr_value
             if (identifier_value := ScopeStack.get_variable(expr_value)) is not None:
+                ## Reading a reference parameter yields the live target value.
+                if identifier_value.type == PowangReference.type:
+                    return identifier_value.get()
                 return identifier_value
             ## functions live on their own stack, fall back to them so
             ## function values can be referenced and inferred with :=
@@ -830,6 +870,26 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case LexerTokenType.STRING_LITERAL:
             return PowangString(expr_value)
+
+        case ParserTokenType.REFERENCE_EXPRESSION:
+            target_node = expr_value['target']
+            target_name = getValidIdentifier(where, target_node)
+            slot = ScopeStack.find_variable_slot(target_name)
+            if slot is None:
+                raise powang_throw(powang_error_identifier_not_found(where, target_name))
+            owner_scope, bound_value = slot
+            if bound_value.type == PowangReference.type:
+                raise powang_throw(powang_error_format(
+                    'REFERENCE', where, "Cannot take a reference to a reference", [
+                        f"'{target_name}' already holds a reference",
+                    ]))
+            if bool(bound_value.const):
+                raise powang_throw(powang_error_format(
+                    'REFERENCE', where, "Cannot take a reference to a constant", [
+                        f"'{target_name}' is constant",
+                        "references mutate the target, so the target must be assignable",
+                    ]))
+            return PowangReference(owner_scope, target_name, bound_value.type)
 
         case ParserTokenType.UNARY_EXPRESSION:
             unary_operator = expr_value['operator']['value']
@@ -1002,6 +1062,13 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     ))
 
             assign_value = evaluateAstExpression(expr_value['expression'])
+            ## Assignment through a reference parameter writes to the caller's
+            ## variable instead of rebinding the local parameter name.
+            if isinstance(assign_target, str) and assign_target_value.type == PowangReference.type:
+                referenced_value = assign_target_value.get()
+                assigned = assignWithChecks(where, referenced_value, assign_value, False)
+                assign_target_value.set(assigned)
+                return assigned
             return assignWithChecks(where, assign_target_value, assign_value, False)
 
         case ParserTokenType.ARRAY_EXPRESSION:

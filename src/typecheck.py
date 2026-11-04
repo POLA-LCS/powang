@@ -198,15 +198,28 @@ class _TypeChecker:
         if not isinstance(type_node, dict):
             return default
         inner = type_node.get('value')
+        reference = False
         if isinstance(inner, str):
             name = inner
+            reference = bool(type_node.get('reference'))
         elif isinstance(inner, dict):
             name = inner.get('value')
+            reference = bool(inner.get('reference'))
         else:
             return default
         if not isinstance(name, str) or not name:
             return default
-        return self._normalized_type_name(name)
+        resolved = self._normalized_type_name(name)
+        return f'&{resolved}' if reference else resolved
+
+    @staticmethod
+    def _annotation_reference(type_node: Any) -> bool:
+        if not isinstance(type_node, dict):
+            return False
+        inner = type_node.get('value')
+        if isinstance(inner, dict):
+            return bool(inner.get('reference', False))
+        return False
 
     @staticmethod
     def _annotation_weak(type_node: Any) -> bool:
@@ -229,6 +242,8 @@ class _TypeChecker:
     def _assignable(self, target: str, source: str, target_weak: bool = False) -> bool:
         if target == SOME or source == SOME:
             return True
+        if target.startswith('&') or source.startswith('&'):
+            return target == source
         if target == source:
             return True
         if source == NOVA:
@@ -330,6 +345,9 @@ class _TypeChecker:
         if node_type == ParserTokenType.POSTFIX_UNWRAP:
             return self._infer_unwrap(value)
 
+        if node_type == ParserTokenType.REFERENCE_EXPRESSION:
+            return self._infer_reference(value)
+
         if node_type == ParserTokenType.SPAWN_EXPRESSION:
             return self._infer_spawn(value)
 
@@ -364,6 +382,18 @@ class _TypeChecker:
         return SOME
 
     # ------------------------------------------------------------ expressions
+    def _infer_reference(self, value: Any) -> str:
+        """Type of `&name`: a reference to the target variable's type."""
+        if not isinstance(value, dict):
+            return SOME
+        name = self._identifier_name(value.get('target'))
+        if name is None:
+            return SOME
+        variable = self._lookup(name)
+        if variable is None or variable.type in (SOME, NOVA):
+            return SOME
+        return f'&{variable.type}'
+
     def _infer_identifier(self, name: Any) -> str:
         if not isinstance(name, str):
             return SOME
@@ -673,6 +703,15 @@ class _TypeChecker:
         declared_type = self._annotation_type(type_node)
         weak = self._annotation_weak(type_node)
         source_type = self._infer(value.get('expression'))
+        if isinstance(source_type, str) and source_type.startswith('&'):
+            self._error(
+                'references cannot be stored',
+                [
+                    'a reference only lives for the duration of one call',
+                    'use &variable directly as a &parameter argument',
+                ],
+                where='variable declaration',
+            )
         if not self._assignable(declared_type, source_type, weak):
             self._assign_error(
                 f'variable declaration: {name}' if name else 'variable declaration',
@@ -687,6 +726,15 @@ class _TypeChecker:
             return SOME
         name = self._identifier_name(value.get('identifier'))
         source_type = self._infer(value.get('expression'))
+        if isinstance(source_type, str) and source_type.startswith('&'):
+            self._error(
+                'references cannot be stored',
+                [
+                    'a reference only lives for the duration of one call',
+                    'use &variable directly as a &parameter argument',
+                ],
+                where='variable declaration',
+            )
         inferred_type = source_type if source_type else SOME
         self._bind(name or '', inferred_type, False, False)
         return inferred_type
@@ -696,6 +744,15 @@ class _TypeChecker:
             return SOME
         target = value.get('target')
         source_type = self._infer(value.get('expression'))
+        if isinstance(source_type, str) and source_type.startswith('&'):
+            self._error(
+                'references cannot be stored',
+                [
+                    'a reference only lives for the duration of one call',
+                    'use &variable directly as a &parameter argument',
+                ],
+                where='assignment',
+            )
         if not isinstance(target, dict):
             return source_type
 
@@ -958,7 +1015,18 @@ class _TypeChecker:
             arguments = value.get('args')
             if isinstance(arguments, list):
                 for argument in arguments:
-                    self._infer(argument)
+                    argument_value = argument.get('value') if isinstance(argument, dict) else None
+                    type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
+                    if self._annotation_reference(type_node):
+                        ## Inside the body a reference parameter behaves like
+                        ## the target variable's own type.
+                        name = self._identifier_name(argument_value.get('identifier'))
+                        bound_type = self._annotation_type(type_node)
+                        if bound_type.startswith('&'):
+                            bound_type = bound_type[1:]
+                        self._bind(name or '', bound_type, True, False)
+                    else:
+                        self._infer(argument)
             block = value.get('block')
             if isinstance(block, dict) and block.get('value') is not None:
                 self._infer(block)

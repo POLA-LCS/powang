@@ -615,6 +615,12 @@ class Parser:
         ))
 
     def helper_UnaryExpression(self, operators: tuple[LexerTokenType, ...]):
+        if self.next.type == LexerTokenType.AMPERSAND:
+            self.advance('reference expression')
+            target = self.Identifier()
+            return doToken(ParserTokenType.REFERENCE_EXPRESSION, {
+                "target": target,
+            }).toDict()
         if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'spawn':
             self.advance('spawn expression')
             spawned = self.UnaryExpression()
@@ -825,6 +831,11 @@ class Parser:
     def Type(self):
         weak = const = False
         error_union = False
+        reference = False
+
+        if self.next.type == LexerTokenType.AMPERSAND:
+            self.advance('reference type')
+            reference = True
 
         # TODO: Try the walrus notation for the weak = True and const = True
         if self.next.type == LexerTokenType.ARROBA:
@@ -832,6 +843,12 @@ class Parser:
             weak = True
 
         type_identifier: str = self.Identifier()['value']
+
+        if reference and weak:
+            raise powang_throw(powang_error_format(
+                "LOGIC", 'type notation', "A reference can't be weak", [
+                    "references point at an existing variable"
+                ]))
 
         if weak: assert type_identifier != PowangNova.type, powang_error_format(
             "LOGIC", 'type notation', "A nova type can't be weak", [
@@ -841,6 +858,12 @@ class Parser:
         if self.next.type == LexerTokenType.EXCLAMATION:
             self.advance('type postfix')
             const = True
+
+        if reference and const:
+            raise powang_throw(powang_error_format(
+                "LOGIC", 'type notation', "A reference can't be constant", [
+                    "references point at an existing variable"
+                ]))
 
         if type_identifier in self.type_alias:
             alias = self.type_alias[type_identifier]
@@ -865,7 +888,7 @@ class Parser:
             "weak": weak,
             "const": const,
             "error_union": error_union,
-            "reference": None # TODO
+            "reference": reference,
         }).toDict()
 
     def helper_KeyValuePair(self, key: DictRepr):

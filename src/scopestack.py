@@ -102,6 +102,9 @@ class _ScopeStackMeta(type):
     def get_variable(cls, name: str) -> Optional[PowangAny]:
         return _scope().get_variable(name)
 
+    def find_variable_slot(cls, name: str):
+        return _scope().find_variable_slot(name)
+
     def get_functions(cls, name: str) -> list[PowangFunction] | None:
         return _scope().get_functions(name)
 

@@ -21,7 +21,7 @@ Initally based on the lisp operators but later changed into a more natural langu
 - - [X] Define.
 - - [ ] Templates.
 - [X] A better lexical analysis.
-- [ ] References.
+- [X] References: `fun f(x: &integer)` with `f(&variable)`.
 - [X] Logical operators.
 - [X] Arithmetics (see [Arithmetic Operators](examples/arithmetics.po)).
 - [X] Error handling: `try`/`catch`/`finally`, `fail`, error unions `T?` and `?`.
@@ -51,6 +51,30 @@ Initally based on the lisp operators but later changed into a more natural langu
 | [`examples/modules.po`](examples/modules.po) | module namespaces, aliases and wildcard imports |
 | [`examples/stdlib.po`](examples/stdlib.po) | strings, json, url and crypto |
 | [`examples/tasks.po`](examples/tasks.po) | spawn and wait |
+| [`examples/references.po`](examples/references.po) | reference parameters that mutate the caller |
+
+## References
+
+A parameter declared `&type` receives a reference to a variable, and the caller passes
+`&variable`. Reads and writes inside the function reach the caller's variable:
+
+```po
+fun increment(value: &integer) {
+    value += 1;
+}
+
+x := 10;
+increment(&x);
+output(x);        ## 11
+```
+
+Rules:
+
+- References are explicit at the call site: `increment(&x)`, not `increment(x)`.
+- Only variables can be referenced. Constants are rejected.
+- A reference lives for one call. It cannot be stored, returned, or sent to a task.
+- Arguments are still evaluated in the caller, and the parameter's operations use the
+  normal type checks.
 
 ## Get started
 You need [Python3](https://www.python.org/) 3.12 or newer.

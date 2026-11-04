@@ -65,6 +65,7 @@ class LexerTokenType(TokenTypeBase):
     COMPARE_NEQ_TYPE  = auto() # !:
 
     AND  = auto() # &&
+    AMPERSAND = auto() # &
     OR = auto() # ||
 
     # Extra
@@ -101,6 +102,7 @@ class ParserTokenType(TokenTypeBase):
     USE_EXPRESSION          = auto()
     EXTERN_REFERENCE         = auto()
     SPAWN_EXPRESSION         = auto()
+    REFERENCE_EXPRESSION     = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

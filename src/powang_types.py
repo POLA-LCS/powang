@@ -557,6 +557,34 @@ class PowangErrorValue(PowangTypeBase):
         value.error = error
         return value
 
+# ====== REFERENCE =========
+class PowangReference(PowangTypeBase):
+    """A temporary reference to a variable slot.
+
+    References exist only for the duration of a call: `&name` creates one and a
+    parameter declared `&type` receives it. The owner is the scope dictionary
+    that holds the target binding, so reads and writes always see the live
+    value even when the caller's scope keeps running.
+    """
+
+    type: Literal['reference'] = 'reference'
+
+    def __init__(self, owner: dict[str, Any], name: str, target_type: str = 'some'):
+        super().__init__(None)
+        self.owner = owner
+        self.name = name
+        self.target_type = target_type
+        self.defined = True
+
+    def get(self) -> 'PowangAny':
+        return self.owner[self.name]
+
+    def set(self, value: 'PowangAny') -> None:
+        self.owner[self.name] = value
+
+    def __repr__(self) -> str:
+        return f"<reference: {self.name}>"
+
 # ====== MODULE =========
 class PowangModule(PowangTypeBase):
     """An immutable namespace produced by loading a Powang module.
@@ -625,6 +653,7 @@ PowangAny = Union[
     PowangErrorValue,  # catchable error value
     PowangModule,      # imported namespace
     PowangTask,        # running task handle
+    PowangReference,   # temporary variable reference
 ]
 
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
@@ -661,6 +690,10 @@ def PowangCopyConstruct(any: PowangAny) -> PowangAny:
     if any.type == PowangTask.type:
         # A task handle names one piece of running work. Copying it must not
         # duplicate or restart that work, so the reference is preserved.
+        return any
+    if any.type == PowangReference.type:
+        # A reference is an alias, not a value. Copying it must keep pointing
+        # at the same slot, so the reference itself is preserved.
         return any
     if any.type == PowangErrorValue.type:
         ## Preserve the structured payload (kind, message, details) across

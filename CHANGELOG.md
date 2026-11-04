@@ -6,6 +6,9 @@ All notable changes to powang are documented here.
 
 ### Added
 
+- Reference parameters: `fun f(x: &integer)` with explicit `f(&variable)` calls. Reads
+  and writes inside the function mutate the caller's variable, constants are rejected,
+  and references cannot be stored, returned, or sent to a task.
 - Gradual static type checker: annotated declarations, assignments, operators, calls
   and returns are verified; unannotated code stays dynamic and degrades to `some`.
 - `--check` (parse and check only) and `--no-check` (skip the static pass) modes.

@@ -38,6 +38,7 @@ class Tokenizer:
         
         r'\&\&' : (LexerTokenType.AND, None),
         r'\|\|' : (LexerTokenType.OR, None),
+        r'&'    : (LexerTokenType.AMPERSAND, None),
         r'::'   : (LexerTokenType.COMPARE_EQ_TYPE, None),
         r'!:'   : (LexerTokenType.COMPARE_NEQ_TYPE, None),
         r'=='   : (LexerTokenType.COMPARE_EQ, None),

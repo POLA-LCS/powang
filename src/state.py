@@ -50,6 +50,13 @@ class ScopeState:
                 return value
         return None
 
+    def find_variable_slot(self, name: str) -> tuple[dict[str, PowangAny], PowangAny] | None:
+        """Return the scope dictionary and live value holding ``name``."""
+        for scope in self.variables[::-1]:
+            if name in scope:
+                return scope, scope[name]
+        return None
+
     def get_functions(self, name: str) -> list[PowangFunction] | None:
         for scope in self.functions[::-1]:
             if (func := scope.get(name)) is not None:
