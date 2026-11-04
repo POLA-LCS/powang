@@ -1,0 +1,19 @@
+## HTTP client backed by src/stdlib_http.py.
+## Responses are maps with status (integer), headers (map of lowercase names
+## to values), body (string, UTF-8 with replacement), url (string) and
+## elapsed_ms (number). Non-2xx statuses are returned, not raised.
+## Failures raise a catchable [EXTERN ERROR] whose message starts with a kind
+## prefix: timeout:, dns:, connect:, tls:, protocol: or invalid url:.
+
+export extern fun get(url: string, headers: map = [], timeout_ms: integer = 10000, follow_redirects: boolean = true, verify_tls: boolean = true): map >> "stdlib_http.get";
+export extern fun post(url: string, body: string = "", headers: map = [], timeout_ms: integer = 10000, follow_redirects: boolean = true, verify_tls: boolean = true): map >> "stdlib_http.post";
+export extern fun request(method: string, url: string, body: string = "", headers: map = [], timeout_ms: integer = 10000, follow_redirects: boolean = true, verify_tls: boolean = true): map >> "stdlib_http.request";
+
+## In-process server (ADR-0001 W28). The handler receives a request map with
+## method, path, query, headers, body, remote_addr and request_id, and returns
+## a map with status, headers and body. serve blocks until stopped; listen
+## returns a per-run server id for stop. Options: workers (4), max_body_bytes
+## (1048576), read_timeout_ms (10000) and host ("127.0.0.1").
+export extern fun serve(port: integer, handler: some, options: map = []): nova >> "stdlib_http_server.serve";
+export extern fun listen(port: integer, handler: some, options: map = []): integer >> "stdlib_http_server.listen";
+export extern fun stop(server: integer): nova >> "stdlib_http_server.stop";

@@ -1,0 +1,63 @@
+## This is a Powang example file
+## Arithmetics
+
+## Operators
+## + -> Sum       | also array concatenation and logical or for booleans.
+## - -> Difference | also removes items from arrays and logical nand for booleans.
+## * -> Product   | also repeats strings and arrays, counts ocurrences on strings.
+## / -> Division  | floor division between integers, chunks strings and arrays,
+##                | splits strings and logical nand for booleans.
+
+## Integer arithmetic
+## The four basic operations between integers always return an integer.
+## Dividing by zero yields nova instead of throwing an error.
+output(7 + 3); ## 10
+output("\n");
+output(7 - 3); ## 4
+output("\n");
+output(7 * 3); ## 21
+output("\n");
+output(7 / 3); ## 2 (floor division)
+output("\n");
+output(7 / 0); ## nova
+output("\n");
+
+## Number arithmetic
+## Numbers are floating point values, division keeps the decimal part.
+output(1.5 + 1); ## 2.5
+output("\n");
+output(7.0 / 2.0); ## 3.5
+output("\n");
+
+## Implicit casts on arithmetic
+## An integer operand gets implicitly casted when the other side is a number.
+printf("{0}\n", 2 + 0.5); ## 2 (untyped + casts the right operand to the left operand's type; use +: for typed addition)
+
+## Boolean arithmetic
+## true behaves like 1 and false like 0.
+output(true + true); ## true
+output("\n");
+output(true - false); ## true
+output("\n");
+output(true * false); ## false
+output("\n");
+
+## String repetition and chunking
+## Multiplying a string by an integer repeats it.
+## Dividing a string by an integer chunks it into an array of that size.
+## Dividing a string by a string splits it by the separator.
+printf("{0}\n", "ab" * 3); ## ababab
+output("abcd" / 2); ## [ab, cd]
+output("\n");
+output("a,b,c" / ","); ## [a, b, c]
+output("\n");
+
+## Array arithmetic
+## Adding arrays concatenates them, subtracting an integer trims its tail
+## and dividing by chunking takes an integer on the left side.
+output([1 2] + [3 4]); ## 1, 2, 3, 4
+output("\n");
+output([1 2 3 4] - 2); ## 1, 2
+output("\n");
+output(2 / [1 2 3 4]); ## [[1, 2], [3, 4]]
+output("\n");

@@ -1,5 +1,6 @@
 from typing import Union, Literal, Any, Callable, Optional
 from dataclasses import dataclass
+from threading import Lock
 from .lexer.token import DictRepr
 from .error import *
 
@@ -50,7 +51,13 @@ class PowangTypeBase:
         }
         
     def __hash__(self) -> int:
-        return hash(self.data)
+        try:
+            return hash(self.data)
+        except TypeError:
+            powang_throw(powang_error_format('KEY', None, "unhashable key", [
+                f"value of type {self.type} cannot be used as a map key"
+            ]))
+            raise # unreachable, keeps type checkers happy
 
     @staticmethod
     def cast(right: 'PowangAny') -> Optional['PowangAny']:
@@ -75,6 +82,9 @@ class PowangTypeBase:
         return None
     
     def __truediv__(self, right: 'PowangAny') -> Optional['PowangAny']:
+        return None
+
+    def __mod__(self, right: 'PowangAny') -> Optional['PowangAny']:
         return None
 
     def __eq__(self, value: 'PowangAny') -> bool: # type: ignore
@@ -204,10 +214,21 @@ class PowangInteger(PowangTypeBase):
             if right.data == 0:
                 return PowangNova()
             return PowangInteger(self.data // right.data)
-        if right.type == PowangString.type:
-            return PowangArray([PowangString(right.data[i:i + self.data]) for i in range(0, len(right.data), self.data)])
-        if right.type == PowangArray.type:
+        if right.type == PowangString.type or right.type == PowangArray.type:
+            assert self.data > 0, powang_error_format('VALUE', f'{right.type} chunking', "Chunk size must be positive", [
+                f"{right.type} cannot be divided into chunks of non-positive size {self.data}"
+            ])
+            if right.type == PowangString.type:
+                return PowangArray([PowangString(right.data[i:i + self.data]) for i in range(0, len(right.data), self.data)])
             return PowangArray([PowangArray([element for element in right.data[i:i + self.data]]) for i in range(0, len(right.data), self.data)])
+        return None
+
+    def __mod__(self, right: 'PowangAny'):
+        if right.type == PowangInteger.type:
+            ## Division/modulo by zero yields nova instead of throwing.
+            if right.data == 0:
+                return PowangNova()
+            return PowangInteger(self.data % right.data)
         return None
 
 class PowangNumber(PowangTypeBase):
@@ -256,6 +277,14 @@ class PowangNumber(PowangTypeBase):
             return PowangBoolean.cast(self) / right
         return None
 
+    def __mod__(self, right: 'PowangAny'):
+        if right.type == PowangNumber.type:
+            ## Python's float modulo keeps the divisor's sign, matching Powang.
+            if right.data == 0.0:
+                return PowangNova()
+            return PowangNumber(self.data % right.data)
+        return None
+
 # ====== STRING =========
 class PowangString(PowangTypeBase):
     data: str
@@ -267,6 +296,18 @@ class PowangString(PowangTypeBase):
     def cast(right: 'PowangAny'):
         if right.type == PowangString.type:
             return PowangString(right.data)
+        ## Error values print through their readable one-line form. This keeps
+        ## `output(err)` useful without making errors JSON-serializable.
+        if right.type == PowangErrorValue.type:
+            return PowangString(right.data)
+        ## Modules are opaque namespaces; their printable form names the module
+        ## instead of exposing the exported member dictionary.
+        if right.type == PowangModule.type:
+            return PowangString(f'<module: {right.name}>')
+        ## Tasks print as an opaque handle. The status is part of the surface
+        ## so `output(t)` is useful without exposing thread internals.
+        if right.type == PowangTask.type:
+            return PowangString(repr(right))
         return None
 
     def size(self) -> 'PowangInteger':
@@ -347,12 +388,17 @@ class PowangArray(PowangTypeBase):
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) - right
         if right.type == PowangInteger.type:
-            return PowangArray(self.data[:-right.data])
+            if right.data < 0:
+                powang_throw(powang_error_format('VALUE', f'{self.type} subtraction', "Cannot remove a negative amount of elements", [
+                    f"expected a non-negative {PowangInteger.type}, but {right.data} was encounter"
+                ]))
+            if right.data == 0:
+                return PowangArray(list(self.data))
+            return PowangArray(list(self.data[:-right.data]))
         if right.type == PowangArray.type:
-            result = PowangArray([element for element in right.data])
-            assert result.type == PowangArray.type, ...
+            result = PowangArray(list(self.data))
             for element in right.data:
-                while element in result.data:
+                if element in result.data:
                     result.data.remove(element)
             return result
         return None
@@ -373,8 +419,8 @@ class PowangArray(PowangTypeBase):
 class PowangMap(PowangTypeBase):
     data: dict['PowangAny', 'PowangAny']
     type: Literal['map'] = 'map'
-    def __init__(self, data: dict['PowangAny', 'PowangAny'] = {}):
-        super().__init__(data)
+    def __init__(self, data: Optional[dict['PowangAny', 'PowangAny']] = None):
+        super().__init__(dict(data) if data is not None else {})
         self.sizeable = True
         self.indexable = True
 
@@ -403,8 +449,8 @@ class PowangMap(PowangTypeBase):
         return PowangInteger(len(self.data))
     
     def index(self, index: 'PowangAny') -> 'PowangAny':
-        assert (value := self.data.get(index)) is not None, powang_error_key(str(index))
-        return value
+        assert index in self.data, powang_error_key(str(index))
+        return self.data[index]
 
     def iterate(self) -> 'PowangArray':
         return PowangArray([PowangArray([key, value]) for key, value in self.data.items()])
@@ -439,29 +485,30 @@ CONSTRUCTOR_METHOD_NAME: Literal['constructor'] = 'constructor'
 
 class PowangObjectType(PowangTypeBase): # user defined types
     type_name: str = 'object'
-    data: dict[str, 'PowangAny'] = {}  # public props
+    data: dict[str, 'PowangAny']  # public props
     type: Literal['object'] = 'object'
  
     private_props  : dict[str, 'PowangAny']
     public_meths : dict[str, list[PowangFunction]]
     private_meths: dict[str, list[PowangFunction]]
     def __init__(self,
-        public_props : dict[str, 'PowangAny']          = {},
-        private_props: dict[str, 'PowangAny']          = {},
-        public_meths : dict[str, list[PowangFunction]] = {},
-        private_meths: dict[str, list[PowangFunction]] = {},
+        public_props : Optional[dict[str, 'PowangAny']]          = None,
+        private_props: Optional[dict[str, 'PowangAny']]          = None,
+        public_meths : Optional[dict[str, list[PowangFunction]]] = None,
+        private_meths: Optional[dict[str, list[PowangFunction]]] = None,
     ):
-        super().__init__(public_props)
-        self.private_props = private_props
-        self.public_meths = public_meths
-        self.private_meths = private_meths
+        super().__init__(dict(public_props) if public_props is not None else {})
+        self.private_props = dict(private_props) if private_props is not None else {}
+        self.public_meths = dict(public_meths) if public_meths is not None else {}
+        self.private_meths = dict(private_meths) if private_meths is not None else {}
 
     def getConstructors(self) -> list[PowangFunction]:
-        assert (constructors := self.getMethods(CONSTRUCTOR_METHOD_NAME, False)) is not None, powang_error_development(
-            'method call', 'Constructor not founded', [
-                "Somehow the type has no constructors..."
-            ]
-        )
+        constructors = self.getMethods(CONSTRUCTOR_METHOD_NAME, False)
+        if constructors is None:
+            raise powang_throw(powang_error_development(
+                'method call', 'Constructor not founded', [
+                    "Somehow the type has no constructors..."
+                ]))
         return constructors
 
     def getMethods(self, method_name: str, private: bool) -> Optional[list[PowangFunction]]:
@@ -485,18 +532,99 @@ class PowangFileStream(PowangTypeBase):
         self.mode = mode
         self.text_io: Optional[TextIO] = None
 
+# ====== ERROR VALUE =========
+class PowangErrorValue(PowangTypeBase):
+    """A catchable language error exposed to Powang code.
+
+    ``data`` holds a readable one-line form so existing printing paths keep
+    working. ``error`` keeps the underlying ``PowangError`` for structured
+    property access (kind, message, details, where, line, column, cause).
+    """
+    data: str
+    type: Literal['error'] = 'error'
+
+    def __init__(self, data: str = ''):
+        super().__init__(data)
+        self.error: Any = None
+
+    @staticmethod
+    def from_error(error: Any) -> 'PowangErrorValue':
+        kind = getattr(error, 'kind', 'ERROR') or 'ERROR'
+        message = getattr(error, 'message', '') or ''
+        label = '[ERROR]' if kind == 'ERROR' else f'[{kind} ERROR]'
+        readable = label + (f' {message}' if message else '')
+        value = PowangErrorValue(readable)
+        value.error = error
+        return value
+
+# ====== MODULE =========
+class PowangModule(PowangTypeBase):
+    """An immutable namespace produced by loading a Powang module.
+
+    ``data`` maps each exported name to its runtime value. Functions are kept
+    as overload lists so calls resolve exactly like unqualified calls do.
+    """
+
+    data: dict[str, Any]
+    type: Literal['module'] = 'module'
+
+    def __init__(self, name: str = '', members: Optional[dict[str, Any]] = None):
+        super().__init__(dict(members) if members is not None else {})
+        self.name = name
+        self.legacy = False
+
+    def getMember(self, name: str):
+        return self.data.get(name)
+
+    def __repr__(self) -> str:
+        return f'<module: {self.name}>'
+
+# ====== TASK =========
+class PowangTask(PowangTypeBase):
+    """A handle to work running on the interpreter's task pool.
+
+    The value itself is only a handle: the result, the error and the cancel
+    flag are filled in by the worker thread. Every access to the mutable
+    fields goes through ``lock`` so the parent thread can inspect a task while
+    a worker is still writing it.
+
+    Copy semantics are intentionally *reference* semantics: a task names one
+    piece of running work, so copying the handle must not fork the work.
+    """
+
+    type: Literal['task'] = 'task'
+
+    def __init__(self, task_id: int = 0):
+        super().__init__(task_id)
+        self.task_id: int = task_id
+        self.status: str = 'pending'
+        self.result: Optional['PowangAny'] = None
+        self.error: Optional[BaseException] = None
+        self.cancel_requested: bool = False
+        self.future: Any = None
+        self.handled: bool = False
+        self.lock: Lock = Lock()
+
+    def __repr__(self) -> str:
+        with self.lock:
+            return f'<task: {self.task_id} {self.status}>'
+
 # ====== ANY =========
 PowangAny = Union[
-    PowangNova,       # None
-    PowangSome,       # Any
-    PowangBoolean,    # bool
-    PowangInteger,    # int
-    PowangNumber,     # float
-    PowangString,     # str
-    PowangArray,      # list
-    PowangMap,        # dict
-    PowangFunction,   # FunctionType
-    PowangObjectType, # object
+    PowangNova,        # None
+    PowangSome,        # Any
+    PowangBoolean,     # bool
+    PowangInteger,     # int
+    PowangNumber,      # float
+    PowangString,      # str
+    PowangArray,       # list
+    PowangMap,         # dict
+    PowangFunction,    # FunctionType
+    PowangObjectType,  # object
+    PowangFileStream,  # TextIO handle
+    PowangErrorValue,  # catchable error value
+    PowangModule,      # imported namespace
+    PowangTask,        # running task handle
 ]
 
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
@@ -511,22 +639,59 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangMap.type        : PowangMap,
         PowangFunction.type   : PowangFunction,
         PowangObjectType.type : PowangObjectType,
+        PowangFileStream.type : PowangFileStream,
+        PowangErrorValue.type : PowangErrorValue,
+        PowangModule.type     : PowangModule,
+        PowangTask.type       : PowangTask,
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:
     if any.type == PowangObjectType.type:
         return PowangCopyConstructObjectType(any)
-    value = PowangTypeMap(any.type)(any.data)
+    if any.type == PowangFileStream.type:
+        # File streams are external resources: a "copy" is the same stream
+        # reference, never a new PowangFileStream (which would need mode/open).
+        return any
+    if any.type == PowangErrorValue.type:
+        # Error values are immutable snapshots; sharing the reference is safe.
+        return any
+    if any.type == PowangModule.type:
+        # Modules are immutable namespaces; copies stay the same reference.
+        return any
+    if any.type == PowangTask.type:
+        # A task handle names one piece of running work. Copying it must not
+        # duplicate or restart that work, so the reference is preserved.
+        return any
+    if any.type == PowangErrorValue.type:
+        ## Preserve the structured payload (kind, message, details) across
+        ## copies; only `data` holds the printable form.
+        value = PowangErrorValue(any.data)
+        value.error = any.error
+    elif any.type == PowangFunction.type:
+        value = PowangFunction(
+            args     = list(any.args),
+            data     = list(any.data),
+            return_expr = any.return_expr,
+        )
+        value.min_argc = any.min_argc
+        if hasattr(any, 'closure'):
+            value.closure = any.closure
+        if hasattr(any, 'external'):
+            value.external = any.external
+    else:
+        value = PowangTypeMap(any.type)(any.data)
     value.weak = any.weak
     value.const = any.const
     return value
 
 def PowangCopyConstructObjectType(anyType: PowangObjectType) -> PowangObjectType:
+    # Props are copied by value, not by reference: instances must never share
+    # mutable property state between each other nor with their base type.
     value = PowangObjectType(
-        anyType.data,
-        anyType.private_props,
-        anyType.public_meths,
-        anyType.private_meths,
+        {key: PowangCopyConstruct(prop) for key, prop in anyType.data.items()},
+        {key: PowangCopyConstruct(prop) for key, prop in anyType.private_props.items()},
+        {key: list(methods) for key, methods in anyType.public_meths.items()},
+        {key: list(methods) for key, methods in anyType.private_meths.items()},
     )
     value.type_name = anyType.type_name
     value.weak = anyType.weak

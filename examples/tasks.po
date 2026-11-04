@@ -1,0 +1,26 @@
+## Tasks: spawn a function call on a worker thread and wait for the result.
+
+fun sum_squares(limit: integer): integer {
+    total: integer = 0;
+    for index := 0; index < limit; index += 1 {
+        total += index * index;
+    }
+    return total;
+}
+
+fun run() {
+    ## Task handles live in a local scope: a global task binding would block
+    ## further spawns by design.
+    first := spawn sum_squares(100);
+    second := spawn sum_squares(200);
+
+    output(typeof(first));
+    output(" ");
+
+    output(wait(first));
+    output(" ");
+    output(wait(second));
+    output("\n");
+}
+
+run();

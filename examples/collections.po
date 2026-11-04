@@ -1,0 +1,49 @@
+## Collections and strings: arrays, maps, indexing, modulo and the strings module.
+
+use strings;
+
+numbers := [10 20 30];
+output(numbers);
+output(" ");
+output(size(numbers));
+output("\n");
+
+numbers[1] = 25;
+output(numbers[1]);
+output("\n");
+
+pairs := ["name" >> "powang", "kind" >> "language"];
+pairs = pairs + ["year" >> 2025];
+output(pairs["name"]);
+output(" ");
+output(size(pairs));
+output("\n");
+
+## Array arithmetic
+output([1 2] + [3 4]);
+output(" ");
+output([1 2 3 4] - 2);
+output(" ");
+output([1 2 3] - [2]);
+output("\n");
+
+## String helpers
+output(strings.trim("  text  "));
+output(" ");
+output(strings.upper("powang"));
+output(" ");
+output(strings.replace("a-b-c", "-", "+"));
+output("\n");
+
+output(strings.split("a,b,c", ","));
+output(" ");
+output(strings.join(["a", "b"], "-"));
+output(" ");
+output(strings.repeat("ab", 3));
+output("\n");
+
+## Modulo and exponent literals
+output(17 % 5);
+output(" ");
+output(2e3);
+output("\n");

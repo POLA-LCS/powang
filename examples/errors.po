@@ -1,0 +1,61 @@
+## Error handling: raising, catching, error unions and `?` propagation.
+
+fun validate(value: integer): integer? {
+    if value < 0 {
+        return fail("VALUE", "negative input", "value=" + (value as string));
+    }
+    return value;
+}
+
+fun double(value: integer): integer? {
+    checked := validate(value)?;
+    return checked * 2;
+}
+
+output(double(5));
+output("\n");
+
+rejected := double(-5);
+output(typeof(rejected));
+output(" ");
+output(rejected.kind);
+output(" ");
+output(rejected.message);
+output("\n");
+
+try {
+    error("boom", "first detail", "second detail");
+} catch problem {
+    output(problem.kind);
+    output(" ");
+    output(problem.message);
+    output(" ");
+    output(size(problem.details));
+    output("\n");
+}
+
+try {
+    pieces := "abc" / 0;
+} catch problem {
+    output(problem.kind);
+    output(": ");
+    output(problem.message);
+    output("\n");
+}
+
+## `?` returns the error value from the enclosing function.
+fun load(value: integer): integer? {
+    loaded := double(value)?;
+    if loaded > 100 {
+        return fail("RANGE", "too large");
+    }
+    return loaded;
+}
+
+small := load(10);
+output(small);
+output("\n");
+
+large := load(1000);
+output(large.kind);
+output("\n");

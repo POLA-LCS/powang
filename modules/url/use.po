@@ -1,0 +1,8 @@
+## URL encoding and query-string helpers backed by src/stdlib_url.py.
+## Encoding uses application/x-www-form-urlencoded semantics: spaces become
+## '+', reserved bytes are percent-encoded.
+
+export extern fun encode(text: string): string >> "stdlib_url.encode";
+export extern fun decode(text: string): string >> "stdlib_url.decode";
+export extern fun parse_query(query: string): map >> "stdlib_url.parse_query";
+export extern fun query_build(mapping: map): string >> "stdlib_url.query_build";

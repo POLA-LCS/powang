@@ -1,0 +1,6 @@
+## JSON parsing and serialization backed by src/stdlib_json.py.
+## Nesting is limited to 100 levels. Object keys must be strings when
+## stringifying. Invalid input raises a catchable [EXTERN ERROR].
+
+export extern fun parse(text: string): some >> "stdlib_json.parse";
+export extern fun stringify(value: some, indent: integer = 0): string >> "stdlib_json.stringify";

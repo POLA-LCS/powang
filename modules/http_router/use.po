@@ -1,0 +1,25 @@
+## HTTP path router for the in-process server (ADR-0001 W29).
+##
+## A router is a map returned by new. It is intentionally not JSON-serializable
+## and is owned by the interpreter state that created it.
+##
+##   r := http_router.new();
+##   http_router.add(r, "GET", "/health", health_handler);
+##   http_router.add(r, "GET", "/users/:id", user_handler);
+##   http_router.add(r, "POST", "/users", create_handler);
+##   response := http_router.dispatch(r, request);
+##
+## Patterns are made of literal segments and :name parameters. A matched
+## parameter is exposed as request["params"]["name"] in a copy of the request
+## map. Unknown paths return 404 with body "not found" and a known path with
+## the wrong method returns 405 with body "method not allowed".
+##
+## Middleware is registered with middleware(router, handler), because `use` is
+## a language keyword and cannot be spelled as a member name. A middleware
+## receives the request map and returns a response map to short-circuit or
+## nova to continue. Middleware runs in insertion order.
+
+export extern fun new(): map >> "stdlib_http_router.new";
+export extern fun add(router: map, method: string, pattern: string, handler: some): nova >> "stdlib_http_router.add";
+export extern fun dispatch(router: map, request: map): map >> "stdlib_http_router.dispatch";
+export extern fun middleware(router: map, handler: some): nova >> "stdlib_http_router.middleware";

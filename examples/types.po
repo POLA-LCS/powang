@@ -1,0 +1,41 @@
+## User-defined types: constructors, public and private members, methods.
+
+type Point {
+    + x: integer;
+    - y: integer = 7;
+
+    + fun constructor(px: integer): Point {
+        this.x = px;
+    }
+
+    + fun sum(other: Point): integer {
+        return this.x + other.x;
+    }
+
+    + fun describe(): string {
+        return "Point(" + (this.x as string) + ", " + (this.y as string) + ")";
+    }
+}
+
+first := [5] as Point;
+second: Point = 9;
+
+output(first.x);
+output(" ");
+output(first.sum(second));
+output("\n");
+
+output(first.describe());
+output("\n");
+
+## y is private, so it is only reachable through a method.
+output(second.describe());
+output("\n");
+
+## Instances copy by value.
+copy := first;
+copy.x = 100;
+output(first.x);
+output(" ");
+output(copy.x);
+output("\n");

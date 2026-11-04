@@ -1,0 +1,33 @@
+## Standard library: strings, json, url and crypto.
+
+use strings;
+use json;
+use url;
+use crypto;
+
+output(strings.trim("  spaced  "));
+output("\n");
+
+payload := ["name" >> "powang", "ok" >> true, "count" >> 3];
+encoded := json.stringify(payload);
+output(encoded);
+output("\n");
+
+decoded := json.parse(encoded);
+output(decoded["name"]);
+output(" ");
+output(decoded["count"]);
+output("\n");
+
+output(url.encode("a b&c"));
+output(" ");
+output(url.query_build(["q" >> "powang docs", "page" >> 2]));
+output("\n");
+
+output(crypto.sha256("abc"));
+output("\n");
+
+output(crypto.constant_time_compare("secret", "secret"));
+output(" ");
+output(crypto.constant_time_compare("secret", "other"));
+output("\n");

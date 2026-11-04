@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "powang"
+version = "0.2.0.dev0"
+description = "A small hand-written, multi-purpose programming language interpreter."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "POLA-LCS" }]
+keywords = ["interpreter", "programming-language", "powang"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Interpreters",
+]
+dependencies = []
+
+[project.scripts]
+# P0-W3: powang.py exposes main(args), which is not a zero-argument console
+# entry point. This target is a placeholder for the P1-W3 follow-up, which will
+# add powang._entry(). Until then the supported invocation is:
+#     python powang.py <file>
+powang = "powang:_entry"
+
+[tool.setuptools]
+py-modules = ["powang"]
+
+[tool.setuptools.packages.find]
+include = ["src*", "modules*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"modules.math" = ["*.po"]
+"modules.strings" = ["*.po"]
+"modules.json" = ["*.po"]
+"modules.url" = ["*.po"]
+"modules.env" = ["*.po"]
+"modules.args" = ["*.po"]
+"modules.time" = ["*.po"]
+"modules.crypto" = ["*.po"]

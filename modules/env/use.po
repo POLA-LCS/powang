@@ -1,0 +1,6 @@
+## Environment variable access backed by src/stdlib_env.py.
+## `get` returns nova when the variable is unset; use `get_or` for a default.
+
+export extern fun get(name: string): @string >> "stdlib_env.get";
+export extern fun get_or(name: string, default: string): string >> "stdlib_env.get_or";
+export extern fun has(name: string): boolean >> "stdlib_env.has";

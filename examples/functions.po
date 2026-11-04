@@ -11,7 +11,7 @@ a: integer = 20;
 b: number = 1.5;
 
 fun add(left: integer, right: integer): integer {
-	return a + b;
+	return left + right;
 }
 
 output(add(a, b) "\n"); ## 21
@@ -26,8 +26,8 @@ output(add(a, b) "\n"); ## 21
 ## its a const var?
 
 fun add(left: integer, right: number): number {
-	return a +: b; ## Inverse implicit cast operator
-	## It is like doing (a as b type) + b but implicitly
+	return left +: right; ## Inverse implicit cast operator
+	## It is like doing (left as right type) + right but implicitly
 }
 
 ## Now doing add(a, b) uses the function with the right types

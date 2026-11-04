@@ -1,5 +1,9 @@
 from .lexer import *
 from .powang_types import *
+from .state import get_state
+
+from collections.abc import Iterator, MutableMapping
+from pathlib import Path
 
 NATI_TYPES: set[str] = {
     PowangNova.type   ,
@@ -10,20 +14,61 @@ NATI_TYPES: set[str] = {
     PowangString.type ,
     PowangArray.type  ,
     PowangMap.type    ,
+    PowangErrorValue.type,
 }
 
-USER_TYPES = set[str]()
-TYPE_ALIAS: dict[str, DictRepr] = {}
 
-from pathlib import Path
+class _PathsProxy(MutableMapping):
+    """Compatibility view over the active state's ``paths`` dict.
 
-PATHS = dict[str, Path]()
+    ``PATHS['RELATIVE']`` used to be a process-global dict. Keeping a small
+    mapping facade lets old call sites keep the same syntax, while the actual
+    mutable data lives on ``InterpreterState.paths``. The proxy stores nothing
+    itself, so it cannot become shared mutable state again.
+    """
+
+    def _paths(self) -> dict[str, Path]:
+        return get_state().paths
+
+    def __getitem__(self, key: str) -> Path:
+        return self._paths()[key]
+
+    def __setitem__(self, key: str, value: Path) -> None:
+        self._paths()[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self._paths()[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._paths())
+
+    def __len__(self) -> int:
+        return len(self._paths())
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._paths()
+
+    def get(self, key: str, default=None):
+        return self._paths().get(key, default)
+
+    def __repr__(self) -> str:
+        return repr(self._paths())
+
+
+PATHS: MutableMapping[str, Path] = _PathsProxy()
 
 class Parser:
-    def __init__(self, data: str):
+    def __init__(self, data: str, source_path: Path | str | None = None):
         self.data = data
+        self.source_path = Path(source_path).resolve() if source_path is not None else None
         self.tokenizer = Tokenizer(data)
         self.next = self.tokenizer.getNextToken()
+        ## Type tables belong to the run that is parsing, never to the module
+        ## object, so an alias from one embedded run is invisible to the next.
+        state = get_state()
+        self.type_alias: dict[str, DictRepr] = state.type_alias
+        self.user_types: set[str] = state.user_types
+
 
     def parse(self):
         return self.Program()
@@ -31,32 +76,89 @@ class Parser:
     def Program(self):
         body: list[DictRepr] = []
         while self.next.type != LexerTokenType.END_OF_FILE:
-            stmt = self.ExpressionStatement()
+            stmt = self.ExpressionStatement(top_level=True)
             if stmt is not None:
                 body.append(stmt)
         return body
 
-    def ExpressionStatement(self):
+    def ExpressionStatement(self, top_level: bool = False):
         if self.next.type == LexerTokenType.END_OF_FILE:
             return None
         if self.next.type == LexerTokenType.KEYWORD:
             keyword = self.next.value
+            if keyword == 'export':
+                if not top_level:
+                    raise powang_throw(powang_error_syntax(
+                        'export declaration',
+                        "export is only allowed at the top level of a module",
+                        ["move the declaration out of the nested block"],
+                    ))
+                self.advance() # export
+                if self.next.type == LexerTokenType.KEYWORD:
+                    assert self.next.value in {'fun', 'type', 'extern'}, powang_error_syntax(
+                        'export declaration',
+                        f"export cannot be applied to {self.next.value}",
+                        ["export supports fun, type, extern fun and variable declarations"],
+                    )
+                else:
+                    assert self.next.type == LexerTokenType.IDENTIFIER, powang_error_syntax(
+                        'export declaration',
+                        "Expected a declaration after export",
+                        [
+                            f"but {LexerTokenType.toStr(self.next.type)} was encountered",
+                        ],
+                    )
+                exported_statement = self.ExpressionStatement()
+                assert exported_statement is not None, powang_error_syntax(
+                    'export declaration', "Reached end of file",
+                )
+                assert exported_statement['type'] in {
+                    ParserTokenType.DECLARATION_FUN,
+                    ParserTokenType.DECLARATION_UNDEFINED,
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                    ParserTokenType.DECLARATION_INTERPRET,
+                    ParserTokenType.TYPE_DECLARATION,
+                    ParserTokenType.EXTERN_REFERENCE,
+                }, powang_error_syntax(
+                    'export declaration',
+                    f"cannot export a {TokenToString(exported_statement['type'])}",
+                )
+                exported_statement['exported'] = True
+                return exported_statement
+            if keyword == 'spawn':
+                ## `spawn` is an expression prefix, so a bare statement uses
+                ## the normal expression-statement path instead of the
+                ## statement-keyword dispatch below.
+                expression = self.Statement()
+                self.consume(LexerTokenType.SEMI_COLON)
+                return expression
             self.consume(LexerTokenType.KEYWORD)
             match keyword:
                 case 'if':
                     return self.helper_IfStatement()
+                case 'try':
+                    return self.helper_TryStatement()
+                case 'catch' | 'finally':
+                    raise powang_throw(powang_error_syntax(
+                        'expression statement',
+                        f"Unexpected keyword: {keyword}",
+                        ["catch and finally must follow a try block"],
+                    ))
                 case 'for':
                     return self.helper_ForStatement()
                 case 'fun':
                     return self.helper_FunDeclaration()
                 case 'return':
-                    return doToken(ParserTokenType.RETURN_EXPRESSION, self.Expression()).toDict()
+                    expression = self.Expression()
+                    if self.next.type == LexerTokenType.SEMI_COLON:
+                        self.advance() # consume the optional trailing semicolon
+                    return doToken(ParserTokenType.RETURN_EXPRESSION, expression).toDict()
                 case 'type':
                     identifier = self.Identifier()
                     if self.next.type == LexerTokenType.RIGHT_ARROW:
                         self.advance()
                         type = self.Type()
-                        TYPE_ALIAS[identifier['value']] = type['value']
+                        self.type_alias[identifier['value']] = type['value']
                         return None
                     return self.helper_TypeObjectDeclaration(identifier)
                 case 'use':
@@ -64,7 +166,7 @@ class Parser:
                 case 'extern':
                     return self.helper_ExternSignature()
                 case _:
-                    raise NotImplementedError(f"{keyword} not implemented yet.")
+                    raise powang_throw(powang_error_development('expression statement', f"{keyword} not implemented yet."))
         else:
             expression = self.Statement()
             self.consume(LexerTokenType.SEMI_COLON)
@@ -94,24 +196,46 @@ class Parser:
 
     def helper_UseModule(self):
         if self.next.type == LexerTokenType.IDENTIFIER:
-                module_path = PATHS['ABSOLUTE'].parent / 'modules' / self.Identifier()['value']
-        else: module_path = PATHS['RELATIVE'].parent / Path(self.StringLiteral()['value'])
+            module_kind = 'name'
+            module_spec = self.Identifier()['value']
+        elif self.next.type == LexerTokenType.STRING_LITERAL:
+            module_kind = 'path'
+            module_spec = self.StringLiteral()['value']
+        else:
+            raise powang_throw(powang_error_syntax(
+                'use statement',
+                "Expected a module name or a path string",
+                [
+                    f"but {LexerTokenType.toStr(self.next.type)} was encountered",
+                ],
+            ))
+
+        alias: str | None = None
+        wildcard: bool = False
+        if self.next.type == LexerTokenType.OPERATOR_CAST_AS:
+            self.advance() # as
+            if self.next.type == LexerTokenType.STAR:
+                self.advance() # *
+                wildcard = True
+            elif self.next.type == LexerTokenType.IDENTIFIER:
+                alias = self.Identifier()['value']
+            else:
+                raise powang_throw(powang_error_syntax(
+                    'use statement',
+                    "Expected an alias or '*' after 'as'",
+                    [
+                        f"but {LexerTokenType.toStr(self.next.type)} was encountered",
+                    ],
+                ))
 
         self.consume(LexerTokenType.SEMI_COLON)
-        modules: list[str] = []
-
-        try:
-            if module_path.is_dir():
-                for path in module_path.iterdir():
-                    with open(path) as file:
-                        modules.append(file.read())
-            else:
-                assert module_path != Path(__name__), powang_error_format("IMPORT", 'module using', "Is importing the same module")
-                with open(module_path) as file:
-                    modules = [file.read()]
-        except FileNotFoundError:
-            assert False, powang_error_format("MODULE", 'using', f"Can't find the module: {module_path}")
-        return doToken(ParserTokenType.USE_EXPRESSION, modules).toDict()
+        return doToken(ParserTokenType.USE_EXPRESSION, {
+            'kind': module_kind,
+            'name': module_spec,
+            'alias': alias,
+            'wildcard': wildcard,
+            'base': str(self.source_path) if self.source_path is not None else None,
+        }).toDict()
 
     def helper_TypeObjectDeclaration(self, identifier: DictRepr, is_signature: bool = False):
         assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
@@ -120,10 +244,10 @@ class Parser:
                 "a powang native type"
             ]
         )
-        assert identifier['value'] not in TYPE_ALIAS, powang_error_redefined(
+        assert identifier['value'] not in self.type_alias, powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
-                f"a type alias for {TYPE_ALIAS[identifier['value']]['value']}"
+                f"a type alias for {self.type_alias[identifier['value']]['value']}"
             ]
         )
         assert identifier['value'] not in {'true', 'false'}, powang_error_redefined(
@@ -245,6 +369,39 @@ class Parser:
     def isNextKeyword(self, keyword: str):
         return self.next.type == LexerTokenType.KEYWORD and self.next.value == keyword
     
+    def helper_TryStatement(self):
+        """`try { ... } (catch [name] { ... })* (finally { ... })?`"""
+        try_block = self.BlockStatement()
+
+        catches: list[DictRepr] = []
+        while self.isNextKeyword('catch'):
+            self.advance()
+            catch_name: DictRepr | None = None
+            if self.next.type == LexerTokenType.IDENTIFIER:
+                catch_name = self.Identifier()
+            catch_block = self.BlockStatement()
+            catches.append({
+                "name": catch_name,
+                "block": catch_block,
+            })
+
+        finally_block: DictRepr | None = None
+        if self.isNextKeyword('finally'):
+            self.advance()
+            finally_block = self.BlockStatement()
+
+        if not catches and finally_block is None:
+            raise powang_throw(powang_error_syntax(
+                'try statement',
+                'try requires at least one catch or finally block',
+            ))
+
+        return doToken(ParserTokenType.TRY_STATEMENT, {
+            "block": try_block,
+            "catches": catches,
+            "finally_block": finally_block,
+        }).toDict()
+
     def helper_IfStatement(self):
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
               expr = self.ParenthesizedExpression()
@@ -281,33 +438,50 @@ class Parser:
             has_paren = True
 
         start_expression = self.Statement()
-        
-        if start_expression['type'] == ParserTokenType.DECLARATION_UNDEFINED:
-            if_expression: DictRepr | None = None
-            if self.next.type == LexerTokenType.RIGHT_ARROW:
-                self.advance()
-                iterable_expression = self.Expression()
-                if self.next.type == LexerTokenType.KEYWORD:
-                    assert self.next.value == 'if', powang_error_syntax('for each expression', f"{self.next.value} is not a valid keyword in this context", [
-                        "for each last expression only accepts if keyword"
-                    ])
-                    self.advance()
-                    if_expression = self.Expression()
-                block = self.BlockStatement()
-                return doToken(ParserTokenType.FOR_EACH_STATEMENT, {
-                    "iterator": start_expression,
-                    "expression": iterable_expression,
-                    "block": block,
-                    "if_expression": if_expression,
+
+        if self.next.type == LexerTokenType.RIGHT_ARROW:
+            if start_expression['type'] not in {
+                ParserTokenType.DECLARATION_UNDEFINED,
+                ParserTokenType.DECLARATION_TYPED_VAR
+            }:
+                ## Bare identifier head (`for x >> arr {}`): implicitly declare
+                ## the iterator as weakly-typed `some` so any element binds.
+                assert start_expression['type'] == LexerTokenType.IDENTIFIER, \
+                    powang_error_syntax('for each expression', 'iterator must be a variable declaration or an identifier')
+                start_expression = doToken(ParserTokenType.DECLARATION_UNDEFINED, {
+                    "identifier": start_expression,
+                    "type": doToken(ParserTokenType.TYPE, {
+                        'value': PowangSome.type,
+                        'const': False,
+                        'weak': False,
+                        'reference': None,
+                    }).toDict(),
                 }).toDict()
-        
+
+            self.advance()
+            iterable_expression = self.Expression()
+            if_expression: DictRepr | None = None
+            if self.next.type == LexerTokenType.KEYWORD:
+                assert self.next.value == 'if', powang_error_syntax('for each expression', f"{self.next.value} is not a valid keyword in this context", [
+                    "for each last expression only accepts if keyword"
+                ])
+                self.advance()
+                if_expression = self.Expression()
+            block = self.BlockStatement()
+            return doToken(ParserTokenType.FOR_EACH_STATEMENT, {
+                "iterator": start_expression,
+                "expression": iterable_expression,
+                "block": block,
+                "if_expression": if_expression,
+            }).toDict()
+
         middle_expression: DictRepr | None = None
         last_expression  : DictRepr | None = None
 
         if self.next.type == LexerTokenType.SEMI_COLON:
             self.advance()
             middle_expression = self.Expression()
-            self.advance()
+            self.consume(LexerTokenType.SEMI_COLON, 'for statement')
             last_expression = self.Statement()
 
         if has_paren:
@@ -405,7 +579,8 @@ class Parser:
     def Level_3_Expression(self):
         return self.helper_BinaryExpression(self.Level_4_Expression, (
             LexerTokenType.STAR,
-            LexerTokenType.SLASH
+            LexerTokenType.SLASH,
+            LexerTokenType.PERCENT,
         ))
         
     def Level_4_Expression(self):
@@ -440,6 +615,20 @@ class Parser:
         ))
 
     def helper_UnaryExpression(self, operators: tuple[LexerTokenType, ...]):
+        if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'spawn':
+            self.advance('spawn expression')
+            spawned = self.UnaryExpression()
+            assert spawned['type'] == ParserTokenType.CALL_EXPRESSION, powang_error_syntax(
+                'spawn expression',
+                "spawn expects a function call",
+                [
+                    "write it as: spawn function_name(args)",
+                    f"but {TokenToString(spawned['type'])} was encountered",
+                ],
+            )
+            return doToken(ParserTokenType.SPAWN_EXPRESSION, {
+                "call": spawned,
+            }).toDict()
         if self.next.type in operators:
             operator = self.consume(self.next.type)
             right = self.UnaryExpression()
@@ -452,7 +641,14 @@ class Parser:
     def PostfixExpression(self):
         expr = self.PrimaryExpression()
         while self.next is not None:
-            if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+            if self.next.type == LexerTokenType.QUESTION_MARK:
+                ## Postfix error-propagation operator. It binds tighter than
+                ## call/index/access: `find(id)?` unwraps the call result.
+                self.advance('postfix unwrap')
+                expr = doToken(ParserTokenType.POSTFIX_UNWRAP, {
+                    "expression": expr,
+                }).toDict()
+            elif self.next.type == LexerTokenType.LEFT_PARENTHESIS:
                 expr = self.CallExpression(expr)
             elif self.next.type == LexerTokenType.LEFT_BRACKET:
                 expr = self.IndexExpression(expr)
@@ -628,6 +824,7 @@ class Parser:
 
     def Type(self):
         weak = const = False
+        error_union = False
 
         # TODO: Try the walrus notation for the weak = True and const = True
         if self.next.type == LexerTokenType.ARROBA:
@@ -645,8 +842,8 @@ class Parser:
             self.advance('type postfix')
             const = True
 
-        if type_identifier in TYPE_ALIAS:
-            alias = TYPE_ALIAS[type_identifier]
+        if type_identifier in self.type_alias:
+            alias = self.type_alias[type_identifier]
             if weak: assert not alias['weak'], powang_error_format('LOGIC', 'type notation', 'Weak notation in a weak type alias', [
                 f"type alias {type_identifier} already refers to a weak {alias['value']}"
             ])
@@ -654,13 +851,20 @@ class Parser:
             if const: assert not alias['const'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
                 f"type alias {type_identifier} already refers to a constant {alias['value']}"
             ])
-            const = alias['weak']
+            const = alias['const']
             type_identifier = alias['value']
         
+        ## A trailing `?` marks an error-union return annotation:
+        ## `fun find(id: integer): map? { ... }` may also return `error`.
+        if self.next.type == LexerTokenType.QUESTION_MARK:
+            self.advance('type error union')
+            error_union = True
+
         return doToken(ParserTokenType.TYPE, {
             "value": type_identifier,
             "weak": weak,
-            "const": const,    
+            "const": const,
+            "error_union": error_union,
             "reference": None # TODO
         }).toDict()
 
@@ -712,7 +916,20 @@ class Parser:
 
     def StringLiteral(self):
         token = self.consume(LexerTokenType.STRING_LITERAL)
-        token.value = token.value.encode('utf-8').decode('unicode_escape')
+        ## Manual escape processing: unicode_escape would re-decode the raw
+        ## UTF-8 bytes as latin-1 and corrupt non-ASCII characters.
+        ESCAPES: dict[str, str] = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '"': '"', '0': '\0'}
+        processed: list[str] = []
+        i = 0
+        while i < len(token.value):
+            char = token.value[i]
+            if char == '\\' and i + 1 < len(token.value) and token.value[i + 1] in ESCAPES:
+                processed.append(ESCAPES[token.value[i + 1]])
+                i += 2
+            else:
+                processed.append(char)
+                i += 1
+        token.value = ''.join(processed)
         return token.toDict(token.value)
 
     def advance(self, where: Optional[str] = None):
@@ -749,4 +966,6 @@ class Parser:
             'value': identifier,
             'weak': weak,
             'const': const,
+            'error_union': False,
+            'reference': None,
         }).toDict()

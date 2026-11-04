@@ -1,17 +1,24 @@
 from ..powang_types import *
 from ..parser import *
 
-def builtin_input(receptor: PowangAny = PowangString()):
+def builtin_input(receptor: Optional[PowangAny] = None):
+    if receptor is None:
+        receptor = PowangString()
     assert not receptor.const or receptor.const.can_change, powang_error_constant_assign(
         "builtin: input",
         receptor.type,
         bool(receptor.weak),
     )
     
-    python_input = input()
+    try:
+        python_input = input()
+    except EOFError:
+        # stdin closed mid-read: report a clean Powang error, not a traceback.
+        raise powang_throw(powang_error_format("INPUT", "builtin: input", "Input stream ended unexpectedly"))
     try:
         if receptor.type == PowangBoolean.type:
-            receptor.data = bool(python_input)
+            ## Follows PowangBoolean.cast string semantics: a non empty string is true
+            receptor.data = len(python_input) > 0
         elif receptor.type == PowangInteger.type:
             receptor.data = int(python_input)
         elif receptor.type == PowangNumber.type:

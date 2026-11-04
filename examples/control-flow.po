@@ -1,0 +1,73 @@
+## Control flow: if/else, C-style for, for-each and try/catch/finally.
+
+fun classify(value: integer): string {
+    if value < 0 {
+        return "negative";
+    } else if value == 0 {
+        return "zero";
+    } else {
+        return "positive";
+    }
+}
+
+output(classify(-4) + " " + classify(0) + " " + classify(9) + "\n");
+
+for index := 0; index < 3; index += 1 {
+    output(index);
+    output(" ");
+}
+output("\n");
+
+numbers := [10 20 30];
+
+## Typed iterator
+for number: integer >> numbers {
+    output(number);
+    output(" ");
+}
+output("\n");
+
+## Bare identifier, implicitly weakly typed
+for number >> numbers {
+    output(number);
+    output(" ");
+}
+output("\n");
+
+## Filtered iteration
+for number >> numbers if number > 15 {
+    output(number);
+    output(" ");
+}
+output("\n");
+
+## Strings and maps are iterable too
+for letter >> "abc" {
+    output(letter);
+}
+output("\n");
+
+for pair >> ["a" >> 1, "b" >> 2] {
+    output(pair[0] + "=" + (pair[1] as string) + " ");
+}
+output("\n");
+
+## try/catch/finally
+fun divide(a: integer, b: integer): integer {
+    try {
+        if b == 0 {
+            error("division by zero");
+        }
+        return a / b;
+    } catch problem {
+        output("caught " + problem.kind + ": " + problem.message + "\n");
+        return 0;
+    } finally {
+        output("cleanup\n");
+    }
+}
+
+output(divide(9, 3));
+output("\n");
+output(divide(9, 0));
+output("\n");

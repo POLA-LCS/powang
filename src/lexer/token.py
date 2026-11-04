@@ -47,22 +47,18 @@ class LexerTokenType(TokenTypeBase):
     ARROBA      = auto() # @
     STAR        = auto() # *
     SLASH       = auto() # /
+    PERCENT     = auto() # %
     SEMI_COLON  = auto() # ;
     COLON       = auto() # :
     COMMA       = auto() # ,
     DOT         = auto() # .
+    QUESTION_MARK = auto() # ?
 
     # Compare
-    COMPARE_TYPED_EQ  = auto() # ==:
-    COMPARE_TYPED_NEQ = auto() # !=:
-    COMPARE_TYPED_LEQ = auto() # <=:
-    COMPARE_TYPED_GEQ = auto() # >=:
-    COMPARE_TYPED_LSS = auto() # <:
-    COMPARE_TYPED_GTR = auto() # >:
     COMPARE_EQ        = auto() # ==
     COMPARE_NEQ       = auto() # !=
-    COMPARE_GEQ       = auto() # <=
-    COMPARE_LEQ       = auto() # >=
+    COMPARE_LEQ       = auto() # <=
+    COMPARE_GEQ       = auto() # >=
     COMPARE_LSS       = auto() # <
     COMPARE_GTR       = auto() # >
     COMPARE_EQ_TYPE   = auto() # ::
@@ -95,13 +91,16 @@ class ParserTokenType(TokenTypeBase):
     FAKE_METHOD_CALL        = auto()
     KEY_VALUE_PAIR          = auto()
     IF_STATEMENT            = auto()
+    TRY_STATEMENT           = auto()
     FOR_STATEMENT           = auto()
     FOR_EACH_STATEMENT      = auto()
     RETURN_EXPRESSION       = auto()
+    POSTFIX_UNWRAP          = auto()
     TYPE_ALIAS              = auto()
     TYPE_DECLARATION        = auto()
     USE_EXPRESSION          = auto()
     EXTERN_REFERENCE         = auto()
+    SPAWN_EXPRESSION         = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):
@@ -138,9 +137,6 @@ class ParserToken(TokenBase):
 
     def __init__(self, type: ParserTokenType, value: DictRepr):
         super().__init__(type, value)
-
-# Union Token type
-TokenType = LexerTokenType | ParserTokenType
 
 def doToken(token_type: LexerTokenType | ParserTokenType, value: Any):
     if isinstance(token_type, LexerTokenType):

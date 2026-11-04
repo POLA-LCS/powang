@@ -1,0 +1,11 @@
+## A module used by examples/modules.po.
+
+use strings;
+
+export fun hello(name: string): string {
+    return "hello " + name;
+}
+
+export fun shout(name: string): string {
+    return strings.upper(hello(name)) + "!";
+}
