@@ -55,13 +55,13 @@ Initally based on the lisp operators but later changed into a more natural langu
 
 ## Editor support
 
-The repository ships a complete Visual Studio Code extension under `editors/vscode/`
-that provides **both** syntax highlighting and LSP diagnostics/completion. No
-third-party extensions are needed.
+The editor support lives in a separate repository at `../powang-lsp`. Clone it and copy
+the folder to your VS Code extensions directory, or run VS Code with
+`--extensionDevelopmentPath=../powang-lsp`.
 
 ### Install the extension
 
-1. Copy the `editors/vscode` folder to your VS Code extensions directory:
+1. Copy the `powang-lsp` folder to your VS Code extensions directory:
    - Windows: `%USERPROFILE%\.vscode\extensions\powang-0.2.0\`
    - macOS: `~/.vscode/extensions/powang-0.2.0/`
    - Linux: `~/.vscode/extensions/powang-0.2.0/`
@@ -72,7 +72,7 @@ Alternatively, run VS Code from the command line with the extension in developme
 mode:
 
 ```bash
-code --extensionDevelopmentPath=editors/vscode
+code --extensionDevelopmentPath=../powang-lsp
 ```
 
 This opens a new VS Code window with the extension loaded. Any `.po` file opened in
