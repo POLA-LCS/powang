@@ -5,7 +5,7 @@
 > [!WARNING]
 > It's still work in progress so expect to encounter bugs or undefined behaviours.
 
-Hiii, this is POLA, a software engineering student, and this is my own programming language.  
+Hiii, this is POLA, a software engineering student, and this is my own programming language.
 Initally based on the lisp operators but later changed into a more natural language.
 
 ## TODO
@@ -21,7 +21,7 @@ Initally based on the lisp operators but later changed into a more natural langu
 - - [X] Define.
 - - [ ] Templates.
 - [X] A better lexical analysis.
-- [X] References: `fun f(x: &integer)` with `f(&variable)`.
+- [ ] References.
 - [X] Logical operators.
 - [X] Arithmetics (see [Arithmetic Operators](examples/arithmetics.po)).
 - [X] Error handling: `try`/`catch`/`finally`, `fail`, error unions `T?` and `?`.
@@ -55,17 +55,18 @@ Initally based on the lisp operators but later changed into a more natural langu
 
 ## Editor support
 
-### Syntax highlighting
-
 The repository ships a complete Visual Studio Code extension under `editors/vscode/`
-that contributes the `powang` language and its TextMate grammar. To use it:
+that provides **both** syntax highlighting and LSP diagnostics/completion. No
+third-party extensions are needed.
+
+### Install the extension
 
 1. Copy the `editors/vscode` folder to your VS Code extensions directory:
    - Windows: `%USERPROFILE%\.vscode\extensions\powang-0.2.0\`
    - macOS: `~/.vscode/extensions/powang-0.2.0/`
    - Linux: `~/.vscode/extensions/powang-0.2.0/`
 2. Reload VS Code (`Ctrl+Shift+P`, then `Developer: Reload Window`).
-3. Open any `.po` file. It should open in `powang` language mode with highlighting.
+3. Open any `.po` file. You get highlighting, diagnostics and completion automatically.
 
 Alternatively, run VS Code from the command line with the extension in development
 mode:
@@ -75,53 +76,14 @@ code --extensionDevelopmentPath=editors/vscode
 ```
 
 This opens a new VS Code window with the extension loaded. Any `.po` file opened in
-that window gets highlighting.
+that window gets highlighting and diagnostics.
 
-For Vim, copy `syntax/powang.vim` into `~/.vim/syntax/` (or `~/vimfiles/syntax/` on
-Windows) and add:
+### What the extension provides
 
-```vim
-autocmd BufRead,BufNewFile *.po set filetype=powang
-```
-
-Sublime Text, GitHub Linguist and any TextMate consumer can use
-`syntax/powang.tmLanguage.json` directly.
-
-### Diagnostics and completion (LSP)
-
-The LSP server runs over standard input and output with no dependencies:
-
-```bash
-python tools/powang_lsp.py
-```
-
-It publishes parser and type-checker diagnostics and offers keyword and builtin
-completion.
-
-For Visual Studio Code, install the **Generic LSP Client (v2)** extension
-(marketplace id `zsol.vscode-glspc`). Then add this to your **User** `settings.json`
-(not the workspace `.vscode/settings.json`, the extension reads user settings only):
-
-```json
-{
-  "files.associations": { "*.po": "powang" },
-  "glspc.server.command": "python",
-  "glspc.server.commandArguments": [
-    "C:/Users/you/Dev/Python/powang/tools/powang_lsp.py"
-  ],
-  "glspc.server.languageId": ["powang"]
-}
-```
-
-Replace the path with your actual checkout location. The workspace `.vscode/settings.json`
-already maps `*.po` to `powang` via `files.associations`. The LSP configuration goes
-in your user settings because the extension reads user settings only. Open the workspace
-in VS Code, install the recommended extension when prompted, and reload. Diagnostics
-and completion appear automatically for `.po` files.
-
-If the extension is not available in your marketplace, any other generic LSP client
-extension works with the same command: `python tools/powang_lsp.py` from the
-repository root. The server has no network port and no third-party dependencies.
+- **Syntax highlighting** via the TextMate grammar in `syntax/powang.tmLanguage.json`.
+- **Diagnostics** from the parser and the gradual type checker, published as you type.
+- **Keyword and builtin completion** with 30 items.
+- **Language configuration**: brackets, comments, indentation rules, auto-closing pairs.
 
 ### What the LSP does
 
@@ -131,7 +93,23 @@ repository root. The server has no network port and no third-party dependencies.
 
 It does not yet provide hover, rename or goto-definition.
 
+### Vim
+
+Copy `syntax/powang.vim` into `~/.vim/syntax/` (or `~/vimfiles/syntax/` on
+Windows) and add:
+
+```vim
+autocmd BufRead,BufNewFile *.po set filetype=powang
+```
+
+Sublime Text, GitHub Linguist and any TextMate consumer can use
+`syntax/powang.tmLanguage.json` directly.
+
 ## References
+
+A parameter declared `&type` receives a reference to a variable, and the caller passes
+`&variable`. Reads and writes inside the function reach the caller's variable:
+
 ```po
 fun increment(value: &integer) {
     value += 1;
@@ -153,11 +131,11 @@ Rules:
 ## Get started
 You need [Python3](https://www.python.org/) 3.12 or newer.
 
-- Clone the repository with:  
+- Clone the repository with:
 ```git clone https://github.com/POLA-LCS/powang```
 
-- Go to `./powang`  
-- Run `python powang.py --help`  
-- Create the file `main.po`   
-- Write your first hello world with `output("Hello, world!\n");`  
-- Run it with `python powang.py main.po`  
+- Go to `./powang`
+- Run `python powang.py --help`
+- Create the file `main.po`
+- Write your first hello world with `output("Hello, world!\n");`
+- Run it with `python powang.py main.po`
