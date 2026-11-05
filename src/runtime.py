@@ -1405,6 +1405,49 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 finally:
                     ScopeStack.pop()
 
+        case ParserTokenType.MATCH_EXPRESSION:
+            match_subject = evaluateAstExpression(expr_value['subject'])
+            match_result: PowangAny = PowangNova()
+            for match_case in expr_value.get('cases', []):
+                if not isinstance(match_case, dict):
+                    continue
+                ScopeStack.push()
+                try:
+                    pattern = match_case.get('pattern')
+                    if not isinstance(pattern, dict):
+                        pattern = {}
+                    kind = pattern.get('kind')
+                    matched = False
+                    if kind == 'wildcard':
+                        matched = True
+                    elif kind == 'literal':
+                        pattern_value = evaluateAstExpression(pattern.get('value'))
+                        matched = match_subject.type == pattern_value.type and match_subject == pattern_value
+                    elif kind == 'binding':
+                        name = pattern['value']['value']
+                        ScopeStack.new_variable(name, PowangCopyConstruct(match_subject))
+                        matched = True
+                    guard = match_case.get('guard')
+                    if matched and guard is not None:
+                        matched = PowangBoolean.cast(evaluateAstExpression(guard)).data
+                    if matched:
+                        if match_case.get('is_expression'):
+                            match_result = evaluateAstExpression(match_case.get('value'))
+                        else:
+                            block = match_case.get('block')
+                            if isinstance(block, dict) and block.get('value') is not None:
+                                for match_statement in block['value']:
+                                    check_cancellation()
+                                    evaluateAstExpression(match_statement)
+                                    if ScopeStack.return_value is not None:
+                                        match_result = ScopeStack.return_value
+                                        ScopeStack.return_value = None
+                                        break
+                        break
+                finally:
+                    ScopeStack.pop()
+            return match_result
+
         case ParserTokenType.IF_STATEMENT:
             if_expr = expr_value['expression']
             if_block = expr_value['block']

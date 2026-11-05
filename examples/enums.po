@@ -21,10 +21,10 @@ print("\n");
 
 ## A function that works with enums.
 fun describe(color: Color): str {
-    match color {
-        case Color.RED >> return "red";
-        case Color.GREEN >> return "green";
-        case _ >> return "blue";
+    return color match {
+        case Color.RED >> "red"
+        case Color.GREEN >> "green"
+        case _ >> "blue"
     }
 }
 

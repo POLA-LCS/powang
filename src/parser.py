@@ -654,6 +654,39 @@ class Parser:
             [f'but {LexerTokenType.toStr(self.next.type)} was encountered'],
         ))
 
+    def helper_MatchExpression(self, subject: DictRepr):
+        self.consume(LexerTokenType.LEFT_BRACE, 'match expression')
+        cases: list[DictRepr] = []
+        while self.isNextKeyword('case'):
+            self.advance()
+            pattern = self.MatchPattern()
+            guard: DictRepr | None = None
+            if self.isNextKeyword('if'):
+                self.advance()
+                guard = self.Expression()
+            self.consume(LexerTokenType.RIGHT_ARROW, 'match case')
+            if self.next.type == LexerTokenType.LEFT_BRACE:
+                block = self.BlockStatement()
+                cases.append({
+                    'pattern': pattern,
+                    'guard': guard,
+                    'block': block,
+                    'is_expression': False,
+                })
+            else:
+                value = self.Expression()
+                cases.append({
+                    'pattern': pattern,
+                    'guard': guard,
+                    'value': value,
+                    'is_expression': True,
+                })
+        self.consume(LexerTokenType.RIGHT_BRACE, 'match expression')
+        return doToken(ParserTokenType.MATCH_EXPRESSION, {
+            'subject': subject,
+            'cases': cases,
+        }).toDict()
+
     def helper_MatchStatement(self):
         subject = self.Expression()
         self.consume(LexerTokenType.LEFT_BRACE, 'match statement')
@@ -1083,6 +1116,9 @@ class Parser:
                     "target": expr,
                     "property": self.Identifier(),
                 }).toDict()
+            elif self.next.type == LexerTokenType.KEYWORD and self.next.value == 'match':
+                self.advance('match expression')
+                expr = self.helper_MatchExpression(expr)
             else:
                 break
         return expr

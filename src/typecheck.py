@@ -435,6 +435,37 @@ class _TypeChecker:
 
         if node_type == ParserTokenType.MATCH_STATEMENT:
             return self._infer_match(value)
+        if node_type == ParserTokenType.MATCH_EXPRESSION:
+            self._infer(value.get('subject'))
+            result_type = SOME
+            for case in value.get('cases', []) if isinstance(value.get('cases'), list) else []:
+                if not isinstance(case, dict):
+                    continue
+                pattern = case.get('pattern')
+                if isinstance(pattern, dict) and pattern.get('kind') == 'binding':
+                    name = self._identifier_name(pattern.get('value'))
+                    if name is not None:
+                        self._scope_push()
+                        try:
+                            self._bind(name, SOME, False)
+                            guard = case.get('guard')
+                            if guard is not None:
+                                self._infer(guard)
+                            if case.get('is_expression'):
+                                case_type = self._infer(case.get('value'))
+                                if result_type == SOME:
+                                    result_type = case_type
+                        finally:
+                            self._scope_pop()
+                else:
+                    guard = case.get('guard')
+                    if guard is not None:
+                        self._infer(guard)
+                    if case.get('is_expression'):
+                        case_type = self._infer(case.get('value'))
+                        if result_type == SOME:
+                            result_type = case_type
+            return result_type
         if node_type == ParserTokenType.DECLARATION_UNDEFINED:
             return self._infer_declaration_undefined(value)
         if node_type == ParserTokenType.DECLARATION_TYPED_VAR:
