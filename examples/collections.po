@@ -1,49 +1,63 @@
-## Collections and strings: arrays, maps, indexing, modulo and the strings module.
+## Collections and strings: typed arrays, maps, indexing, modulo and the strings module.
 
 use strings;
 
-numbers := [10 20 30];
-output(numbers);
-output(" ");
-output(size(numbers));
-output("\n");
+numbers: array[integer] = [10 20 30];
+print(numbers);
+print(" ");
+print(size(numbers));
+print("\n");
 
 numbers[1] = 25;
-output(numbers[1]);
-output("\n");
+print(numbers[1]);
+print("\n");
+
+## A bare array annotation is sugar for array[any].
+mixed: array = [1 "two" true];
+print(size(mixed));
+print("\n");
+
+## Element types are checked on declarations, calls and returns.
+typed_names: array[string] = ["ada" "grace"];
+print(typed_names[1]);
+print("\n");
 
 pairs := ["name" >> "powang", "kind" >> "language"];
 pairs = pairs + ["year" >> 2025];
-output(pairs["name"]);
-output(" ");
-output(size(pairs));
-output("\n");
+print(pairs["name"]);
+print(" ");
+print(size(pairs));
+print("\n");
 
 ## Array arithmetic
-output([1 2] + [3 4]);
-output(" ");
-output([1 2 3 4] - 2);
-output(" ");
-output([1 2 3] - [2]);
-output("\n");
+print([1 2] + [3 4]);
+print(" ");
+print([1 2 3 4] - 2);
+print(" ");
+print([1 2 3] - [2]);
+print("\n");
 
 ## String helpers
-output(strings.trim("  text  "));
-output(" ");
-output(strings.upper("powang"));
-output(" ");
-output(strings.replace("a-b-c", "-", "+"));
-output("\n");
+print(strings.trim("  text  "));
+print(" ");
+print(strings.upper("powang"));
+print(" ");
+print(strings.replace("a-b-c", "-", "+"));
+print("\n");
 
-output(strings.split("a,b,c", ","));
-output(" ");
-output(strings.join(["a", "b"], "-"));
-output(" ");
-output(strings.repeat("ab", 3));
-output("\n");
+print(strings.split("a,b,c", ","));
+print(" ");
+print(strings.join(["a", "b"], "-"));
+print(" ");
+print(strings.repeat("ab", 3));
+print("\n");
+
+## format builds a string without printing it.
+print(format("{0}/{1}", "a", "b"));
+print("\n");
 
 ## Modulo and exponent literals
-output(17 % 5);
-output(" ");
-output(2e3);
-output("\n");
+print(17 % 5);
+print(" ");
+print(2e3);
+print("\n");

@@ -12,7 +12,7 @@ def _invalid_exponent(matched: str) -> str:
 class Tokenizer:
     Keywords: set[str] = {
         'if', 'else', 'for', 'fun', 'return', 'use', 'type', 'extern',
-        'export', 'try', 'catch', 'finally', 'spawn',
+        'export', 'try', 'catch', 'finally', 'spawn', 'match', 'case', 'const',
     }
     
     RegexPatterns: dict[
@@ -30,6 +30,10 @@ class Tokenizer:
         r'\d+[eE][+-]?\d+'          : (LexerTokenType.FLOATING_LITERAL, None),
         r'\d+'                      : (LexerTokenType.INTEGER_LITERAL, None),
         
+        r'\$"((?:\\.|[^"\\])*)"': (
+            LexerTokenType.INTERPOLATED_STRING_LITERAL,
+            lambda x: x[2:-1]  # Remove the $ and the quotes
+        ),
         r'\"((?:\\.|[^\"\\])*)\"': (
             LexerTokenType.STRING_LITERAL,
             lambda x: x[1:-1]  # Remove the quotes
@@ -38,6 +42,7 @@ class Tokenizer:
         
         r'\&\&' : (LexerTokenType.AND, None),
         r'\|\|' : (LexerTokenType.OR, None),
+        r'\|>'  : (LexerTokenType.PIPELINE, None),
         r'&'    : (LexerTokenType.AMPERSAND, None),
         r'::'   : (LexerTokenType.COMPARE_EQ_TYPE, None),
         r'!:'   : (LexerTokenType.COMPARE_NEQ_TYPE, None),
@@ -68,6 +73,8 @@ class Tokenizer:
         r'%'      : (LexerTokenType.PERCENT, None),
 
         r'\.'  : (LexerTokenType.DOT,   None),
+        r'\?\.' : (LexerTokenType.SAFE_ACCESS, None),
+        r'\?\?' : (LexerTokenType.COALESCE, None),
         r'\?'  : (LexerTokenType.QUESTION_MARK, None),
         r','   : (LexerTokenType.COMMA, None),
 
@@ -116,6 +123,19 @@ class Tokenizer:
 
             if not self.hasMoreTokens():
                 return LexerToken(LexerTokenType.END_OF_FILE, None)
+
+            ## Block comments use `#! ... !#` and may span multiple lines.
+            if self.data.startswith('#!', self.position):
+                comment_end = self.data.find('!#', self.position + 2)
+                if comment_end == -1:
+                    lines = self.data.split('\n')
+                    raise powang_throw(powang_error_syntax(None, "unterminated block comment", [
+                        lines[self.row] if self.row < len(lines) else '',
+                    ]))
+                skipped = self.data[self.position:comment_end + 2]
+                self.row += skipped.count('\n')
+                self.position = comment_end + 2
+                continue
 
             # Pattern recognition
             for pattern, (token_type, modifier) in self.RegexPatterns.items():

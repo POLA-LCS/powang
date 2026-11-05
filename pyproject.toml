@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "powang"
-version = "0.2.0.dev0"
+version = "0.4.0"
 description = "A small hand-written, multi-purpose programming language interpreter."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,10 +25,6 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-# P0-W3: powang.py exposes main(args), which is not a zero-argument console
-# entry point. This target is a placeholder for the P1-W3 follow-up, which will
-# add powang._entry(). Until then the supported invocation is:
-#     python powang.py <file>
 powang = "powang:_entry"
 
 [tool.setuptools]
@@ -47,3 +43,6 @@ namespaces = true
 "modules.args" = ["*.po"]
 "modules.time" = ["*.po"]
 "modules.crypto" = ["*.po"]
+"modules.http" = ["*.po"]
+"modules.http_router" = ["*.po"]
+"modules.log" = ["*.po"]

@@ -4,6 +4,7 @@ from .state import get_state
 
 from collections.abc import Iterator, MutableMapping
 from pathlib import Path
+import copy
 
 NATI_TYPES: set[str] = {
     PowangNova.type   ,
@@ -68,6 +69,8 @@ class Parser:
         state = get_state()
         self.type_alias: dict[str, DictRepr] = state.type_alias
         self.user_types: set[str] = state.user_types
+        self._synthetic_counter: int = 0
+        self._consts: dict[str, DictRepr] = {}
 
 
     def parse(self):
@@ -146,6 +149,10 @@ class Parser:
                     ))
                 case 'for':
                     return self.helper_ForStatement()
+                case 'match':
+                    return self.helper_MatchStatement()
+                case 'const':
+                    return self.helper_ConstDeclaration()
                 case 'fun':
                     return self.helper_FunDeclaration()
                 case 'return':
@@ -175,7 +182,7 @@ class Parser:
     def helper_ExternSignature(self):
         if self.isNextKeyword('fun'):
             self.advance()
-            powang_mapping = self.helper_FunDeclaration()
+            powang_mapping = self.helper_FunDeclaration(allow_body=False)
             assert powang_mapping['value']['block']['value'] is None, powang_error_syntax('extern function', "Expected function signature but function definition was encountered")
         else:
             assert self.isNextKeyword('type'), powang_error_syntax('extern signature', "There's only external functions and types", [
@@ -329,7 +336,128 @@ class Parser:
             'methods'    : methods,
         }).toDict()
 
+    def DestructurePattern(self):
+        self.consume(LexerTokenType.LEFT_BRACKET, 'destructuring pattern')
+        entries: list[DictRepr] = []
+        while self.next.type != LexerTokenType.RIGHT_BRACKET:
+            identifier = self.Identifier()
+            entry_type: DictRepr | None = None
+            reference = False
+            if self.next.type == LexerTokenType.COLON:
+                self.advance('destructuring binding')
+                if self.next.type == LexerTokenType.AMPERSAND:
+                    self.advance('destructuring reference')
+                    reference = True
+                    if self.next.type not in {
+                        LexerTokenType.COMMA,
+                        LexerTokenType.RIGHT_BRACKET,
+                    }:
+                        entry_type = self.Type()
+                else:
+                    entry_type = self.Type()
+            entries.append({
+                'identifier': identifier,
+                'type': entry_type,
+                'reference': reference,
+            })
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+            else:
+                break
+        self.consume(LexerTokenType.RIGHT_BRACKET, 'destructuring pattern')
+
+        pattern = doToken(ParserTokenType.DESTRUCTURE_PATTERN, {
+            'entries': entries,
+            'group_type': None,
+            'group_reference': False,
+        }).toDict()
+
+        if self.next.type == LexerTokenType.COLON:
+            state = self._saveParserState()
+            self.advance()
+            if self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
+                self._restoreParserState(state)
+            else:
+                group_reference = False
+                group_type: DictRepr | None = None
+                if self.next.type == LexerTokenType.AMPERSAND:
+                    self.advance('destructuring reference')
+                    group_reference = True
+                    if self.next.type not in {
+                        LexerTokenType.OPERATOR_ASSIGNMENT,
+                        LexerTokenType.SEMI_COLON,
+                        LexerTokenType.RIGHT_ARROW,
+                    }:
+                        group_type = self.Type()
+                else:
+                    group_type = self.Type()
+                pattern['value']['group_type'] = group_type
+                pattern['value']['group_reference'] = group_reference
+        return pattern
+
+    @staticmethod
+    def _destructure_is_typed(pattern: DictRepr) -> bool:
+        group_type = pattern['value'].get('group_type')
+        if group_type is not None:
+            return True
+        for entry in pattern['value'].get('entries', []):
+            if entry.get('type') is None:
+                return False
+        return True
+
+    @staticmethod
+    def _destructure_operator(pattern: DictRepr) -> str:
+        return '=' if Parser._destructure_is_typed(pattern) else ':='
+
+    def DestructureDeclaration(self):
+        pattern = self.DestructurePattern()
+        if self.next.type == LexerTokenType.COLON:
+            self.advance()
+            self.consume(LexerTokenType.OPERATOR_ASSIGNMENT, 'destructuring declaration')
+            operator = ':='
+        elif self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
+            self.advance()
+            operator = '='
+        else:
+            raise powang_throw(powang_error_syntax(
+                'destructuring declaration',
+                'Expected := or = after the destructuring pattern',
+            ))
+
+        if operator == ':=' and self._destructure_is_typed(pattern):
+            raise powang_throw(powang_error_syntax(
+                'destructuring declaration',
+                'Use = when every binding has an explicit type',
+            ))
+        if operator == '=' and not self._destructure_is_typed(pattern):
+            raise powang_throw(powang_error_syntax(
+                'destructuring declaration',
+                'Use := when at least one binding infers its type',
+            ))
+
+        expression = self.Expression()
+        return doToken(ParserTokenType.DESTRUCTURE_DECLARATION, {
+            'pattern': pattern,
+            'expression': expression,
+            'operator': operator,
+        }).toDict()
+
     def Statement(self):
+        if self.next.type == LexerTokenType.LEFT_BRACKET:
+            state = self._saveParserState()
+            is_destructure = False
+            try:
+                self.DestructurePattern()
+                is_destructure = self.next.type in {
+                    LexerTokenType.COLON,
+                    LexerTokenType.OPERATOR_ASSIGNMENT,
+                }
+            except Exception:
+                is_destructure = False
+            self._restoreParserState(state)
+            if is_destructure:
+                return self.DestructureDeclaration()
+
         expr = self.Expression()        
 
         if self.next.type in {
@@ -402,10 +530,29 @@ class Parser:
             "finally_block": finally_block,
         }).toDict()
 
+    def _saveParserState(self):
+        return (self.tokenizer.position, self.tokenizer.row, self.next)
+
+    def _restoreParserState(self, state) -> None:
+        self.tokenizer.position, self.tokenizer.row, self.next = state
+
+    def Condition(self):
+        """Accept a declaration or a normal expression in an `if` condition."""
+        state = self._saveParserState()
+        statement = self.Statement()
+        if statement['type'] in {
+            ParserTokenType.DECLARATION_INTERPRET,
+            ParserTokenType.DECLARATION_TYPED_VAR,
+            ParserTokenType.DECLARATION_UNDEFINED,
+        }:
+            return statement
+        self._restoreParserState(state)
+        return self.Expression()
+
     def helper_IfStatement(self):
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
               expr = self.ParenthesizedExpression()
-        else: expr = self.Expression()
+        else: expr = self.Condition()
             
         if self.next.type == LexerTokenType.LEFT_BRACE:
             block = self.BlockStatement()
@@ -431,13 +578,99 @@ class Parser:
             "else": else_block,
         }).toDict()
         
+    def MatchPattern(self):
+        if self.next.type == LexerTokenType.IDENTIFIER and self.next.value == '_':
+            self.advance('match wildcard')
+            return {'kind': 'wildcard', 'value': None, 'type': None}
+        if self.next.type in {
+            LexerTokenType.INTEGER_LITERAL,
+            LexerTokenType.FLOATING_LITERAL,
+            LexerTokenType.STRING_LITERAL,
+            LexerTokenType.BOOLEAN_LITERAL,
+            LexerTokenType.NOVA_LITERAL,
+            LexerTokenType.INTERPOLATED_STRING_LITERAL,
+        }:
+            return {'kind': 'literal', 'value': self.Literal('match pattern'), 'type': None}
+        if self.next.type == LexerTokenType.IDENTIFIER:
+            identifier = self.Identifier()
+            type_node: DictRepr | None = None
+            if self.next.type == LexerTokenType.COLON:
+                self.advance()
+                type_node = self.Type()
+            return {'kind': 'binding', 'value': identifier, 'type': type_node}
+        raise powang_throw(powang_error_syntax(
+            'match pattern',
+            'Expected a literal, a binding or _',
+            [f'but {LexerTokenType.toStr(self.next.type)} was encountered'],
+        ))
+
+    def helper_MatchStatement(self):
+        subject = self.Expression()
+        self.consume(LexerTokenType.LEFT_BRACE, 'match statement')
+        cases: list[DictRepr] = []
+        while self.isNextKeyword('case'):
+            self.advance()
+            pattern = self.MatchPattern()
+            guard: DictRepr | None = None
+            if self.isNextKeyword('if'):
+                self.advance()
+                guard = self.Expression()
+            self.consume(LexerTokenType.RIGHT_ARROW, 'match case')
+            if self.next.type == LexerTokenType.LEFT_BRACE:
+                block = self.BlockStatement()
+            else:
+                statement = self.ExpressionStatement()
+                assert statement is not None, powang_error_syntax('match case', 'Reached end of file')
+                block = doToken(ParserTokenType.BLOCK_STATEMENT, [statement]).toDict()
+            cases.append({
+                'pattern': pattern,
+                'guard': guard,
+                'block': block,
+            })
+        self.consume(LexerTokenType.RIGHT_BRACE, 'match statement')
+        return doToken(ParserTokenType.MATCH_STATEMENT, {
+            'subject': subject,
+            'cases': cases,
+        }).toDict()
+
     def helper_ForStatement(self):
         has_paren = False
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
             self.consume(LexerTokenType.LEFT_PARENTHESIS)
             has_paren = True
 
-        start_expression = self.Statement()
+        destructure_pattern: DictRepr | None = None
+        if self.next.type == LexerTokenType.LEFT_BRACKET:
+            state = self._saveParserState()
+            try:
+                candidate = self.DestructurePattern()
+                if self.next.type == LexerTokenType.RIGHT_ARROW:
+                    destructure_pattern = candidate
+                    synthetic_identifier = doToken(
+                        LexerTokenType.IDENTIFIER,
+                        f'__powang_iter_{self._synthetic_counter}',
+                    ).toDict()
+                    self._synthetic_counter += 1
+                    start_expression = doToken(ParserTokenType.DECLARATION_UNDEFINED, {
+                        "identifier": synthetic_identifier,
+                        "type": doToken(ParserTokenType.TYPE, {
+                            'value': PowangSome.type,
+                            'const': False,
+                            'weak': False,
+                            'reference': None,
+                        }).toDict(),
+                        "inferred": True,
+                    }).toDict()
+                else:
+                    self._restoreParserState(state)
+                    start_expression = self.Statement()
+            except Exception:
+                self._restoreParserState(state)
+                start_expression = self.Statement()
+        else:
+            start_expression = self.Statement()
+
+        original_start = start_expression
 
         if self.next.type == LexerTokenType.RIGHT_ARROW:
             if start_expression['type'] not in {
@@ -456,10 +689,80 @@ class Parser:
                         'weak': False,
                         'reference': None,
                     }).toDict(),
+                    "inferred": True,
                 }).toDict()
 
             self.advance()
             iterable_expression = self.Expression()
+
+            ## `for i >> start >> end` and `for i >> start >> step >> end`
+            ## are range loops. They desugar to the existing C-style for node.
+            if self.next.type == LexerTokenType.RIGHT_ARROW:
+                self.advance()
+                second_expression = self.Expression()
+                step_expression: DictRepr | None = None
+                end_expression: DictRepr = second_expression
+                if self.next.type == LexerTokenType.RIGHT_ARROW:
+                    self.advance()
+                    step_expression = second_expression
+                    end_expression = self.Expression()
+
+                if original_start['type'] == LexerTokenType.IDENTIFIER:
+                    iterator_identifier = original_start
+                    iterator_type = None
+                elif original_start['type'] in {
+                    ParserTokenType.DECLARATION_UNDEFINED,
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                }:
+                    iterator_identifier = original_start['value']['identifier']
+                    iterator_type = original_start['value']['type']
+                else:
+                    raise powang_throw(powang_error_syntax(
+                        'for range expression',
+                        'iterator must be a variable declaration or an identifier',
+                    ))
+
+                if iterator_type is None:
+                    start_declaration = doToken(ParserTokenType.DECLARATION_INTERPRET, {
+                        "identifier": iterator_identifier,
+                        "expression": iterable_expression,
+                    }).toDict()
+                else:
+                    start_declaration = doToken(ParserTokenType.DECLARATION_TYPED_VAR, {
+                        "identifier": iterator_identifier,
+                        "type": iterator_type,
+                        "expression": iterable_expression,
+                    }).toDict()
+
+                condition = doToken(ParserTokenType.BINARY_EXPRESSION, {
+                    "left": iterator_identifier,
+                    "operator": doToken(LexerTokenType.COMPARE_LSS, '<').toDict(),
+                    "right": end_expression,
+                    "typed": False,
+                }).toDict()
+                step_value = step_expression if step_expression is not None else \
+                    doToken(LexerTokenType.INTEGER_LITERAL, 1).toDict()
+                increment_expression = doToken(ParserTokenType.BINARY_EXPRESSION, {
+                    "left": iterator_identifier,
+                    "operator": doToken(LexerTokenType.OPERATOR_PLUS, '+').toDict(),
+                    "right": step_value,
+                    "typed": False,
+                }).toDict()
+                increment = doToken(ParserTokenType.ASSIGNMENT, {
+                    "target": iterator_identifier,
+                    "expression": increment_expression,
+                }).toDict()
+
+                if has_paren:
+                    self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+                block = self.BlockStatement()
+                return doToken(ParserTokenType.FOR_STATEMENT, {
+                    "start_expression": start_declaration,
+                    "middle_expression": condition,
+                    "last_expression": increment,
+                    "block": block,
+                }).toDict()
+
             if_expression: DictRepr | None = None
             if self.next.type == LexerTokenType.KEYWORD:
                 assert self.next.value == 'if', powang_error_syntax('for each expression', f"{self.next.value} is not a valid keyword in this context", [
@@ -468,6 +771,13 @@ class Parser:
                 self.advance()
                 if_expression = self.Expression()
             block = self.BlockStatement()
+            if destructure_pattern is not None:
+                destructure_declaration = doToken(ParserTokenType.DESTRUCTURE_DECLARATION, {
+                    'pattern': destructure_pattern,
+                    'expression': start_expression['value']['identifier'],
+                    'operator': self._destructure_operator(destructure_pattern),
+                }).toDict()
+                block['value'] = [destructure_declaration] + block['value']
             return doToken(ParserTokenType.FOR_EACH_STATEMENT, {
                 "iterator": start_expression,
                 "expression": iterable_expression,
@@ -495,7 +805,19 @@ class Parser:
             "block": block,
         }).toDict()
 
-    def helper_FunDeclaration(self):
+    def helper_ConstDeclaration(self):
+        identifier = self.Identifier()
+        if self.next.type == LexerTokenType.COLON:
+            self.advance()
+            self.Type()
+        self.consume(LexerTokenType.OPERATOR_ASSIGNMENT, 'const declaration')
+        expression = self.Expression()
+        self._consts[identifier['value']] = expression
+        if self.next.type == LexerTokenType.SEMI_COLON:
+            self.advance()
+        return None
+
+    def helper_FunDeclaration(self, allow_body: bool = True):
         identifier = self.Identifier()
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
         args: list[DictRepr] = []
@@ -539,6 +861,19 @@ class Parser:
             return_expr = self.Type()
         if self.next.type == LexerTokenType.LEFT_BRACE:
             block = self.BlockStatement()
+        elif allow_body and self.next.type == LexerTokenType.RIGHT_ARROW:
+            assert return_expr is not None, powang_error_syntax(
+                'function body',
+                'Expression-bodied functions require a return type',
+                ['add a return type after the closing parenthesis'],
+            )
+            self.advance('function body')
+            expression = self.Expression()
+            block = doToken(ParserTokenType.BLOCK_STATEMENT, [
+                doToken(ParserTokenType.RETURN_EXPRESSION, expression).toDict()
+            ]).toDict()
+            if self.next.type == LexerTokenType.SEMI_COLON:
+                self.advance()
         else:
             block = doToken(ParserTokenType.BLOCK_STATEMENT, None).toDict()
         return doToken(ParserTokenType.DECLARATION_FUN, {
@@ -550,7 +885,17 @@ class Parser:
         }).toDict()
 
     def Expression(self):
-        return self.Level_0_Expression()
+        return self.Level_Pipeline()
+
+    def Level_Pipeline(self):
+        return self.helper_BinaryExpression(self.Level_Coalesce, (
+            LexerTokenType.PIPELINE,
+        ))
+
+    def Level_Coalesce(self):
+        return self.helper_BinaryExpression(self.Level_0_Expression, (
+            LexerTokenType.COALESCE,
+        ))
 
     def Level_0_Expression(self):
         return self.helper_BinaryExpression(self. Level_1_Expression, (
@@ -682,6 +1027,12 @@ class Parser:
                                 "arguments": call_expression['value']['arguments'] 
                             }
                         ).toDict()
+            elif self.next.type == LexerTokenType.SAFE_ACCESS:
+                self.advance('safe access')
+                expr = doToken(ParserTokenType.SAFE_ACCESS_EXPRESSION, {
+                    "target": expr,
+                    "property": self.Identifier(),
+                }).toDict()
             else:
                 break
         return expr
@@ -690,6 +1041,20 @@ class Parser:
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
         args: list[DictRepr] = []
         while self.next is not None and self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+            if self.next.type == LexerTokenType.IDENTIFIER:
+                state = self._saveParserState()
+                name = self.Identifier()
+                if self.next.type == LexerTokenType.RIGHT_ARROW:
+                    self.advance()
+                    value = self.Expression()
+                    args.append(doToken(ParserTokenType.NAMED_ARGUMENT, {
+                        'name': name,
+                        'value': value,
+                    }).toDict())
+                    if self.next.type == LexerTokenType.COMMA:
+                        self.consume(LexerTokenType.COMMA)
+                    continue
+                self._restoreParserState(state)
             args.append(self.Expression())
             # if self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
             if self.next.type == LexerTokenType.COMMA:
@@ -776,6 +1141,8 @@ class Parser:
                 if self.next.type == LexerTokenType.COLON:
                     self.consume(LexerTokenType.COLON)
                     return self.VariableDeclaration(identifier)
+                if identifier['value'] in self._consts:
+                    return copy.deepcopy(self._consts[identifier['value']])
                 return identifier
         return self.Literal('primary expression')
 
@@ -832,17 +1199,24 @@ class Parser:
         weak = const = False
         error_union = False
         reference = False
+        element_type: Optional[DictRepr] = None
 
         if self.next.type == LexerTokenType.AMPERSAND:
             self.advance('reference type')
             reference = True
 
-        # TODO: Try the walrus notation for the weak = True and const = True
         if self.next.type == LexerTokenType.ARROBA:
             self.advance('type prefix')
             weak = True
 
         type_identifier: str = self.Identifier()['value']
+
+        ## `array[element]` is the typed form. Bare `array` is sugar for
+        ## `array[any]`, where `any` resolves to the gradual `some` type.
+        if type_identifier == PowangArray.type and self.next is not None and self.next.type == LexerTokenType.LEFT_BRACKET:
+            self.consume(LexerTokenType.LEFT_BRACKET, 'array element type')
+            element_type = self.Type()
+            self.consume(LexerTokenType.RIGHT_BRACKET, 'array element type')
 
         if reference and weak:
             raise powang_throw(powang_error_format(
@@ -875,8 +1249,14 @@ class Parser:
                 f"type alias {type_identifier} already refers to a constant {alias['value']}"
             ])
             const = alias['const']
+            if element_type is None and alias.get('element_type') is not None:
+                element_type = alias['element_type']
             type_identifier = alias['value']
-        
+
+        ## `any` is the gradual unknown used by bare `array` sugar.
+        if type_identifier == 'any':
+            type_identifier = PowangSome.type
+
         ## A trailing `?` marks an error-union return annotation:
         ## `fun find(id: integer): map? { ... }` may also return `error`.
         if self.next.type == LexerTokenType.QUESTION_MARK:
@@ -889,6 +1269,7 @@ class Parser:
             "const": const,
             "error_union": error_union,
             "reference": reference,
+            "element_type": element_type,
         }).toDict()
 
     def helper_KeyValuePair(self, key: DictRepr):
@@ -912,6 +1293,8 @@ class Parser:
                 return self.FloatingNumberLiteral()
             case LexerTokenType.STRING_LITERAL:
                 return self.StringLiteral()
+            case LexerTokenType.INTERPOLATED_STRING_LITERAL:
+                return self.InterpolatedStringLiteral()
         raise powang_throw(powang_error_syntax_unexpected_token(
             where,
             LexerTokenType.toStr(self.next.type),
@@ -939,21 +1322,111 @@ class Parser:
 
     def StringLiteral(self):
         token = self.consume(LexerTokenType.STRING_LITERAL)
+        token.value = self._processStringEscapes(token.value)
+        return token.toDict(token.value)
+
+    @staticmethod
+    def _processStringEscapes(value: str) -> str:
         ## Manual escape processing: unicode_escape would re-decode the raw
         ## UTF-8 bytes as latin-1 and corrupt non-ASCII characters.
         ESCAPES: dict[str, str] = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '"': '"', '0': '\0'}
         processed: list[str] = []
         i = 0
-        while i < len(token.value):
-            char = token.value[i]
-            if char == '\\' and i + 1 < len(token.value) and token.value[i + 1] in ESCAPES:
-                processed.append(ESCAPES[token.value[i + 1]])
+        while i < len(value):
+            char = value[i]
+            if char == '\\' and i + 1 < len(value) and value[i + 1] in ESCAPES:
+                processed.append(ESCAPES[value[i + 1]])
                 i += 2
             else:
                 processed.append(char)
                 i += 1
-        token.value = ''.join(processed)
-        return token.toDict(token.value)
+        return ''.join(processed)
+
+    def InterpolatedStringLiteral(self):
+        token = self.consume(LexerTokenType.INTERPOLATED_STRING_LITERAL)
+        raw = token.value
+        parts: list[dict] = []
+        text: list[str] = []
+
+        def flush_text() -> None:
+            if text:
+                parts.append({
+                    'kind': 'text',
+                    'value': self._processStringEscapes(''.join(text)),
+                })
+                text.clear()
+
+        i = 0
+        while i < len(raw):
+            char = raw[i]
+            if char == '\\' and i + 1 < len(raw):
+                text.append(char)
+                text.append(raw[i + 1])
+                i += 2
+                continue
+            if char == '{':
+                if i + 1 < len(raw) and raw[i + 1] == '{':
+                    text.append('{')
+                    i += 2
+                    continue
+                flush_text()
+                depth = 1
+                j = i + 1
+                in_string = False
+                escaped = False
+                while j < len(raw):
+                    current = raw[j]
+                    if in_string:
+                        if escaped:
+                            escaped = False
+                        elif current == '\\':
+                            escaped = True
+                        elif current == '"':
+                            in_string = False
+                    else:
+                        if current == '"':
+                            in_string = True
+                        elif current == '{':
+                            depth += 1
+                        elif current == '}':
+                            depth -= 1
+                            if depth == 0:
+                                break
+                    j += 1
+                if j >= len(raw):
+                    raise powang_throw(powang_error_syntax(
+                        'interpolated string',
+                        'Unclosed interpolation',
+                        ['add a closing brace'],
+                    ))
+                expression_source = raw[i + 1:j]
+                sub_parser = Parser(expression_source)
+                sub_parser._consts = self._consts
+                expression = sub_parser.Expression()
+                if sub_parser.next.type != LexerTokenType.END_OF_FILE:
+                    raise powang_throw(powang_error_syntax(
+                        'interpolated string',
+                        'Unexpected token in interpolation',
+                        [f'but {LexerTokenType.toStr(sub_parser.next.type)} was encountered'],
+                    ))
+                parts.append({'kind': 'expression', 'value': expression})
+                i = j + 1
+                continue
+            if char == '}':
+                if i + 1 < len(raw) and raw[i + 1] == '}':
+                    text.append('}')
+                    i += 2
+                    continue
+                raise powang_throw(powang_error_syntax(
+                    'interpolated string',
+                    'Unexpected closing brace',
+                    ['use }} for a literal brace'],
+                ))
+            text.append(char)
+            i += 1
+
+        flush_text()
+        return doToken(ParserTokenType.INTERPOLATED_STRING, {'parts': parts}).toDict()
 
     def advance(self, where: Optional[str] = None):
         return self.consume(self.next.type, where)

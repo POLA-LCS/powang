@@ -5,7 +5,9 @@ from src.stdlib_http_server import shutdown_state_servers
 from src.stdlib_env import set_argv
 from src.typecheck import check_source
 from sys import argv, exit as sys_exit, stdin
+import sys as _sys
 import pathlib
+from pathlib import Path
 import traceback
 
 INTERPRETER_PATH = pathlib.Path(__file__).resolve()
@@ -109,7 +111,7 @@ def arguments_handler(args: list[str]):
 
 
     if ast_output is not None and not ast_output:
-        raise powang_throw(powang_error_format('USAGE', None, 'dump output was nos provided'))
+        raise powang_throw(powang_error_format('USAGE', None, 'dump output was not provided'))
     if check_only and no_check:
         raise powang_throw(powang_error_format('USAGE', None, 'Conflicting flags', [
             "--check and --no-check cannot be used together"
@@ -164,14 +166,12 @@ def main(args: list[str]):
 
 def run_cli() -> int:
     try:
-        import sys as _sys
         if hasattr(_sys.stdout, 'reconfigure'):
             _sys.stdout.reconfigure(encoding='utf-8')
             _sys.stderr.reconfigure(encoding='utf-8')
     except (OSError, ValueError):
         pass
     try:
-        import sys as _sys
         ## The language depth guard (900 evaluation levels) is only reachable
         ## if the Python stack can hold the corresponding interpreter frames.
         ## Python 3.12+ keeps Python frames off the C stack, so this is safe.
@@ -198,7 +198,7 @@ def run_cli() -> int:
         print(powang_error_format("KEYBOARD", "User input", "Keyboard interrupt"))
         exit_code = 130
     except FileNotFoundError as ferror:
-        print(powang_error_format("INPUT", "File read", f"File not founded: {ferror.filename}"))
+        print(powang_error_format("INPUT", "File read", f"File not found: {ferror.filename}"))
         exit_code = 1
     except RecursionError:
         print(powang_error_format("RECURSION", "runtime", "Python recursion limit reached"))

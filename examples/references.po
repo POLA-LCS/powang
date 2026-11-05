@@ -1,8 +1,4 @@
-## References let a function modify the caller's variable.
-##
-## A parameter declared `&type` receives a reference. Callers pass `&variable`.
-## References live only for the duration of one call: they cannot be stored,
-## returned, or sent to a task.
+## References: pass a variable by reference and mutate the caller.
 
 fun increment(value: &integer) {
     value += 1;
@@ -22,36 +18,33 @@ fun add_all(target: &integer, amounts: array) {
 
 counter := 10;
 increment(&counter);
-output(counter);
-output("\n");
+print(counter);
+print("\n");
 
 left := 1;
 right := 2;
 swap(&left, &right);
-output(left);
-output(" ");
-output(right);
-output("\n");
+print(left);
+print(" ");
+print(right);
+print("\n");
 
 total := 0;
 add_all(&total, [1 2 3 4]);
-output(total);
-output("\n");
+print(total);
+print("\n");
 
-## The callee can also read through the reference.
 fun doubled(value: &integer): integer {
     return value * 2;
 }
 
-output(doubled(&counter));
-output("\n");
+print(doubled(&counter));
+print("\n");
 
-## Constants cannot be referenced.
 limit: integer! = 5;
 try {
-    ## Uncomment to see the runtime error:
     ## increment(&limit);
-    output("constants are protected\n");
+    print("constants are protected\n");
 } catch problem {
-    output(problem.kind + "\n");
+    print(problem.kind + "\n");
 }

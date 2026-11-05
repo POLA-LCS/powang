@@ -1,11 +1,4 @@
-## This a Powang example
-## Functions
-
-## The function template is the next
-## fun foo(arg1: type1, arg2: type2, ...): return_type {}
-
-## If the function has no return type, it assumes to be nova
-## If the function has no return value, it assumes to ve nova
+## Functions: declarations, return types and overload resolution.
 
 a: integer = 20;
 b: number = 1.5;
@@ -14,21 +7,10 @@ fun add(left: integer, right: integer): integer {
 	return left + right;
 }
 
-output(add(a, b) "\n"); ## 21
-
-## If you have multiple definitions there is a points system
-## that decided what function should use based on
-## argument number matching
-## min argumetn number matching
-## type match
-## implicit type cast
-## its a weak var?
-## its a const var?
+print(add(a, b) "\n"); ## 21
 
 fun add(left: integer, right: number): number {
-	return left +: right; ## Inverse implicit cast operator
-	## It is like doing (left as right type) + right but implicitly
+	return left +: right;
 }
 
-## Now doing add(a, b) uses the function with the right types
-output(add(a, b) "\n"); ## 21.5
+print(add(a, b) "\n"); ## 21.5

@@ -20,22 +20,22 @@ type Point {
 first := [5] as Point;
 second: Point = 9;
 
-output(first.x);
-output(" ");
-output(first.sum(second));
-output("\n");
+print(first.x);
+print(" ");
+print(first.sum(second));
+print("\n");
 
-output(first.describe());
-output("\n");
+print(first.describe());
+print("\n");
 
-## y is private, so it is only reachable through a method.
-output(second.describe());
-output("\n");
+## y is private and reachable through a method.
+print(second.describe());
+print("\n");
 
 ## Instances copy by value.
 copy := first;
 copy.x = 100;
-output(first.x);
-output(" ");
-output(copy.x);
-output("\n");
+print(first.x);
+print(" ");
+print(copy.x);
+print("\n");

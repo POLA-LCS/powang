@@ -15,6 +15,7 @@ class LexerTokenType(TokenTypeBase):
     INTEGER_LITERAL  = auto() # 69
     FLOATING_LITERAL = auto() # 3.141592
     STRING_LITERAL   = auto() # "hello"
+    INTERPOLATED_STRING_LITERAL = auto() # $"hello {name}"
 
     # Identifiers
     IDENTIFIER = auto()
@@ -53,6 +54,8 @@ class LexerTokenType(TokenTypeBase):
     COMMA       = auto() # ,
     DOT         = auto() # .
     QUESTION_MARK = auto() # ?
+    SAFE_ACCESS = auto() # ?.
+    COALESCE    = auto() # ??
 
     # Compare
     COMPARE_EQ        = auto() # ==
@@ -67,6 +70,7 @@ class LexerTokenType(TokenTypeBase):
     AND  = auto() # &&
     AMPERSAND = auto() # &
     OR = auto() # ||
+    PIPELINE = auto() # |>
 
     # Extra
     END_OF_FILE = auto()
@@ -103,6 +107,16 @@ class ParserTokenType(TokenTypeBase):
     EXTERN_REFERENCE         = auto()
     SPAWN_EXPRESSION         = auto()
     REFERENCE_EXPRESSION     = auto()
+    INTERPOLATED_STRING      = auto()
+    MATCH_STATEMENT          = auto()
+    DESTRUCTURE_DECLARATION  = auto()
+    DESTRUCTURE_PATTERN      = auto()
+    RANGE_STATEMENT          = auto()
+    SAFE_ACCESS_EXPRESSION   = auto()
+    COALESCE_EXPRESSION      = auto()
+    NAMED_ARGUMENT           = auto()
+    PIPELINE_EXPRESSION      = auto()
+    CONST_DECLARATION        = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):

@@ -3,10 +3,10 @@ from ..powang_types import *
 from ..error import *
 from .cast import explicitCastString
 
-def builtin_output(*args: PowangAny) -> PowangInteger:
+def builtin_print(*args: PowangAny) -> PowangInteger:
     """
-    Prints out in an standard way any element given.  
-    returns the amount of arguments that were passed
+    Prints each argument without adding a newline.
+    Returns the number of arguments.
     """
     
     for arg in args:
@@ -14,12 +14,18 @@ def builtin_output(*args: PowangAny) -> PowangInteger:
         if arg.type == PowangObjectType.type and casted_arg is None:
             casted_arg = PowangString(f"<type: {arg.type_name}>")
         assert casted_arg is not None, powang_error_invalid_cast(
-            "function: output",
+            "function: print",
             PowangString.type,
             arg.type,
             True,
         )
         print(casted_arg.data, sep='', end='')
+    return PowangInteger(len(args))
+
+def builtin_println(*args: PowangAny) -> PowangInteger:
+    """Prints each argument and then a newline."""
+    builtin_print(*args)
+    print()
     return PowangInteger(len(args))
 
 def builtin_format(
@@ -75,7 +81,7 @@ def builtin_format(
 def builtin_printf(
     format_string: PowangString | PowangAny,
     *args: PowangAny,
-):  return builtin_output(builtin_format(format_string, *args))
+):  return builtin_print(builtin_format(format_string, *args))
 
 def builtin_fail(
     kind: PowangString | PowangAny,

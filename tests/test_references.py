@@ -17,7 +17,7 @@ class ReferenceTests(unittest.TestCase):
             "fun increment(value: &integer) { value += 1; }\n"
             "x := 10;\n"
             "increment(&x);\n"
-            "output(x);\n"
+            "print(x);\n"
         )
         self.assertEqual(result.returncode, 0, result.combined)
         self.assertEqual(result.lines, ["11"])
@@ -32,7 +32,7 @@ class ReferenceTests(unittest.TestCase):
             "left := 1;\n"
             "right := 2;\n"
             "swap(&left, &right);\n"
-            "output(left); output(\" \"); output(right);\n"
+            "print(left); print(\" \"); print(right);\n"
         )
         self.assertEqual(result.returncode, 0, result.combined)
         self.assertEqual(result.lines, ["2 1"])
@@ -41,7 +41,7 @@ class ReferenceTests(unittest.TestCase):
         result = run_source(
             "fun doubled(value: &integer): integer { return value * 2; }\n"
             "x := 21;\n"
-            "output(doubled(&x));\n"
+            "print(doubled(&x));\n"
         )
         self.assertEqual(result.returncode, 0, result.combined)
         self.assertEqual(result.lines, ["42"])

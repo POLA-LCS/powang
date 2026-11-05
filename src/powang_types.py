@@ -297,7 +297,7 @@ class PowangString(PowangTypeBase):
         if right.type == PowangString.type:
             return PowangString(right.data)
         ## Error values print through their readable one-line form. This keeps
-        ## `output(err)` useful without making errors JSON-serializable.
+        ## `print(err)` useful without making errors JSON-serializable.
         if right.type == PowangErrorValue.type:
             return PowangString(right.data)
         ## Modules are opaque namespaces; their printable form names the module
@@ -305,7 +305,7 @@ class PowangString(PowangTypeBase):
         if right.type == PowangModule.type:
             return PowangString(f'<module: {right.name}>')
         ## Tasks print as an opaque handle. The status is part of the surface
-        ## so `output(t)` is useful without exposing thread internals.
+        ## so `print(t)` is useful without exposing thread internals.
         if right.type == PowangTask.type:
             return PowangString(repr(right))
         return None
@@ -463,7 +463,7 @@ class PowangMap(PowangTypeBase):
             return new_map
         return None
     
-# ====== USER DEFINED FUNCTION ========= TODO
+# ====== USER DEFINED FUNCTION =========
 class PowangFunction(PowangTypeBase):
     data: list[DictRepr]
     type: Literal['function'] = 'function'
@@ -584,6 +584,51 @@ class PowangReference(PowangTypeBase):
 
     def __repr__(self) -> str:
         return f"<reference: {self.name}>"
+
+
+class PowangElementReference(PowangTypeBase):
+    """A reference to one element of an array-like container."""
+
+    type: Literal['reference'] = 'reference'
+
+    def __init__(self, container: 'PowangArray', index: int):
+        super().__init__(None)
+        self.container = container
+        self.index = index
+        self.defined = True
+
+    def get(self) -> 'PowangAny':
+        return self.container.data[self.index]
+
+    def set(self, value: 'PowangAny') -> None:
+        self.container.data[self.index] = value
+
+    def __repr__(self) -> str:
+        return f"<reference: element {self.index}>"
+
+
+class PowangPropertyReference(PowangTypeBase):
+    """A reference to one public property of an object."""
+
+    type: Literal['reference'] = 'reference'
+
+    def __init__(self, container: 'PowangObjectType', name: str):
+        super().__init__(None)
+        self.container = container
+        self.name = name
+        self.defined = True
+
+    def get(self) -> 'PowangAny':
+        value = self.container.getProperty(self.name, False)
+        if value is None:
+            raise KeyError(self.name)
+        return value
+
+    def set(self, value: 'PowangAny') -> None:
+        self.container.data[self.name] = value
+
+    def __repr__(self) -> str:
+        return f"<reference: property {self.name}>"
 
 # ====== MODULE =========
 class PowangModule(PowangTypeBase):

@@ -9,18 +9,16 @@ fun sum_squares(limit: integer): integer {
 }
 
 fun run() {
-    ## Task handles live in a local scope: a global task binding would block
-    ## further spawns by design.
     first := spawn sum_squares(100);
     second := spawn sum_squares(200);
 
-    output(typeof(first));
-    output(" ");
+    print(typeof(first));
+    print(" ");
 
-    output(wait(first));
-    output(" ");
-    output(wait(second));
-    output("\n");
+    print(wait(first));
+    print(" ");
+    print(wait(second));
+    print("\n");
 }
 
 run();

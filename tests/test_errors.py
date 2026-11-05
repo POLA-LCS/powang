@@ -37,13 +37,13 @@ class ErrorDiagnosticTests(unittest.TestCase):
         self.assertNotIn("Traceback (most recent call last)", result.combined)
 
     def test_zero_array_chunk_size_is_rejected(self) -> None:
-        result = run_source("output(0 / [1 2 3]);\n")
+        result = run_source("print(0 / [1 2 3]);\n")
         self.assert_diagnostic(result, "VALUE", "Chunk size must be positive")
         self.assertIn("non-positive size 0", result.stdout)
         self.assertIn("[VALUE ERROR]", result.stdout)
 
     def test_unknown_identifier(self) -> None:
-        result = run_source("output(nope);\n")
+        result = run_source("print(nope);\n")
         self.assert_diagnostic(result, "IDENTIFIER", "nope")
         self.assertIn("doens't exists", result.stdout)
 
@@ -53,7 +53,7 @@ class ErrorDiagnosticTests(unittest.TestCase):
         self.assertIn("but string was encounter", result.stdout)
 
     def test_syntax_error(self) -> None:
-        result = run_source("output(1 +);\n")
+        result = run_source("print(1 +);\n")
         self.assert_diagnostic(result, "SYNTAX", "Unexpected token")
         self.assertIn("expected literal", result.stdout)
 
@@ -65,7 +65,7 @@ class ErrorDiagnosticTests(unittest.TestCase):
     def test_missing_input_file(self) -> None:
         missing = ROOT / "tests" / "__does_not_exist__.po"
         result = run_file(missing)
-        self.assert_diagnostic(result, "INPUT", "File not founded")
+        self.assert_diagnostic(result, "INPUT", "File not found")
         self.assertIn("__does_not_exist__.po", result.stdout)
 
     def test_invalid_cli_flag(self) -> None:
@@ -76,9 +76,9 @@ class ErrorDiagnosticTests(unittest.TestCase):
     def test_language_errors_do_not_leak_python_assertions(self) -> None:
         cases = {
             "return": "return 1;\n",
-            "identifier": "output(missing);\n",
-            "chunk": "output(0 / [1 2]);\n",
-            "syntax": "output(1 +);\n",
+            "identifier": "print(missing);\n",
+            "chunk": "print(0 / [1 2]);\n",
+            "syntax": "print(1 +);\n",
         }
         for name, source in cases.items():
             with self.subTest(name=name):
@@ -89,7 +89,7 @@ class ErrorDiagnosticTests(unittest.TestCase):
                 self.assertEqual(result.stderr, "")
 
     def test_successful_program_has_no_diagnostics(self) -> None:
-        result = run_source('output("ok"); output("\\n");\n')
+        result = run_source('print("ok"); print("\\n");\n')
         self.assertEqual(result.stdout, "ok\n")
         self.assertNotIn("[ERROR]", result.combined)
         self.assertNotRegex(result.combined, DIAGNOSTIC_RE)

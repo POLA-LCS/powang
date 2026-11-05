@@ -2,6 +2,37 @@
 
 All notable changes to powang are documented here.
 
+## 0.4.0
+
+### Added
+
+- Trailing commas in arrays, maps, calls and parameters.
+- String interpolation with `$"..."`, block comments with `#! ... !#`, and `println`.
+- Range iteration with `for i >> start >> end` and `for i >> start >> step >> end`.
+- Destructuring declarations and for-each destructuring, including typed bindings,
+  group types and references.
+- `match` statements with literal, binding, typed binding and wildcard patterns,
+  plus guards.
+- Null-safe `?.` access and `??` coalescing.
+- Declarations in `if` conditions, scoped to the branch.
+- Named arguments using `name >> value`.
+- Expression-bodied functions with `>>`.
+- Pipeline expressions using `|>`.
+- `const` declarations as compile-time macro substitution.
+- Typed array annotations such as `array[integer]` and `array[string]`. Element types are
+  checked on declarations, function arguments, returns, indexing and casts.
+- `inputf(receptor, prompt)` prints the prompt and then reads one line into the receptor.
+
+### Changed
+
+- The `output` builtin is now `print`.
+- A bare `array` annotation is sugar for `array[any]`.
+
+### Removed
+
+- The empty uv lock file and build artifacts. The powang repository keeps the
+  language implementation, standard library, examples, tests, docs, and banner.
+
 ## 0.2.0-web-rc1
 
 ### Added

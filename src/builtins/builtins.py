@@ -10,7 +10,8 @@ from .cast import * # HELPER
 
 BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
     # OUTPUT
-    'output': (1, -1, builtin_output),
+    'print': (1, -1, builtin_print),
+    'println': (0, -1, builtin_println),
     'format': (1, -1, builtin_format),
     'printf': (1, -1, builtin_printf),
     'error' : (1, -1, builtin_error ),
@@ -19,6 +20,7 @@ BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
 
     # INPUT
     'input' : (0,  1, builtin_input),
+    'inputf': (2,  2, builtin_inputf),
 
     # INFO
     'typeof': (1,  1, builtin_typeof),

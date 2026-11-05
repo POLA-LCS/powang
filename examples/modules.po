@@ -3,14 +3,14 @@
 use "./lib/greeting.po" as greeting;
 use "./lib/greeting.po" as *;
 
-output(greeting.hello("powang"));
-output("\n");
+print(greeting.hello("powang"));
+print("\n");
 
-output(greeting.shout("powang"));
-output("\n");
+print(greeting.shout("powang"));
+print("\n");
 
 ## Wildcard import exposes the exported names directly.
-output(hello("wildcard"));
-output("\n");
-output(shout("wildcard"));
-output("\n");
+print(hello("wildcard"));
+print("\n");
+print(shout("wildcard"));
+print("\n");

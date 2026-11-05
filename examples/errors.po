@@ -12,35 +12,35 @@ fun double(value: integer): integer? {
     return checked * 2;
 }
 
-output(double(5));
-output("\n");
+print(double(5));
+print("\n");
 
 rejected := double(-5);
-output(typeof(rejected));
-output(" ");
-output(rejected.kind);
-output(" ");
-output(rejected.message);
-output("\n");
+print(typeof(rejected));
+print(" ");
+print(rejected.kind);
+print(" ");
+print(rejected.message);
+print("\n");
 
 try {
     error("boom", "first detail", "second detail");
 } catch problem {
-    output(problem.kind);
-    output(" ");
-    output(problem.message);
-    output(" ");
-    output(size(problem.details));
-    output("\n");
+    print(problem.kind);
+    print(" ");
+    print(problem.message);
+    print(" ");
+    print(size(problem.details));
+    print("\n");
 }
 
 try {
     pieces := "abc" / 0;
 } catch problem {
-    output(problem.kind);
-    output(": ");
-    output(problem.message);
-    output("\n");
+    print(problem.kind);
+    print(": ");
+    print(problem.message);
+    print("\n");
 }
 
 ## `?` returns the error value from the enclosing function.
@@ -53,9 +53,9 @@ fun load(value: integer): integer? {
 }
 
 small := load(10);
-output(small);
-output("\n");
+print(small);
+print("\n");
 
 large := load(1000);
-output(large.kind);
-output("\n");
+print(large.kind);
+print("\n");

@@ -114,6 +114,19 @@ def run_source(
         return run_file(path, timeout=timeout)
 
 
+def run_source_with_input(
+    source: str,
+    input_text: str,
+    *,
+    name: str = "program.po",
+    timeout: int = DEFAULT_TIMEOUT,
+) -> RunResult:
+    """Write ``source`` to a temporary ``.po`` file and run it with stdin."""
+    with tempfile.TemporaryDirectory(prefix="powang-test-") as directory:
+        path = write_po(directory, name, source)
+        return run_command([str(path)], input_text=input_text, timeout=timeout)
+
+
 def run_repl(lines: str | list[str] | tuple[str, ...]) -> RunResult:
     """Pipe lines into the REPL. ``exit`` is not appended automatically."""
     if isinstance(lines, str):

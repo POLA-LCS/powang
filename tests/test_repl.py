@@ -30,7 +30,7 @@ class ReplTests(unittest.TestCase):
         assert_no_traceback(self, result)
 
     def test_exit_terminates_input_processing(self) -> None:
-        result = run_repl(["exit", "output(99);"])
+        result = run_repl(["exit", "print(99);"])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("99", result.stdout)
         self.assertEqual(result.stderr, "")

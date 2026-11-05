@@ -1,5 +1,15 @@
 from ..powang_types import *
 from ..parser import *
+from .output import builtin_print
+
+def builtin_inputf(receptor: PowangAny, prompt: PowangString | PowangAny):
+    assert prompt.type == PowangString.type, powang_error_type_match(
+        'builtin: inputf, prompt',
+        PowangString.type,
+        prompt.type,
+    )
+    builtin_print(prompt)
+    return builtin_input(receptor)
 
 def builtin_input(receptor: Optional[PowangAny] = None):
     if receptor is None:

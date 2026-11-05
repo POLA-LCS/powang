@@ -10,47 +10,47 @@ fun classify(value: integer): string {
     }
 }
 
-output(classify(-4) + " " + classify(0) + " " + classify(9) + "\n");
+print(classify(-4) + " " + classify(0) + " " + classify(9) + "\n");
 
 for index := 0; index < 3; index += 1 {
-    output(index);
-    output(" ");
+    print(index);
+    print(" ");
 }
-output("\n");
+print("\n");
 
 numbers := [10 20 30];
 
 ## Typed iterator
 for number: integer >> numbers {
-    output(number);
-    output(" ");
+    print(number);
+    print(" ");
 }
-output("\n");
+print("\n");
 
 ## Bare identifier, implicitly weakly typed
 for number >> numbers {
-    output(number);
-    output(" ");
+    print(number);
+    print(" ");
 }
-output("\n");
+print("\n");
 
 ## Filtered iteration
 for number >> numbers if number > 15 {
-    output(number);
-    output(" ");
+    print(number);
+    print(" ");
 }
-output("\n");
+print("\n");
 
 ## Strings and maps are iterable too
 for letter >> "abc" {
-    output(letter);
+    print(letter);
 }
-output("\n");
+print("\n");
 
 for pair >> ["a" >> 1, "b" >> 2] {
-    output(pair[0] + "=" + (pair[1] as string) + " ");
+    print(pair[0] + "=" + (pair[1] as string) + " ");
 }
-output("\n");
+print("\n");
 
 ## try/catch/finally
 fun divide(a: integer, b: integer): integer {
@@ -60,14 +60,14 @@ fun divide(a: integer, b: integer): integer {
         }
         return a / b;
     } catch problem {
-        output("caught " + problem.kind + ": " + problem.message + "\n");
+        print("caught " + problem.kind + ": " + problem.message + "\n");
         return 0;
     } finally {
-        output("cleanup\n");
+        print("cleanup\n");
     }
 }
 
-output(divide(9, 3));
-output("\n");
-output(divide(9, 0));
-output("\n");
+print(divide(9, 3));
+print("\n");
+print(divide(9, 0));
+print("\n");

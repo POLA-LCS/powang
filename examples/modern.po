@@ -1,0 +1,62 @@
+## Modern syntax tour: comments, interpolation, destructuring, ranges, match,
+## null safety, named arguments, pipelines and const macros.
+
+use strings;
+
+const MAX_SCORE: integer = 100;
+const LABEL = "powang";
+
+println($"== {LABEL} ==");
+println($"max score: {MAX_SCORE}");
+
+#! Block comments can span
+more than one line. !#
+
+## Trailing commas are allowed.
+numbers := [1, 2, 3,];
+pairs := ["a" >> 1, "b" >> 2,];
+
+## Range iteration: start, step, end. The end is exclusive.
+for i >> 0 >> 2 >> 6 {
+    print(i);
+    print(" ");
+}
+println("");
+
+## Array destructuring.
+[a, b] := numbers;
+println($"first={a} second={b}");
+
+## Typed for-each destructuring.
+for [key: string, value: integer] >> pairs {
+    println($"{key}={value}");
+}
+
+## Match with guards.
+fun classify(value: integer): string {
+    match value {
+        case 0 >> return "zero";
+        case n if n < 0 >> return "negative";
+        case _ >> return "positive";
+    }
+}
+
+println(classify(-3));
+println(classify(0));
+println(classify(7));
+
+## Null safety and a declaration in an if condition.
+missing: @string = nova;
+println(missing ?? "fallback");
+if found := missing {
+    println(found);
+} else {
+    println("not found");
+}
+
+## Named arguments, expression-bodied functions and pipelines.
+fun greet(name: string = LABEL, punctuation: string = "!"): string >> $"Hello, {name}{punctuation}";
+
+println(greet());
+println(greet(name >> "Ada"));
+println("  trim me  " |> strings.trim |> strings.upper);
