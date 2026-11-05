@@ -38,6 +38,11 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
 
             result_dict[key_cast.data] = value_cast.data
         return PowangString('[' + ', '.join(' >> '.join([key, value]) for key, value in result_dict.items()) + ']')
+    if left.type == PowangObjectType.type and getattr(left, 'is_enum', False):
+        variant_name = left.data.get('name') if isinstance(left.data, dict) else None
+        if isinstance(variant_name, PowangString):
+            return PowangString(f'<{left.type_name}: {variant_name.data}>')
+        return PowangString(f'<{left.type_name}>')
     return None
 
 def explicitCastInteger(left: PowangAny) -> Optional[PowangInteger]:

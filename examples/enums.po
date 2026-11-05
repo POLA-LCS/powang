@@ -1,0 +1,44 @@
+## Enums: a finite set of named constant values.
+
+type Color enum {
+    RED,
+    GREEN,
+    BLUE,
+}
+
+c: Color = Color.RED;
+print(c);
+print("\n");
+
+print(c :: Color);
+print("\n");
+
+print(c == Color.RED);
+print("\n");
+
+print(c == Color.BLUE);
+print("\n");
+
+## A function that works with enums.
+fun describe(color: Color): str {
+    if color == Color.RED {
+        return "red";
+    } else if color == Color.GREEN {
+        return "green";
+    } else {
+        return "blue";
+    }
+}
+
+print(describe(Color.RED));
+print("\n");
+print(describe(Color.GREEN));
+print("\n");
+print(describe(Color.BLUE));
+print("\n");
+
+## Enum variants are objects with a name property.
+print(Color.RED);
+print("\n");
+print(typeof(Color.RED));
+print("\n");

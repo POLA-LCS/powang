@@ -162,6 +162,9 @@ class Parser:
                     return doToken(ParserTokenType.RETURN_EXPRESSION, expression).toDict()
                 case 'type':
                     identifier = self.Identifier()
+                    if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'enum':
+                        self.advance()
+                        return self.helper_EnumDeclaration(identifier)
                     if self.next.type == LexerTokenType.RIGHT_ARROW:
                         self.advance()
                         type = self.Type()
@@ -334,6 +337,40 @@ class Parser:
             'identifier' : identifier,
             'properties' : properties,
             'methods'    : methods,
+        }).toDict()
+
+    def helper_EnumDeclaration(self, identifier: DictRepr):
+        assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
+            TokenToString(ParserTokenType.TYPE_DECLARATION),
+            identifier['value'], [
+                "a powang native type"
+            ]
+        )
+        self.consume(LexerTokenType.LEFT_BRACE)
+        variants: list[str] = []
+        while self.next.type != LexerTokenType.RIGHT_BRACE:
+            variant_name = self.Identifier()['value']
+            assert variant_name not in variants, powang_error_redefined(
+                TokenToString(ParserTokenType.TYPE_DECLARATION),
+                variant_name, [
+                    f"duplicate variant in enum {identifier['value']}"
+                ]
+            )
+            variants.append(variant_name)
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+            elif self.next.type != LexerTokenType.RIGHT_BRACE:
+                raise powang_throw(powang_error_syntax(
+                    'enum declaration', "Expected ',' or '}'", [
+                        f"but {TokenToString(self.next.type)} was encountered",
+                    ]))
+        self.consume(LexerTokenType.RIGHT_BRACE)
+        return doToken(ParserTokenType.TYPE_DECLARATION, {
+            'identifier' : identifier,
+            'properties' : None,
+            'methods'    : None,
+            'is_enum'    : True,
+            'variants'   : variants,
         }).toDict()
 
     def DestructurePattern(self):

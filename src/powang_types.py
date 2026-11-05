@@ -487,6 +487,7 @@ class PowangObjectType(PowangTypeBase): # user defined types
     type_name: str = 'object'
     data: dict[str, 'PowangAny']  # public props
     type: Literal['object'] = 'object'
+    is_enum: bool = False
  
     private_props  : dict[str, 'PowangAny']
     public_meths : dict[str, list[PowangFunction]]
@@ -505,10 +506,7 @@ class PowangObjectType(PowangTypeBase): # user defined types
     def getConstructors(self) -> list[PowangFunction]:
         constructors = self.getMethods(CONSTRUCTOR_METHOD_NAME, False)
         if constructors is None:
-            raise powang_throw(powang_error_development(
-                'method call', 'Constructor not founded', [
-                    "Somehow the type has no constructors..."
-                ]))
+            return []
         return constructors
 
     def getMethods(self, method_name: str, private: bool) -> Optional[list[PowangFunction]]:
@@ -772,6 +770,7 @@ def PowangCopyConstructObjectType(anyType: PowangObjectType) -> PowangObjectType
         {key: list(methods) for key, methods in anyType.private_meths.items()},
     )
     value.type_name = anyType.type_name
+    value.is_enum = getattr(anyType, 'is_enum', False)
     value.weak = anyType.weak
     value.const = anyType.const
     return value

@@ -6,16 +6,16 @@ print(undefined_variable "\n");
 defined_variable: str = "Holaaa";
 print(defined_variable "\n");
 
-infered_variable := [10 20 30];
+infered_variable := [10, 20, 30];
 print(infered_variable "\n");
 
 integer_variable: int = 2.5;
 number_variable: num = 2;
 string_variable: str = 25 as str;
 
-printf("{0} -> {1}\n", integer_variable typeof(integer_variable));
-printf("{0} -> {1}\n", number_variable  typeof(number_variable ));
-printf("{0} -> {1}\n", string_variable  typeof(string_variable ));
+printf("{0} -> {1}\n", integer_variable, typeof(integer_variable));
+printf("{0} -> {1}\n", number_variable,  typeof(number_variable ));
+printf("{0} -> {1}\n", string_variable,  typeof(string_variable ));
 
 ## Weak types can hold their type or nova.
 weak_variable: @str = nova;

@@ -19,7 +19,28 @@
 ## receives the request map and returns a response map to short-circuit or
 ## nova to continue. Middleware runs in insertion order.
 
-export extern fun new(): map >> "stdlib_http_router.new";
-export extern fun add(router: map, method: str, pattern: str, handler: some): nova >> "stdlib_http_router.add";
-export extern fun dispatch(router: map, request: map): map >> "stdlib_http_router.dispatch";
-export extern fun middleware(router: map, handler: some): nova >> "stdlib_http_router.middleware";
+export extern fun http_router_new(): map >> "stdlib_http_router.new";
+export extern fun http_router_add(router: map, method: str, pattern: str, handler: some): nova >> "stdlib_http_router.add";
+export extern fun http_router_dispatch(router: map, request: map): map >> "stdlib_http_router.dispatch";
+export extern fun http_router_middleware(router: map, handler: some): nova >> "stdlib_http_router.middleware";
+
+r := http_router_new();
+r
+|> http_router_add("GET", "/health", health_handler)
+|> http_router_add("GET", "/users/:id", user_handler)
+|> http_router_add("POST", "/users", create_handler);
+
+export type HTTPRouter {
+    + r: map;
+    
+    + fun constructor(): HTTPRouter {
+        r = http_router_new();
+    }
+    
+    + fun add(method: str, pattern: str, handler: some): &HTTPRouter {
+        http_router_add(r, method, pattern, handler);
+        return this;
+    }
+    + fun dispatch(request: map): map >> http_router_dispatch(r, request);
+    + fun add(method: str, pattern: str, handler: some): nova >> http_router_add(r, method, pattern, handler);
+}

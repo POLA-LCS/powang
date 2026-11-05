@@ -23,6 +23,7 @@ Initially based on the lisp operators but later changed into a more natural lang
 | [`examples/stdlib.po`](examples/stdlib.po) | strings, json, url and crypto |
 | [`examples/tasks.po`](examples/tasks.po) | spawn and wait |
 | [`examples/references.po`](examples/references.po) | reference parameters that mutate the caller |
+| [`examples/enums.po`](examples/enums.po) | enums: named constant values |
 | [`examples/modern.po`](examples/modern.po) | interpolation, destructuring, match, ranges and pipelines |
 
 ## References
@@ -196,6 +197,28 @@ const DOUBLE_MAX = MAX_SIZE * 2;
 ```po
 buffer_size: int! = 64;
 ```
+
+| [`examples/enums.po`](examples/enums.po) | enums: named constant values, comparison, printing |
+
+## Enums
+
+A finite set of named constant values:
+
+```po
+type Color enum {
+    RED,
+    GREEN,
+    BLUE,
+}
+
+c: Color = Color.RED;
+print(c);              ## <Color: RED>
+print(c == Color.RED); ## true
+print(c :: Color);     ## true
+```
+
+Each variant is an instance of the enum type. Variants compare by name and type.
+Enums work with functions, typed declarations, and `::` type checks.
 
 ## Get started
 You need [Python3](https://www.python.org/) 3.12 or newer.

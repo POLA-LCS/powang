@@ -1639,6 +1639,40 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.TYPE_DECLARATION:
             identifier = getValidIdentifier(where, expr_value['identifier'])
+            
+            ## Enum declaration: a finite set of named constant instances.
+            if expr_value.get('is_enum'):
+                get_state().user_types.add(identifier)
+                variant_names: list[str] = expr_value.get('variants') or []
+                # Build the enum type with a `name` property (string).
+                enum_type = PowangObjectType(
+                    {'name': PowangString(variant_names[0] if variant_names else '')},
+                    {},
+                    {},
+                    {},
+                )
+                enum_type.type_name = identifier
+                enum_type.is_enum = True
+                ScopeStack.new_ObjectType(identifier, enum_type)
+                
+                # Create variant instances and store them in a map.
+                variants_map: dict[PowangAny, PowangAny] = {}
+                for variant_name in variant_names:
+                    instance = PowangObjectType(
+                        {'name': PowangString(variant_name)},
+                        {},
+                        {},
+                        {},
+                    )
+                    instance.type_name = identifier
+                    instance.is_enum = True
+                    instance.defined = True
+                    variants_map[PowangString(variant_name)] = instance
+                enum_value = PowangMap(variants_map)
+                ScopeStack.new_variable(identifier, enum_value)
+                get_state().user_types.discard(identifier)
+                return enum_value
+            
             get_state().user_types.add(identifier)
             ScopeStack.push()
             try:
@@ -1702,6 +1736,14 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if target.type == PowangModule.type:
                 property_identifier = getValidIdentifier(where, expr_value['property'])
                 return moduleMemberValue(where, target, property_identifier)
+            if target.type == PowangMap.type:
+                property_identifier = getValidIdentifier(where, expr_value['property'])
+                key = PowangString(property_identifier)
+                if key in target.data:
+                    return target.data[key]
+                raise powang_throw(powang_error_identifier_not_found(where, property_identifier, [
+                    "perhaps it is a private variant?"
+                ]))
             assert target.type == PowangObjectType.type, powang_error_syntax(where, "Invalid access", [
                 f"{target.type} cannot be accessed in any way or has no properties"
             ])
