@@ -617,6 +617,9 @@ class Parser:
         }).toDict()
         
     def MatchPattern(self):
+        if self.next.type == LexerTokenType.RIGHT_ARROW:
+            ## `case >> expr` is a catch-all wildcard.
+            return {'kind': 'wildcard', 'value': None, 'type': None}
         if self.next.type == LexerTokenType.IDENTIFIER and self.next.value == '_':
             self.advance('match wildcard')
             return {'kind': 'wildcard', 'value': None, 'type': None}

@@ -24,7 +24,7 @@ fun describe(color: Color): str {
     return color match {
         case Color.RED >> "red"
         case Color.GREEN >> "green"
-        case _ >> "blue"
+        case >> "blue"
     }
 }
 
