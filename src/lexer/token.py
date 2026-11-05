@@ -70,7 +70,7 @@ class LexerTokenType(TokenTypeBase):
     AND  = auto() # &&
     AMPERSAND = auto() # &
     OR = auto() # ||
-    PIPELINE = auto() # |>
+    PIPELINE = auto() # :>
 
     # Extra
     END_OF_FILE = auto()
@@ -106,6 +106,7 @@ class ParserTokenType(TokenTypeBase):
     USE_EXPRESSION          = auto()
     EXTERN_REFERENCE         = auto()
     SPAWN_EXPRESSION         = auto()
+    TUPLE_EXPRESSION          = auto()
     REFERENCE_EXPRESSION     = auto()
     INTERPOLATED_STRING      = auto()
     MATCH_STATEMENT          = auto()

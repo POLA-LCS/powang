@@ -43,7 +43,6 @@ class Tokenizer:
         
         r'\&\&' : (LexerTokenType.AND, None),
         r'\|\|' : (LexerTokenType.OR, None),
-        r'\|>'  : (LexerTokenType.PIPELINE, None),
         r'&'    : (LexerTokenType.AMPERSAND, None),
         r'::'   : (LexerTokenType.COMPARE_EQ_TYPE, None),
         r'!:'   : (LexerTokenType.COMPARE_NEQ_TYPE, None),
@@ -54,6 +53,7 @@ class Tokenizer:
         r'<'    : (LexerTokenType.COMPARE_LSS, None),
 
         r'>>'  : (LexerTokenType.RIGHT_ARROW, None),
+        r':>'  : (LexerTokenType.PIPELINE, None),
         r'>'   : (LexerTokenType.COMPARE_GTR, None),
         
         r'\+='    : (LexerTokenType.OPERATOR_ASSIGNMENT_PLUS, None),

@@ -27,6 +27,13 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
             if cast_result is None: return None
             result_list.append(cast_result.data)
         return PowangString('[' + ', '.join(result_list) + ']')
+    if left.type == PowangTuple.type:
+        result_list: list[str] = []
+        for item in left.data:
+            cast_result = explicitCastString(item)
+            if cast_result is None: return None
+            result_list.append(cast_result.data)
+        return PowangString('[' + ', '.join(result_list) + ']')
     if left.type == PowangMap.type:
         result_dict: dict[str, str] = {}
         for key, value in left.data.items():

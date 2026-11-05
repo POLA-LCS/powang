@@ -415,6 +415,32 @@ class PowangArray(PowangTypeBase):
             return PowangBoolean.cast(self) / right
         return None
     
+# ====== TUPLE =========
+class PowangTuple(PowangTypeBase):
+    data: list['PowangAny']
+    type: Literal['tup'] = 'tup'
+
+    def __init__(self, data: Optional[list['PowangAny']] = None):
+        super().__init__(list(data) if data is not None else [])
+
+    def size(self) -> 'PowangInteger':
+        return PowangInteger(len(self.data))
+
+    def index(self, index: 'PowangAny') -> 'PowangAny':
+        assert index.type == PowangInteger.type, powang_error_type_match(f'{PowangTuple.type} indexing', PowangInteger.type, index.type)
+        assert 0 <= index.data < (size := self.size().data), powang_error_index_out_of_range(index.data, size)
+        return self.data[index.data]
+
+    def iterate(self) -> 'PowangArray':
+        return PowangArray(self.data)
+
+    def __add__(self, right: 'PowangAny') -> None:
+        return None
+
+    def __repr__(self) -> str:
+        return '[' + ', '.join(repr(item) for item in self.data) + ']'
+
+
 # ====== MAP =========
 class PowangMap(PowangTypeBase):
     data: dict['PowangAny', 'PowangAny']
@@ -487,6 +513,7 @@ class PowangObjectType(PowangTypeBase): # user defined types
     type_name: str = 'object'
     data: dict[str, 'PowangAny']  # public props
     type: Literal['object'] = 'object'
+    is_enum: bool = False
     is_enum: bool = False
  
     private_props  : dict[str, 'PowangAny']
@@ -628,6 +655,27 @@ class PowangPropertyReference(PowangTypeBase):
     def __repr__(self) -> str:
         return f"<reference: property {self.name}>"
 
+# ====== REFERENCE =========
+class PowangReference(PowangTypeBase):
+    type: Literal['reference'] = 'reference'
+
+    def __init__(self, owner: dict[str, Any], name: str, target_type: str = 'some'):
+        super().__init__(None)
+        self.owner = owner
+        self.name = name
+        self.target_type = target_type
+        self.defined = True
+
+    def get(self) -> 'PowangAny':
+        return self.owner[self.name]
+
+    def set(self, value: 'PowangAny') -> None:
+        self.owner[self.name] = value
+
+    def __repr__(self) -> str:
+        return f"<reference: {self.name}>"
+
+
 # ====== MODULE =========
 class PowangModule(PowangTypeBase):
     """An immutable namespace produced by loading a Powang module.
@@ -697,6 +745,7 @@ PowangAny = Union[
     PowangModule,      # imported namespace
     PowangTask,        # running task handle
     PowangReference,   # temporary variable reference
+    PowangTuple,       # fixed-size tuple
 ]
 
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
@@ -715,6 +764,7 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangErrorValue.type : PowangErrorValue,
         PowangModule.type     : PowangModule,
         PowangTask.type       : PowangTask,
+        PowangTuple.type      : PowangTuple,
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:
@@ -734,6 +784,8 @@ def PowangCopyConstruct(any: PowangAny) -> PowangAny:
         # A task handle names one piece of running work. Copying it must not
         # duplicate or restart that work, so the reference is preserved.
         return any
+    if any.type == PowangTuple.type:
+        return PowangTuple(list(any.data))
     if any.type == PowangReference.type:
         # A reference is an alias, not a value. Copying it must keep pointing
         # at the same slot, so the reference itself is preserved.

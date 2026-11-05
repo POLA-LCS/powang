@@ -413,6 +413,10 @@ class _TypeChecker:
             return self._infer_access(value)
         if node_type == ParserTokenType.ARRAY_EXPRESSION:
             return self._infer_array(value)
+        if node_type == ParserTokenType.TUPLE_EXPRESSION:
+            for element in value.get('elements', []) if isinstance(value, dict) else []:
+                self._infer(element)
+            return 'tup'
         if node_type == ParserTokenType.KEY_VALUE_PAIR:
             self._infer(value.get('key'))
             self._infer(value.get('value'))
@@ -551,7 +555,7 @@ class _TypeChecker:
                 return right_type
             return SOME
 
-        if operator_name == '|>':
+        if operator_name == ':>':
             if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.CALL_EXPRESSION:
                 call_value = dict(right_node.get('value') or {})
                 call_value['arguments'] = [left_node] + list(call_value.get('arguments', []))

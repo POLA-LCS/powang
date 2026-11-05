@@ -165,6 +165,7 @@ def main(args: list[str]):
     return 0
 
 def run_cli() -> int:
+    import sys as _sys
     try:
         if hasattr(_sys.stdout, 'reconfigure'):
             _sys.stdout.reconfigure(encoding='utf-8')
@@ -199,9 +200,6 @@ def run_cli() -> int:
         exit_code = 130
     except FileNotFoundError as ferror:
         print(powang_error_format("INPUT", "File read", f"File not found: {ferror.filename}"))
-        exit_code = 1
-    except RecursionError:
-        print(powang_error_format("RECURSION", "runtime", "Python recursion limit reached"))
         exit_code = 1
     except Exception as unexpected:
         if debug:

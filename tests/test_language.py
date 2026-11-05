@@ -456,7 +456,7 @@ class ModernSyntaxTests(LanguageTestCase):
     def test_pipeline(self) -> None:
         source = (
             "use strings;\n"
-            'result := "  powang  " |> strings.trim |> strings.upper;\n'
+            'result := "  powang  " :> strings.trim :> strings.upper;\n'
             'print(result); print("\\n");\n'
         )
         self.assert_program_output(source, "POWANG\n")

@@ -59,4 +59,4 @@ fun greet(name: str = LABEL, punctuation: str = "!"): str >> $"Hello, {name}{pun
 
 println(greet());
 println(greet(name >> "Ada"));
-println("  trim me  " |> strings.trim |> strings.upper);
+println("  trim me  " :> strings.trim :> strings.upper);

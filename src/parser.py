@@ -16,6 +16,7 @@ NATI_TYPES: set[str] = {
     PowangArray.type  ,
     PowangMap.type    ,
     PowangErrorValue.type,
+    'tup',
 }
 
 
@@ -1173,6 +1174,20 @@ class Parser:
                 return self.ContainerExpression()
             case LexerTokenType.LEFT_BRACE:
                 return self.BlockStatement()
+            case LexerTokenType.DOT:
+                saved_position = self.tokenizer.position
+                saved_row = self.tokenizer.row
+                saved_next = self.next
+                self.advance('tuple literal')  # consume the leading dot
+                is_tuple = self.next is not None and self.next.type == LexerTokenType.LEFT_BRACKET
+                # restore
+                self.tokenizer.position = saved_position
+                self.tokenizer.row = saved_row
+                self.next = saved_next
+                if is_tuple:
+                    self.advance('tuple literal')  # consume the leading dot
+                    return self.helper_TupleExpression()
+                return self.Literal('primary expression')
             case LexerTokenType.IDENTIFIER:
                 identifier = self.Identifier()
                 if self.next.type == LexerTokenType.COLON:
@@ -1182,6 +1197,18 @@ class Parser:
                     return copy.deepcopy(self._consts[identifier['value']])
                 return identifier
         return self.Literal('primary expression')
+
+    def helper_TupleExpression(self):
+        self.consume(LexerTokenType.LEFT_BRACKET)
+        elements: list = []
+        while self.next is not None and self.next.type != LexerTokenType.RIGHT_BRACKET:
+            elements.append(self.Expression())
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+        self.consume(LexerTokenType.RIGHT_BRACKET)
+        return doToken(ParserTokenType.TUPLE_EXPRESSION, {
+            "elements": elements,
+        }).toDict()
 
     def ParenthesizedExpression(self):
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
@@ -1248,6 +1275,19 @@ class Parser:
 
         type_identifier: str = self.Identifier()['value']
 
+        generics: list = []
+        if type_identifier == 'tup' and self.next.type == LexerTokenType.LEFT_BRACKET:
+            self.consume(LexerTokenType.LEFT_BRACKET)
+            while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                generics.append(self.Type())
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    raise powang_throw(powang_error_syntax('tuple type', "Expected ',' or ']' in tup[...]", [
+                        f"but {TokenToString(self.next.type)} was encountered",
+                    ]))
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+
         ## `arr[element]` is the typed form. Bare `arr` is sugar for
         ## `arr[any]`, where `any` resolves to the gradual `some` type.
         if type_identifier == PowangArray.type and self.next is not None and self.next.type == LexerTokenType.LEFT_BRACKET:
@@ -1307,6 +1347,7 @@ class Parser:
             "error_union": error_union,
             "reference": reference,
             "element_type": element_type,
+            "generics": generics,
         }).toDict()
 
     def helper_KeyValuePair(self, key: DictRepr):

@@ -977,9 +977,9 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 "check for unbounded or deeply nested recursion",
             ])
         return _evaluateAstExpression(expression, is_identifier)
-    except RecursionError:
-        ## Insurance for interpreters with a low Python stack limit: expose a
-        ## Powang diagnostic instead of leaking the Python one.
+    except RecursionError as e:
+        import traceback
+        traceback.print_exc()
         raise PowangError('RECURSION', 'Python recursion limit reached', [
             f"depth: {_evaluation_depth.get()}",
             "check for unbounded or deeply nested recursion",
@@ -1139,7 +1139,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 binary_value = PowangCopyConstruct(binary_casted)
                 return binary_value
 
-            if binary_operator == '|>':
+            if binary_operator == ':>':
                 right_node = expr_value['right']
                 if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.CALL_EXPRESSION:
                     call_value = right_node['value']
@@ -1300,6 +1300,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 })
             array_elements: list = [evaluateAstExpression(array_item) for array_item in array_expr_elements]
             return PowangArray(array_elements)
+
+        case ParserTokenType.TUPLE_EXPRESSION:
+            tuple_elements: list = [evaluateAstExpression(item) for item in expr_value['elements']]
+            return PowangTuple(tuple_elements)
 
         case ParserTokenType.INDEX_EXPRESSION:
             index_expression_value = getIndexedValue(where, expression['value'], False)
