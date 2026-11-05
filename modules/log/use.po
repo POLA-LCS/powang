@@ -1,10 +1,10 @@
 ## Structured logging. All output goes to stderr, so program output stays clean.
 
-export extern fun debug(message: string): nova >> "stdlib_log.debug";
-export extern fun info(message: string): nova >> "stdlib_log.info";
-export extern fun warn(message: string): nova >> "stdlib_log.warn";
-export extern fun err(message: string): nova >> "stdlib_log.error";
-export extern fun with_fields(level: string, message: string, fields: map): nova >> "stdlib_log.with_fields";
-export extern fun set_level(level: string): nova >> "stdlib_log.set_level";
-export extern fun is_enabled(level: string): boolean >> "stdlib_log.is_enabled";
-export extern fun access(request_id: integer, method: string, path: string, status: integer, elapsed_ms: number): nova >> "stdlib_log.access";
+export extern fun debug(message: str): nova >> "stdlib_log.debug";
+export extern fun info(message: str): nova >> "stdlib_log.info";
+export extern fun warn(message: str): nova >> "stdlib_log.warn";
+export extern fun err(message: str): nova >> "stdlib_log.error";
+export extern fun with_fields(level: str, message: str, fields: map): nova >> "stdlib_log.with_fields";
+export extern fun set_level(level: str): nova >> "stdlib_log.set_level";
+export extern fun is_enabled(level: str): boolean >> "stdlib_log.is_enabled";
+export extern fun access(request_id: int, method: str, path: str, status: int, elapsed_ms: num): nova >> "stdlib_log.access";

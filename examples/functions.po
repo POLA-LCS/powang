@@ -1,15 +1,15 @@
 ## Functions: declarations, return types and overload resolution.
 
-a: integer = 20;
-b: number = 1.5;
+a: int = 20;
+b: num = 1.5;
 
-fun add(left: integer, right: integer): integer {
+fun add(left: int, right: int): int {
 	return left + right;
 }
 
 print(add(a, b) "\n"); ## 21
 
-fun add(left: integer, right: number): number {
+fun add(left: int, right: num): num {
 	return left +: right;
 }
 

@@ -196,7 +196,7 @@ def getValidIdentifier(where: str, identifier: DictRepr) -> str:
 
 
 def getCastTypeName(where: str, node: DictRepr) -> str:
-    """Return the type name after `as`, accepting both `string` and `array[item]`."""
+    """Return the type name after `as`, accepting both `string` and `arr[item]`."""
     if isinstance(node, dict):
         if node.get('type') == LexerTokenType.IDENTIFIER:
             value = node.get('value')
@@ -211,7 +211,7 @@ def getCastTypeName(where: str, node: DictRepr) -> str:
                         target.get('value') == PowangArray.type:
                     return PowangArray.type
     raise powang_throw(powang_error_syntax('cast expression', 'Expected a type name after `as`', [
-        'write a primitive type, a user type or array[element]'
+        'write a primitive type, a user type or arr[element]'
     ]))
 
 
@@ -464,7 +464,7 @@ def getIndexedValue(where: str, expression: DictRepr, subscript_check: bool):
         target_value = PowangTypeMap(target_value.some)(target_value.data)
     index = evaluateAstExpression(expression['index'])
     if subscript_check:
-        assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "string type is not subscriptable for now.")
+        assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "str type is not subscriptable for now.")
     return target_value.index(index)
 
 def getErrorProperty(where: str, error_value: PowangErrorValue, property_identifier: str) -> PowangAny:

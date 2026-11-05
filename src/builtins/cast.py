@@ -50,7 +50,7 @@ def explicitCastInteger(left: PowangAny) -> Optional[PowangInteger]:
         try:
             return PowangInteger(int(left.data))
         except ValueError:
-            assert powang_error_format("RUNTIME", 'explicit cast', "Invalid integer string", [
+            assert powang_error_format("RUNTIME", 'explicit cast', "Invalid int string", [
                 f"\"{left.data}\""
             ])
     return PowangInteger.cast(left)
@@ -66,7 +66,7 @@ def explicitCastNumber(left: PowangAny) -> Optional[PowangNumber]:
         try:
             return PowangNumber(float(left.data))
         except ValueError:
-            assert powang_error_format("RUNTIME", 'explicit cast', "Invalid number string", [
+            assert powang_error_format("RUNTIME", 'explicit cast', "Invalid num string", [
                 f"\"{left.data}\""
             ])
     return None

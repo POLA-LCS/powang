@@ -1,7 +1,7 @@
 ## UTC time helpers backed by src/stdlib_time.py.
 ## `sleep_ms` blocks the interpreter thread; async support is a later wave.
 
-export extern fun epoch(): number >> "stdlib_time.epoch";
-export extern fun now_iso(): string >> "stdlib_time.now_iso";
-export extern fun format_epoch(epoch: number, fmt: string): string >> "stdlib_time.format_epoch";
-export extern fun sleep_ms(ms: integer): nova >> "stdlib_time.sleep_ms";
+export extern fun epoch(): num >> "stdlib_time.epoch";
+export extern fun now_iso(): str >> "stdlib_time.now_iso";
+export extern fun format_epoch(epoch: num, fmt: str): str >> "stdlib_time.format_epoch";
+export extern fun sleep_ms(ms: int): nova >> "stdlib_time.sleep_ms";

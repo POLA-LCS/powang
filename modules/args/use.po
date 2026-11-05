@@ -2,6 +2,6 @@
 ## `all` returns everything after the input file, `at` indexes it (negative
 ## indices count from the end) and `count` returns its length.
 
-export extern fun all(): array >> "stdlib_env.argv";
-export extern fun count(): integer >> "stdlib_env.argv_count";
-export extern fun at(index: integer): @string >> "stdlib_env.argv_get";
+export extern fun all(): arr >> "stdlib_env.argv";
+export extern fun count(): int >> "stdlib_env.argv_count";
+export extern fun at(index: int): @str >> "stdlib_env.argv_get";

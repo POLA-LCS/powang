@@ -2,6 +2,14 @@
 
 All notable changes to powang are documented here.
 
+## 0.5.0
+
+### Changed
+
+- Renamed the builtin types `integer` to `int`, `number` to `num`, `array` to `arr`
+  and `string` to `str`.
+- Typed array annotations now use `arr[element]`, for example `arr[int]` and `arr[str]`.
+
 ## 0.4.0
 
 ### Added

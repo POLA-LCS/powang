@@ -2,5 +2,5 @@
 ## Nesting is limited to 100 levels. Object keys must be strings when
 ## stringifying. Invalid input raises a catchable [EXTERN ERROR].
 
-export extern fun parse(text: string): some >> "stdlib_json.parse";
-export extern fun stringify(value: some, indent: integer = 0): string >> "stdlib_json.stringify";
+export extern fun parse(text: str): some >> "stdlib_json.parse";
+export extern fun stringify(value: some, indent: int = 0): str >> "stdlib_json.stringify";

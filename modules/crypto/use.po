@@ -2,7 +2,7 @@
 ## Inputs are UTF-8 text; digests are lowercase hex. `constant_time_compare`
 ## does not short-circuit on the first difference.
 
-export extern fun sha256(text: string): string >> "stdlib_crypto.sha256";
-export extern fun hmac_sha256(key: string, message: string): string >> "stdlib_crypto.hmac_sha256";
-export extern fun random_token(byte_length: integer): string >> "stdlib_crypto.random_token";
-export extern fun constant_time_compare(a: string, b: string): boolean >> "stdlib_crypto.constant_time_compare";
+export extern fun sha256(text: str): str >> "stdlib_crypto.sha256";
+export extern fun hmac_sha256(key: str, message: str): str >> "stdlib_crypto.hmac_sha256";
+export extern fun random_token(byte_length: int): str >> "stdlib_crypto.random_token";
+export extern fun constant_time_compare(a: str, b: str): boolean >> "stdlib_crypto.constant_time_compare";

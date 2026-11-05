@@ -2,10 +2,10 @@
 
 use strings;
 
-export fun hello(name: string): string {
+export fun hello(name: str): str {
     return "hello " + name;
 }
 
-export fun shout(name: string): string {
+export fun shout(name: str): str {
     return strings.upper(hello(name)) + "!";
 }

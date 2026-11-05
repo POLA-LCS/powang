@@ -1,6 +1,6 @@
 ## Control flow: if/else, C-style for, for-each and try/catch/finally.
 
-fun classify(value: integer): string {
+fun classify(value: int): str {
     if value < 0 {
         return "negative";
     } else if value == 0 {
@@ -21,22 +21,22 @@ print("\n");
 numbers := [10 20 30];
 
 ## Typed iterator
-for number: integer >> numbers {
-    print(number);
+for num: int >> numbers {
+    print(num);
     print(" ");
 }
 print("\n");
 
 ## Bare identifier, implicitly weakly typed
-for number >> numbers {
-    print(number);
+for num >> numbers {
+    print(num);
     print(" ");
 }
 print("\n");
 
 ## Filtered iteration
-for number >> numbers if number > 15 {
-    print(number);
+for num >> numbers if num > 15 {
+    print(num);
     print(" ");
 }
 print("\n");
@@ -48,12 +48,12 @@ for letter >> "abc" {
 print("\n");
 
 for pair >> ["a" >> 1, "b" >> 2] {
-    print(pair[0] + "=" + (pair[1] as string) + " ");
+    print(pair[0] + "=" + (pair[1] as str) + " ");
 }
 print("\n");
 
 ## try/catch/finally
-fun divide(a: integer, b: integer): integer {
+fun divide(a: int, b: int): int {
     try {
         if b == 0 {
             error("division by zero");

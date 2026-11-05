@@ -1,5 +1,5 @@
-export extern fun sqrt(x: number): number >> "math.sqrt";
-export extern fun log(x: number, base: number = 10): number >> "math.log";
-export extern fun cos(angle: number): number >> "math.cos";
-export extern fun sin(angle: number): number >> "math.sin";
-export extern fun tan(angle: number): number >> "math.tan";
+export extern fun sqrt(x: num): num >> "math.sqrt";
+export extern fun log(x: num, base: num = 10): num >> "math.log";
+export extern fun cos(angle: num): num >> "math.cos";
+export extern fun sin(angle: num): num >> "math.sin";
+export extern fun tan(angle: num): num >> "math.tan";

@@ -1,22 +1,22 @@
-## String helpers backed by src/stdlib_strings.py.
+## str helpers backed by src/stdlib_strings.py.
 ## Text is Unicode code point based: size, char_code and slicing count code
 ## points, not UTF-8 bytes. Invalid input raises a catchable [EXTERN ERROR].
 
-export extern fun trim(text: string): string >> "stdlib_strings.trim";
-export extern fun upper(text: string): string >> "stdlib_strings.upper";
-export extern fun lower(text: string): string >> "stdlib_strings.lower";
-export extern fun replace(text: string, old: string, new: string): string >> "stdlib_strings.replace";
-export extern fun contains(text: string, sub: string): boolean >> "stdlib_strings.contains";
-export extern fun starts_with(text: string, prefix: string): boolean >> "stdlib_strings.starts_with";
-export extern fun ends_with(text: string, suffix: string): boolean >> "stdlib_strings.ends_with";
-export extern fun slice(text: string, start: integer, end: integer): string >> "stdlib_strings.slice";
-export extern fun split(text: string, sep: string): array >> "stdlib_strings.split";
-export extern fun join(items: array, sep: string): string >> "stdlib_strings.join";
-export extern fun repeat(text: string, count: integer): string >> "stdlib_strings.repeat";
-export extern fun pad_left(text: string, width: integer, fill: string = " "): string >> "stdlib_strings.pad_left";
-export extern fun pad_right(text: string, width: integer, fill: string = " "): string >> "stdlib_strings.pad_right";
-export extern fun char_code(char: string): integer >> "stdlib_strings.char_code";
-export extern fun from_char_code(code: integer): string >> "stdlib_strings.from_char_code";
-export extern fun parse_int(text: string): integer >> "stdlib_strings.parse_int";
-export extern fun parse_number(text: string): number >> "stdlib_strings.parse_number";
-export extern fun format_number(value: number, decimals: integer): string >> "stdlib_strings.format_number";
+export extern fun trim(text: str): str >> "stdlib_strings.trim";
+export extern fun upper(text: str): str >> "stdlib_strings.upper";
+export extern fun lower(text: str): str >> "stdlib_strings.lower";
+export extern fun replace(text: str, old: str, new: str): str >> "stdlib_strings.replace";
+export extern fun contains(text: str, sub: str): boolean >> "stdlib_strings.contains";
+export extern fun starts_with(text: str, prefix: str): boolean >> "stdlib_strings.starts_with";
+export extern fun ends_with(text: str, suffix: str): boolean >> "stdlib_strings.ends_with";
+export extern fun slice(text: str, start: int, end: int): str >> "stdlib_strings.slice";
+export extern fun split(text: str, sep: str): arr >> "stdlib_strings.split";
+export extern fun join(items: arr, sep: str): str >> "stdlib_strings.join";
+export extern fun repeat(text: str, count: int): str >> "stdlib_strings.repeat";
+export extern fun pad_left(text: str, width: int, fill: str = " "): str >> "stdlib_strings.pad_left";
+export extern fun pad_right(text: str, width: int, fill: str = " "): str >> "stdlib_strings.pad_right";
+export extern fun char_code(char: str): int >> "stdlib_strings.char_code";
+export extern fun from_char_code(code: int): str >> "stdlib_strings.from_char_code";
+export extern fun parse_int(text: str): int >> "stdlib_strings.parse_int";
+export extern fun parse_number(text: str): num >> "stdlib_strings.parse_number";
+export extern fun format_number(value: num, decimals: int): str >> "stdlib_strings.format_number";

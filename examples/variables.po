@@ -1,24 +1,24 @@
 ## Variables: declarations, inference, casts, weak types and constants.
 
-undefined_variable: integer;
+undefined_variable: int;
 print(undefined_variable "\n");
 
-defined_variable: string = "Holaaa";
+defined_variable: str = "Holaaa";
 print(defined_variable "\n");
 
 infered_variable := [10 20 30];
 print(infered_variable "\n");
 
-integer_variable: integer = 2.5;
-number_variable: number = 2;
-string_variable: string = 25 as string;
+integer_variable: int = 2.5;
+number_variable: num = 2;
+string_variable: str = 25 as str;
 
 printf("{0} -> {1}\n", integer_variable typeof(integer_variable));
 printf("{0} -> {1}\n", number_variable  typeof(number_variable ));
 printf("{0} -> {1}\n", string_variable  typeof(string_variable ));
 
 ## Weak types can hold their type or nova.
-weak_variable: @string = nova;
+weak_variable: @str = nova;
 printf("Weak: {0}\n" weak_variable "\n");
 
 weak_variable = "Holaaa";
@@ -28,6 +28,6 @@ weak_variable = nova;
 printf("Weak: {0}\n" weak_variable "\n");
 
 ## Constants cannot be reassigned.
-undefined_const: number!;
+undefined_const: num!;
 undefined_const = 6.9;
 print(undefined_const);

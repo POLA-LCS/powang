@@ -31,7 +31,7 @@ A parameter declared `&type` receives a reference to a variable, and the caller 
 `&variable`. Reads and writes inside the function reach the caller's variable:
 
 ```po
-fun increment(value: &integer) {
+fun increment(value: &int) {
     value += 1;
 }
 
@@ -50,22 +50,22 @@ Rules:
 
 ## Typed arrays
 
-Array annotations accept an element type:
+`arr` annotations accept an element type:
 
 ```po
-numbers: array[integer] = [1 2 3];
-names: array[string] = ["ada" "grace"];
+numbers: arr[int] = [1 2 3];
+names: arr[str] = ["ada" "grace"];
 ```
 
-A bare `array` is sugar for `array[any]`, which accepts any element type:
+A bare `arr` is sugar for `arr[any]`, which accepts any element type:
 
 ```po
-values: array = [1 "two" true];
+values: arr = [1 "two" true];
 ```
 
 Element types are checked on declarations, function arguments and return values.
-Typed annotations also work in casts, for example `values as array[integer]`.
-The runtime representation is still one `array` type, so typed arrays add no runtime cost.
+Typed annotations also work in casts, for example `values as arr[int]`.
+The runtime representation is still one `arr` type, so typed arrays add no runtime cost.
 
 ## Output and input
 
@@ -118,8 +118,8 @@ Destructuring works for arrays and objects with the same bracket syntax:
 
 ```po
 [a, b] := pair;
-[a: integer, b] := pair;
-[a, b]: integer = pair;
+[a: int, b] := pair;
+[a, b]: int = pair;
 [r:&, s] := pair;    ## r references pair[0]
 ```
 
@@ -127,7 +127,7 @@ For each supports destructuring directly:
 
 ```po
 for [key, value] >> pairs { println($"{key}={value}"); }
-for [key: string, value: integer] >> pairs { println($"{key}:{value}"); }
+for [key: str, value: int] >> pairs { println($"{key}:{value}"); }
 ```
 
 ## Pattern matching
@@ -163,13 +163,13 @@ if name := user?.name {
 Expression-bodied functions use `>>`:
 
 ```po
-fun double(x: integer): integer >> x * 2;
+fun double(x: int): int >> x * 2;
 ```
 
 Named arguments use `>>`:
 
 ```po
-fun greet(name: string = "world") {
+fun greet(name: str = "world") {
     println($"Hello, {name}!");
 }
 
@@ -187,14 +187,14 @@ result := "  powang  " |> strings.trim |> strings.upper;
 `const` creates a compile-time macro that is substituted everywhere it appears.
 
 ```po
-const MAX_SIZE: integer = 1024;
+const MAX_SIZE: int = 1024;
 const DOUBLE_MAX = MAX_SIZE * 2;
 ```
 
 `!` marks a runtime immutable value. It still occupies memory and can be passed around.
 
 ```po
-buffer_size: integer! = 64;
+buffer_size: int! = 64;
 ```
 
 ## Get started

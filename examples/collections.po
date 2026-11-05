@@ -2,7 +2,7 @@
 
 use strings;
 
-numbers: array[integer] = [10 20 30];
+numbers: arr[int] = [10 20 30];
 print(numbers);
 print(" ");
 print(size(numbers));
@@ -12,13 +12,13 @@ numbers[1] = 25;
 print(numbers[1]);
 print("\n");
 
-## A bare array annotation is sugar for array[any].
-mixed: array = [1 "two" true];
+## A bare arr annotation is sugar for arr[any].
+mixed: arr = [1 "two" true];
 print(size(mixed));
 print("\n");
 
 ## Element types are checked on declarations, calls and returns.
-typed_names: array[string] = ["ada" "grace"];
+typed_names: arr[str] = ["ada" "grace"];
 print(typed_names[1]);
 print("\n");
 
@@ -29,7 +29,7 @@ print(" ");
 print(size(pairs));
 print("\n");
 
-## Array arithmetic
+## arr arithmetic
 print([1 2] + [3 4]);
 print(" ");
 print([1 2 3 4] - 2);
@@ -37,7 +37,7 @@ print(" ");
 print([1 2 3] - [2]);
 print("\n");
 
-## String helpers
+## str helpers
 print(strings.trim("  text  "));
 print(" ");
 print(strings.upper("powang"));
@@ -52,7 +52,7 @@ print(" ");
 print(strings.repeat("ab", 3));
 print("\n");
 
-## format builds a string without printing it.
+## format builds a str without printing it.
 print(format("{0}/{1}", "a", "b"));
 print("\n");
 

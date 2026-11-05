@@ -105,8 +105,8 @@ class ComparisonTests(LanguageTestCase):
             'print(3 >= 4); print("\\n");\n'
             'print(2 == 2); print("\\n");\n'
             'print(2 != 2); print("\\n");\n'
-            'print(1 :: integer); print("\\n");\n'
-            'print("a" !: integer); print("\\n");\n'
+            'print(1 :: int); print("\\n");\n'
+            'print("a" !: int); print("\\n");\n'
         )
         result = run_source(source)
         self.assertEqual(
@@ -155,7 +155,7 @@ class ForEachTests(LanguageTestCase):
     def test_typed_bare_and_filtered_forms(self) -> None:
         source = (
             "arr := [10 20 30];\n"
-            'for i1: integer >> arr { print(i1); print(" "); }\n'
+            'for i1: int >> arr { print(i1); print(" "); }\n'
             'print("\\n");\n'
             'for i2 >> arr { print(i2); print(" "); }\n'
             'print("\\n");\n'
@@ -174,7 +174,7 @@ class ForEachTests(LanguageTestCase):
 class FunctionTests(LanguageTestCase):
     def test_recursive_factorial(self) -> None:
         source = (
-            "fun fact(n: integer): integer {\n"
+            "fun fact(n: int): int {\n"
             "    if n <= 1 { return 1; }\n"
             "    return n * fact(n - 1);\n"
             "}\n"
@@ -184,15 +184,15 @@ class FunctionTests(LanguageTestCase):
 
     def test_expression_bodied_function(self) -> None:
         source = (
-            "fun double(x: integer): integer >> x * 2;\n"
+            "fun double(x: int): int >> x * 2;\n"
             "print(double(21));\n"
         )
         self.assert_program_output(source, "42")
 
     def test_overload_selection(self) -> None:
         source = (
-            "fun pick(a: integer, b: integer): integer { return a + b; }\n"
-            "fun pick(a: integer, b: number): number { return a +: b; }\n"
+            "fun pick(a: int, b: int): int { return a + b; }\n"
+            "fun pick(a: int, b: num): num { return a +: b; }\n"
             'print(pick(2, 3)); print("\\n");\n'
             'print(pick(20, 1.5)); print("\\n");\n'
         )
@@ -200,7 +200,7 @@ class FunctionTests(LanguageTestCase):
 
     def test_function_value_assignment_with_some_type(self) -> None:
         source = (
-            "fun add(left: integer, right: integer): integer { return left + right; }\n"
+            "fun add(left: int, right: int): int { return left + right; }\n"
             "f: some = add;\n"
             'print(typeof(f)); print("\\n");\n'
         )
@@ -208,7 +208,7 @@ class FunctionTests(LanguageTestCase):
 
     def test_function_value_assignment_with_inference(self) -> None:
         source = (
-            "fun add(left: integer, right: integer): integer { return left + right; }\n"
+            "fun add(left: int, right: int): int { return left + right; }\n"
             "g := add;\n"
             'print(typeof(g)); print("\\n");\n'
         )
@@ -219,10 +219,10 @@ class UserTypeTests(LanguageTestCase):
     def test_constructor_properties_and_method(self) -> None:
         source = (
             "type Point {\n"
-            "    + x: integer;\n"
-            "    - y: integer = 7;\n"
-            "    + fun constructor(px: integer): Point { this.x = px; }\n"
-            "    + fun sum(other: Point): integer { return this.x + other.x; }\n"
+            "    + x: int;\n"
+            "    - y: int = 7;\n"
+            "    + fun constructor(px: int): Point { this.x = px; }\n"
+            "    + fun sum(other: Point): int { return this.x + other.x; }\n"
             "}\n"
             "p := [5] as Point;\n"
             "q: Point = 9;\n"
@@ -238,8 +238,8 @@ class UserTypeTests(LanguageTestCase):
     def test_instance_method_can_mutate_property(self) -> None:
         source = (
             "type Counter {\n"
-            "    + count: integer = 0;\n"
-            "    + fun bump(): integer { this.count += 1; return this.count; }\n"
+            "    + count: int = 0;\n"
+            "    + fun bump(): int { this.count += 1; return this.count; }\n"
             "}\n"
             "a := [] as Counter;\n"
             'print(a.count); print(" ");\n'
@@ -297,27 +297,27 @@ class StringTests(LanguageTestCase):
 
 class ArrayTypingTests(LanguageTestCase):
     def test_typed_array_declaration_and_index(self) -> None:
-        source = "numbers: array[integer] = [1 2 3];\nprint(numbers[1]);\n"
+        source = "numbers: arr[int] = [1 2 3];\nprint(numbers[1]);\n"
         self.assert_program_output(source, "2")
 
     def test_bare_array_is_array_any(self) -> None:
-        source = 'values: array = [1 "two" true];\nprint(size(values));\n'
+        source = 'values: arr = [1 "two" true];\nprint(size(values));\n'
         self.assert_program_output(source, "3")
 
     def test_explicit_array_any_accepts_mixed_elements(self) -> None:
-        source = 'values: array[any] = [1 "two" true];\nprint(size(values));\n'
+        source = 'values: arr[any] = [1 "two" true];\nprint(size(values));\n'
         self.assert_program_output(source, "3")
 
     def test_typed_array_rejects_mixed_elements(self) -> None:
-        result = run_source('numbers: array[integer] = [1 "two"];\n')
+        result = run_source('numbers: arr[int] = [1 "two"];\n')
         self.assertEqual(result.returncode, 1)
-        self.assertIn("expected array[integer]", result.combined)
-        self.assertIn("array[mixed]", result.combined)
+        self.assertIn("expected arr[int]", result.combined)
+        self.assertIn("arr[mixed]", result.combined)
         assert_no_traceback(self, result)
 
     def test_typed_array_function_parameter(self) -> None:
         source = (
-            "fun first(values: array[integer]): integer {\n"
+            "fun first(values: arr[int]): int {\n"
             "    return values[0];\n"
             "}\n"
             "print(first([4 5 6]));\n"
@@ -325,14 +325,14 @@ class ArrayTypingTests(LanguageTestCase):
         self.assert_program_output(source, "4")
 
     def test_typed_array_index_assignment_rejects_wrong_type(self) -> None:
-        result = run_source('numbers: array[integer] = [1 2];\nnumbers[0] = "x";\n')
+        result = run_source('numbers: arr[int] = [1 2];\nnumbers[0] = "x";\n')
         self.assertEqual(result.returncode, 1)
-        self.assertIn("expected integer", result.combined)
+        self.assertIn("expected int", result.combined)
         assert_no_traceback(self, result)
 
     def test_for_each_infers_element_type(self) -> None:
         source = (
-            "numbers: array[integer] = [1 2 3];\n"
+            "numbers: arr[int] = [1 2 3];\n"
             "for value >> numbers { print(value); print(\" \"); }\n"
             "print(\"\\n\");\n"
         )
@@ -340,17 +340,17 @@ class ArrayTypingTests(LanguageTestCase):
 
     def test_for_each_rejects_wrong_iterator_type(self) -> None:
         source = (
-            "numbers: array[integer] = [1 2];\n"
-            "for value: string >> numbers { print(value); }\n"
+            "numbers: arr[int] = [1 2];\n"
+            "for value: str >> numbers { print(value); }\n"
         )
         result = run_source(source)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("expected string", result.combined)
+        self.assertIn("expected str", result.combined)
         assert_no_traceback(self, result)
 
     def test_nested_typed_array(self) -> None:
         source = (
-            "nested: array[array[integer]] = [[1 2]];\n"
+            "nested: arr[arr[int]] = [[1 2]];\n"
             "for row >> nested { print(row[0]); }\n"
         )
         self.assert_program_output(source, "1")
@@ -358,7 +358,7 @@ class ArrayTypingTests(LanguageTestCase):
     def test_array_cast_accepts_typed_annotation(self) -> None:
         source = (
             "values := [1 2 3];\n"
-            "casted := values as array[integer];\n"
+            "casted := values as arr[int];\n"
             "print(casted[1]);\n"
         )
         self.assert_program_output(source, "2")
@@ -370,7 +370,7 @@ class BuiltinRenameTests(LanguageTestCase):
         self.assert_program_output(source, "a-2")
 
     def test_inputf_prints_prompt_and_reads_receptor(self) -> None:
-        source = 'value: string;\ninputf(value, "Name: ");\nprint(value);\n'
+        source = 'value: str;\ninputf(value, "Name: ");\nprint(value);\n'
         result = run_source_with_input(source, "Ada\n")
         self.assertEqual(result.stdout, "Name: Ada")
         self.assertEqual(result.stderr, "")
@@ -381,7 +381,7 @@ class ModernSyntaxTests(LanguageTestCase):
     def test_trailing_commas(self) -> None:
         source = (
             "numbers := [1, 2, 3,];\n"
-            "fun add(a: integer, b: integer = 0,): integer { return a + b; }\n"
+            "fun add(a: int, b: int = 0,): int { return a + b; }\n"
             'print(add(1, 2,),); print("\\n",);\n'
         )
         self.assert_program_output(source, "3\n")
@@ -401,14 +401,14 @@ class ModernSyntaxTests(LanguageTestCase):
     def test_for_each_destructuring(self) -> None:
         source = (
             'pairs := ["a" >> 1, "b" >> 2];\n'
-            'for [key: string, value: integer] >> pairs { print($"{key}={value};"); }\n'
+            'for [key: str, value: int] >> pairs { print($"{key}={value};"); }\n'
         )
         self.assert_program_output(source, "a=1;b=2;")
 
     def test_destructuring_and_references(self) -> None:
         source = (
             "pair := [1, 2];\n"
-            "[a: integer, b] := pair;\n"
+            "[a: int, b] := pair;\n"
             'print(a + b); print("\\n");\n'
             "[r:&, s] := pair;\n"
             "r = 10;\n"
@@ -418,7 +418,7 @@ class ModernSyntaxTests(LanguageTestCase):
 
     def test_safe_access_and_if_declaration(self) -> None:
         source = (
-            "value: @string = nova;\n"
+            "value: @str = nova;\n"
             'print(value ?? "default"); print("\\n");\n'
             'if name := value { print("yes"); } else { print("no"); }\n'
             'print("\\n");\n'
@@ -430,7 +430,7 @@ class ModernSyntaxTests(LanguageTestCase):
 
     def test_match_statement(self) -> None:
         source = (
-            "fun classify(value: integer): string {\n"
+            "fun classify(value: int): str {\n"
             "    match value {\n"
             '        case 0 >> return "zero";\n'
             '        case n if n < 0 >> return "negative";\n'
@@ -444,7 +444,7 @@ class ModernSyntaxTests(LanguageTestCase):
 
     def test_named_arguments(self) -> None:
         source = (
-            'fun greet(name: string = "world", punctuation: string = "!") {\n'
+            'fun greet(name: str = "world", punctuation: str = "!") {\n'
             '    print($"{name}{punctuation}");\n'
             "}\n"
             "greet();\n"
@@ -463,7 +463,7 @@ class ModernSyntaxTests(LanguageTestCase):
 
     def test_const_macros(self) -> None:
         source = (
-            "const MAX_SIZE: integer = 8;\n"
+            "const MAX_SIZE: int = 8;\n"
             "const DOUBLE_MAX = MAX_SIZE * 2;\n"
             'print(DOUBLE_MAX); print("\\n");\n'
         )
@@ -473,12 +473,12 @@ class ModernSyntaxTests(LanguageTestCase):
 class VariableTests(LanguageTestCase):
     def test_typed_inferred_weak_and_const(self) -> None:
         source = (
-            "a: integer = 2.5;\n"
-            "b: number = 2;\n"
+            "a: int = 2.5;\n"
+            "b: num = 2;\n"
             'c := "hi";\n'
-            "w: @string = nova;\n"
+            "w: @str = nova;\n"
             'w = "value";\n'
-            "k: number!;\n"
+            "k: num!;\n"
             "k = 6.9;\n"
             'print(a); print(" "); print(b); print(" ");\n'
             'print(c); print(" "); print(w); print(" "); print(k); print("\\n");\n'

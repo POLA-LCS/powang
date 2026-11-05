@@ -1,19 +1,19 @@
 ## User-defined types: constructors, public and private members, methods.
 
 type Point {
-    + x: integer;
-    - y: integer = 7;
+    + x: int;
+    - y: int = 7;
 
-    + fun constructor(px: integer): Point {
+    + fun constructor(px: int): Point {
         this.x = px;
     }
 
-    + fun sum(other: Point): integer {
+    + fun sum(other: Point): int {
         return this.x + other.x;
     }
 
-    + fun describe(): string {
-        return "Point(" + (this.x as string) + ", " + (this.y as string) + ")";
+    + fun describe(): str {
+        return "Point(" + (this.x as str) + ", " + (this.y as str) + ")";
     }
 }
 

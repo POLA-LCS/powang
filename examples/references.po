@@ -1,16 +1,16 @@
 ## References: pass a variable by reference and mutate the caller.
 
-fun increment(value: &integer) {
+fun increment(value: &int) {
     value += 1;
 }
 
-fun swap(first: &integer, second: &integer) {
+fun swap(first: &int, second: &int) {
     temporary := first;
     first = second;
     second = temporary;
 }
 
-fun add_all(target: &integer, amounts: array) {
+fun add_all(target: &int, amounts: arr) {
     for amount >> amounts {
         target += amount;
     }
@@ -34,14 +34,14 @@ add_all(&total, [1 2 3 4]);
 print(total);
 print("\n");
 
-fun doubled(value: &integer): integer {
+fun doubled(value: &int): int {
     return value * 2;
 }
 
 print(doubled(&counter));
 print("\n");
 
-limit: integer! = 5;
+limit: int! = 5;
 try {
     ## increment(&limit);
     print("constants are protected\n");

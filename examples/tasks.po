@@ -1,7 +1,7 @@
 ## Tasks: spawn a function call on a worker thread and wait for the result.
 
-fun sum_squares(limit: integer): integer {
-    total: integer = 0;
+fun sum_squares(limit: int): int {
+    total: int = 0;
     for index := 0; index < limit; index += 1 {
         total += index * index;
     }

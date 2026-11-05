@@ -1,13 +1,13 @@
 ## Error handling: raising, catching, error unions and `?` propagation.
 
-fun validate(value: integer): integer? {
+fun validate(value: int): int? {
     if value < 0 {
-        return fail("VALUE", "negative input", "value=" + (value as string));
+        return fail("VALUE", "negative input", "value=" + (value as str));
     }
     return value;
 }
 
-fun double(value: integer): integer? {
+fun double(value: int): int? {
     checked := validate(value)?;
     return checked * 2;
 }
@@ -44,7 +44,7 @@ try {
 }
 
 ## `?` returns the error value from the enclosing function.
-fun load(value: integer): integer? {
+fun load(value: int): int? {
     loaded := double(value)?;
     if loaded > 100 {
         return fail("RANGE", "too large");

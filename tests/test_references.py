@@ -14,7 +14,7 @@ from helpers import run_source  # noqa: E402
 class ReferenceTests(unittest.TestCase):
     def test_reference_parameter_mutates_caller(self) -> None:
         result = run_source(
-            "fun increment(value: &integer) { value += 1; }\n"
+            "fun increment(value: &int) { value += 1; }\n"
             "x := 10;\n"
             "increment(&x);\n"
             "print(x);\n"
@@ -24,7 +24,7 @@ class ReferenceTests(unittest.TestCase):
 
     def test_swap_through_references(self) -> None:
         result = run_source(
-            "fun swap(a: &integer, b: &integer) {\n"
+            "fun swap(a: &int, b: &int) {\n"
             "    temp := a;\n"
             "    a = b;\n"
             "    b = temp;\n"
@@ -39,7 +39,7 @@ class ReferenceTests(unittest.TestCase):
 
     def test_reading_through_reference(self) -> None:
         result = run_source(
-            "fun doubled(value: &integer): integer { return value * 2; }\n"
+            "fun doubled(value: &int): int { return value * 2; }\n"
             "x := 21;\n"
             "print(doubled(&x));\n"
         )
@@ -48,8 +48,8 @@ class ReferenceTests(unittest.TestCase):
 
     def test_reference_to_constant_is_rejected(self) -> None:
         result = run_source(
-            "fun increment(value: &integer) { value += 1; }\n"
-            "limit: integer! = 5;\n"
+            "fun increment(value: &int) { value += 1; }\n"
+            "limit: int! = 5;\n"
             "increment(&limit);\n"
         )
         self.assertEqual(result.returncode, 1)
@@ -66,7 +66,7 @@ class ReferenceTests(unittest.TestCase):
 
     def test_missing_ampersand_is_rejected(self) -> None:
         result = run_source(
-            "fun increment(value: &integer) { value += 1; }\n"
+            "fun increment(value: &int) { value += 1; }\n"
             "x := 1;\n"
             "increment(x);\n"
         )

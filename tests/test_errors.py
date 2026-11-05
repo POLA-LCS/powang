@@ -48,9 +48,9 @@ class ErrorDiagnosticTests(unittest.TestCase):
         self.assertIn("doens't exists", result.stdout)
 
     def test_type_mismatch_in_typed_declaration(self) -> None:
-        result = run_source('x: integer = "hi";\n')
-        self.assert_diagnostic(result, "TYPE", "expected integer")
-        self.assertIn("but string was encounter", result.stdout)
+        result = run_source('x: int = "hi";\n')
+        self.assert_diagnostic(result, "TYPE", "expected int")
+        self.assertIn("but str was encounter", result.stdout)
 
     def test_syntax_error(self) -> None:
         result = run_source("print(1 +);\n")

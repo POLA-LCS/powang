@@ -211,7 +211,7 @@ class _TypeChecker:
         return value if isinstance(value, str) else None
 
     def _type_name_from_node(self, node: Any) -> Optional[str]:
-        """Resolve a type name used after `as`, including `array[...]`."""
+        """Resolve a type name used after `as`, including `arr[...]`."""
         if not isinstance(node, dict):
             return None
         if node.get('type') == LexerTokenType.IDENTIFIER:
@@ -1177,7 +1177,7 @@ class _TypeChecker:
             iterator_value = iterator.get('value') if isinstance(iterator, dict) else None
             if isinstance(iterator_value, dict):
                 if iterator_kind == ParserTokenType.DECLARATION_UNDEFINED and iterator_value.get('inferred'):
-                    ## Bare `for x >> values` takes the array element type.
+                    ## Bare `for x >> values` takes the arr element type.
                     name = self._identifier_name(iterator_value.get('identifier'))
                     bind_type = element_type if element_type not in (SOME, MIXED) else SOME
                     self._bind(name or '', bind_type, False, False)

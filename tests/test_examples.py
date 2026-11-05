@@ -18,12 +18,12 @@ class VariablesExampleTests(unittest.TestCase):
 
     def test_expected_lines(self) -> None:
         expected = [
-            "<integer: undefined>",
+            "<int: undefined>",
             "Holaaa",
             "[10, 20, 30]",
-            "2 -> integer",
-            "2.0 -> number",
-            "25 -> string",
+            "2 -> int",
+            "2.0 -> num",
+            "25 -> str",
             "Weak: nova",
             "Weak: Holaaa",
             "Weak: nova",
@@ -35,10 +35,10 @@ class VariablesExampleTests(unittest.TestCase):
         output = self.result.stdout
         self.assertIn("Holaaa", output)
         self.assertIn("[10, 20, 30]", output)
-        self.assertIn("<integer: undefined>", output)
-        self.assertIn("2 -> integer", output)
-        self.assertIn("2.0 -> number", output)
-        self.assertIn("25 -> string", output)
+        self.assertIn("<int: undefined>", output)
+        self.assertIn("2 -> int", output)
+        self.assertIn("2.0 -> num", output)
+        self.assertIn("25 -> str", output)
         self.assertIn("Weak: Holaaa", output)
         self.assertTrue(output.endswith("6.9"))
 

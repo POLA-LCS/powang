@@ -1211,12 +1211,12 @@ class Parser:
 
         type_identifier: str = self.Identifier()['value']
 
-        ## `array[element]` is the typed form. Bare `array` is sugar for
-        ## `array[any]`, where `any` resolves to the gradual `some` type.
+        ## `arr[element]` is the typed form. Bare `arr` is sugar for
+        ## `arr[any]`, where `any` resolves to the gradual `some` type.
         if type_identifier == PowangArray.type and self.next is not None and self.next.type == LexerTokenType.LEFT_BRACKET:
-            self.consume(LexerTokenType.LEFT_BRACKET, 'array element type')
+            self.consume(LexerTokenType.LEFT_BRACKET, 'arr element type')
             element_type = self.Type()
-            self.consume(LexerTokenType.RIGHT_BRACKET, 'array element type')
+            self.consume(LexerTokenType.RIGHT_BRACKET, 'arr element type')
 
         if reference and weak:
             raise powang_throw(powang_error_format(
@@ -1253,12 +1253,12 @@ class Parser:
                 element_type = alias['element_type']
             type_identifier = alias['value']
 
-        ## `any` is the gradual unknown used by bare `array` sugar.
+        ## `any` is the gradual unknown used by bare `arr` sugar.
         if type_identifier == 'any':
             type_identifier = PowangSome.type
 
         ## A trailing `?` marks an error-union return annotation:
-        ## `fun find(id: integer): map? { ... }` may also return `error`.
+        ## `fun find(id: int): map? { ... }` may also return `error`.
         if self.next.type == LexerTokenType.QUESTION_MARK:
             self.advance('type error union')
             error_union = True

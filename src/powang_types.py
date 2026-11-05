@@ -164,7 +164,7 @@ class PowangBoolean(PowangTypeBase):
 # ====== INTEGER =========
 class PowangInteger(PowangTypeBase):
     data: int
-    type: Literal['integer'] = 'integer'
+    type: Literal['int'] = 'int'
     def __init__(self, data: int = 0):
         super().__init__(data)
 
@@ -233,7 +233,7 @@ class PowangInteger(PowangTypeBase):
 
 class PowangNumber(PowangTypeBase):
     data: float
-    type: Literal['number'] = 'number'
+    type: Literal['num'] = 'num'
     def __init__(self, data: float = 0.0):
         super().__init__(data)
 
@@ -288,7 +288,7 @@ class PowangNumber(PowangTypeBase):
 # ====== STRING =========
 class PowangString(PowangTypeBase):
     data: str
-    type: Literal['string'] = 'string'
+    type: Literal['str'] = 'str'
     def __init__(self, data: str = ''):
         super().__init__(data)
 
@@ -354,7 +354,7 @@ class PowangString(PowangTypeBase):
 # ====== ARRAY =========
 class PowangArray(PowangTypeBase):
     data: list['PowangAny']
-    type: Literal['array'] = 'array'
+    type: Literal['arr'] = 'arr'
     def __init__(self, data: list['PowangAny'] = []):
         super().__init__(data)
 
