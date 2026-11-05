@@ -630,6 +630,18 @@ class Parser:
         }:
             return {'kind': 'literal', 'value': self.Literal('match pattern'), 'type': None}
         if self.next.type == LexerTokenType.IDENTIFIER:
+            # A dotted name such as Color.RED is a literal pattern, not a
+            # binding. Peek ahead without consuming the identifier.
+            saved_position = self.tokenizer.position
+            saved_row = self.tokenizer.row
+            saved_next = self.next
+            self.advance('match pattern')
+            is_access = self.next.type == LexerTokenType.DOT
+            self.tokenizer.position = saved_position
+            self.tokenizer.row = saved_row
+            self.next = saved_next
+            if is_access:
+                return {'kind': 'literal', 'value': self.PostfixExpression(), 'type': None}
             identifier = self.Identifier()
             type_node: DictRepr | None = None
             if self.next.type == LexerTokenType.COLON:
