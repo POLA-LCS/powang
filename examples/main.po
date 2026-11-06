@@ -1,1 +1,0 @@
-x: arr[map[str, num]];
