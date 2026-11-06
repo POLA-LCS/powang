@@ -1335,14 +1335,19 @@ class Parser:
         type_identifier: str = self.Identifier()['value']
 
         generics: list = []
-        if type_identifier == 'tup' and self.next.type == LexerTokenType.LEFT_BRACKET:
+        variadic: bool = False
+        if type_identifier in ('tup', PowangMap.type) and self.next.type == LexerTokenType.LEFT_BRACKET:
             self.consume(LexerTokenType.LEFT_BRACKET)
             while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                if self.next.type == LexerTokenType.ELLIPSIS:
+                    self.advance('variadic type')
+                    variadic = True
+                    break
                 generics.append(self.Type())
                 if self.next.type == LexerTokenType.COMMA:
                     self.advance()
                 elif self.next.type != LexerTokenType.RIGHT_BRACKET:
-                    raise powang_throw(powang_error_syntax('tuple type', "Expected ',' or ']' in tup[...]", [
+                    raise powang_throw(powang_error_syntax('generic type', "Expected ',' or ']' in type[...]", [
                         f"but {TokenToString(self.next.type)} was encountered",
                     ]))
             self.consume(LexerTokenType.RIGHT_BRACKET)
@@ -1407,6 +1412,7 @@ class Parser:
             "reference": reference,
             "element_type": element_type,
             "generics": generics,
+            "variadic": variadic,
         }).toDict()
 
     def helper_KeyValuePair(self, key: DictRepr):

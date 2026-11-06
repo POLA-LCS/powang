@@ -53,6 +53,7 @@ class LexerTokenType(TokenTypeBase):
     COLON       = auto() # :
     COMMA       = auto() # ,
     DOT         = auto() # .
+    ELLIPSIS    = auto() # ...
     QUESTION_MARK = auto() # ?
     SAFE_ACCESS = auto() # ?.
     COALESCE    = auto() # ??

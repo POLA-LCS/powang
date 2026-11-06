@@ -231,9 +231,21 @@ class _TypeChecker:
             if isinstance(inner, dict):
                 name = inner.get('value')
                 if isinstance(name, str):
-                    if name == 'any':
-                        return 'any'
-                    return self._normalized_type_name(name)
+                    generics = inner.get('generics')
+                    base = 'any' if name == 'any' else self._normalized_type_name(name)
+                    if isinstance(generics, list) and generics:
+                        types = [self._type_name_from_node(g) for g in generics]
+                        types = [t if t is not None else 'any' for t in types]
+                        if inner.get('variadic'):
+                            types.append('...')
+                        if name == 'tup':
+                            return 'tup[' + ', '.join(types) + ']'
+                        if name in (PowangMap.type, 'map'):
+                            return 'map[' + ', '.join(types) + ']'
+                        if name in (PowangArray.type, 'arr'):
+                            if types:
+                                return _array_of(types[0])
+                    return base
             return None
         if node.get('type') == LexerTokenType.IDENTIFIER:
             name = node.get('value')
@@ -314,7 +326,17 @@ class _TypeChecker:
                 generics = inner.get('generics')
             if isinstance(generics, list) and generics:
                 types = [self._annotation_type(g, ANY) if isinstance(g, dict) else ANY for g in generics]
+                if inner.get('variadic'):
+                    types.append('...')
                 resolved = 'tup[' + ', '.join(types) + ']'
+        if resolved == MAP:
+            generics = None
+            if isinstance(inner, dict):
+                generics = inner.get('generics')
+            if isinstance(generics, list) and len(generics) >= 2:
+                kt = self._annotation_type(generics[0], ANY) if isinstance(generics[0], dict) else ANY
+                vt = self._annotation_type(generics[1], ANY) if isinstance(generics[1], dict) else ANY
+                resolved = 'map[' + kt + ', ' + vt + ']'
         return f'&{resolved}' if reference else resolved
 
     @staticmethod
@@ -351,6 +373,12 @@ class _TypeChecker:
             return target == source
         if target == source:
             return True
+        if target.startswith(('tup[', 'map[')) or source.startswith(('tup[', 'map[')):
+            try:
+                from . import typespec as _ts
+                return _ts.assignable(_ts.type_of_str(target), _ts.type_of_str(source))
+            except Exception:
+                return False
         if _is_array_type(target) and _is_array_type(source):
             target_element = _array_element_type(target)
             source_element = _array_element_type(source)
@@ -460,9 +488,11 @@ class _TypeChecker:
         if node_type == ParserTokenType.ARRAY_EXPRESSION:
             return self._infer_array(value)
         if node_type == ParserTokenType.TUPLE_EXPRESSION:
-            for element in value.get('elements', []) if isinstance(value, dict) else []:
-                self._infer(element)
-            return 'tup'
+            elements = value.get('elements', []) if isinstance(value, dict) else []
+            element_types = [self._infer(element) for element in elements]
+            if not element_types:
+                return 'tup'
+            return 'tup[' + ', '.join(element_types) + ']'
         if node_type == ParserTokenType.KEY_VALUE_PAIR:
             self._infer(value.get('key'))
             self._infer(value.get('value'))

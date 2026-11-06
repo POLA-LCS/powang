@@ -1114,13 +1114,15 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 return PowangBoolean(not type_condition)
 
             if binary_operator == 'as':
+                from . import typespec as _ts
+                target_spec = _ts.from_ast_expr(expr_value['right'])
                 binary_right = getCastTypeName(where, expr_value['right'])
                 if binary_left.type == PowangAnyType.type:
                     binary_left = PowangTypeMap(binary_left.any)(binary_left.data)
 
                 if binary_right in get_state().type_alias:
                     binary_right = get_state().type_alias[binary_right]['value']
-                if binary_right not in NATI_TYPES:
+                if binary_right not in NATI_TYPES and not target_spec.nominal:
                     user_type = ScopeStack.get_ObjectType(binary_right)
                     if user_type is None:
                         raise powang_throw(powang_error_identifier_type(where, binary_right))
@@ -1128,7 +1130,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     return check_result
 
                 # EXPLICIT CASTING
-                binary_casted = explicitCast(binary_right, binary_left)
+                binary_casted = explicitCast(target_spec, binary_left)
                 if binary_casted is None:
                     raise powang_throw(powang_error_invalid_cast(
                         None,

@@ -73,6 +73,7 @@ class Tokenizer:
         r'/'      : (LexerTokenType.SLASH, None),
         r'%'      : (LexerTokenType.PERCENT, None),
 
+        r'\.\.\.' : (LexerTokenType.ELLIPSIS, None),
         r'\.'  : (LexerTokenType.DOT,   None),
         r'\?\.' : (LexerTokenType.SAFE_ACCESS, None),
         r'\?\?' : (LexerTokenType.COALESCE, None),
