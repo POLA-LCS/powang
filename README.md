@@ -62,9 +62,9 @@ println(classify(-3));
 
 ### Types
 
-powang is gradually typed. Annotated declarations, assignments, operators, calls and returns are checked. Unannotated code stays dynamic and degrades to `some`.
+powang is gradually typed. Annotated declarations, assignments, operators, calls and returns are checked. Unannotated code stays dynamic and degrades to `any`.
 
-Built-in types: `int`, `num`, `str`, `bool`, `arr`, `map`, `tup`, `some`, `nova`, `file`, `task`, `function`, `error`, `module`, `object`, `reference`.
+Built-in types: `int`, `num`, `str`, `bool`, `arr`, `map`, `tup`, `any`, `nova`, `file`, `task`, `function`, `error`, `module`, `object`, `reference`.
 
 ```po
 undefined_variable: int;

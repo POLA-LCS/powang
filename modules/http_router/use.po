@@ -20,6 +20,6 @@
 ## nova to continue. Middleware runs in insertion order.
 
 export extern fun new(): map >> "stdlib_http_router.new";
-export extern fun add(router: map, method: str, pattern: str, handler: some): nova >> "stdlib_http_router.add";
+export extern fun add(router: map, method: str, pattern: str, handler: any): nova >> "stdlib_http_router.add";
 export extern fun dispatch(router: map, request: map): map >> "stdlib_http_router.dispatch";
-export extern fun middleware(router: map, handler: some): nova >> "stdlib_http_router.middleware";
+export extern fun middleware(router: map, handler: any): nova >> "stdlib_http_router.middleware";

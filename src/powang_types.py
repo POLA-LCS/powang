@@ -116,7 +116,7 @@ class PowangNova(PowangTypeBase):
 # ====== SOME =========
 class PowangSome(PowangTypeBase):
     data: Any
-    type: Literal['some'] = 'some'
+    type: Literal['any'] = 'any'
     def __init__(self, data: Any = 0):
         super().__init__(data)
         self.some = 'nova'

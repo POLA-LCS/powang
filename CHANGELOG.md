@@ -49,7 +49,7 @@ All notable changes to powang are documented here.
   and writes inside the function mutate the caller's variable, constants are rejected,
   and references cannot be stored, returned, or sent to a task.
 - Gradual static type checker: annotated declarations, assignments, operators, calls
-  and returns are verified; unannotated code stays dynamic and degrades to `some`.
+  and returns are verified; unannotated code stays dynamic and degrades to `any`.
 - `--check` (parse and check only) and `--no-check` (skip the static pass) modes.
 - Error-union return types (`T?`), the postfix `?` propagation operator, and the
   `fail(kind, message, details...)` value constructor.

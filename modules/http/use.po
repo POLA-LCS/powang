@@ -14,6 +14,6 @@ export extern fun request(method: str, url: str, body: str = "", headers: map = 
 ## a map with status, headers and body. serve blocks until stopped; listen
 ## returns a per-run server id for stop. Options: workers (4), max_body_bytes
 ## (1048576), read_timeout_ms (10000) and host ("127.0.0.1").
-export extern fun serve(port: int, handler: some, options: map = []): nova >> "stdlib_http_server.serve";
-export extern fun listen(port: int, handler: some, options: map = []): int >> "stdlib_http_server.listen";
+export extern fun serve(port: int, handler: any, options: map = []): nova >> "stdlib_http_server.serve";
+export extern fun listen(port: int, handler: any, options: map = []): int >> "stdlib_http_server.listen";
 export extern fun stop(server: int): nova >> "stdlib_http_server.stop";

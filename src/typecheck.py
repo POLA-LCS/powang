@@ -42,7 +42,7 @@ from .error import (
 )
 from .lexer.token import LexerTokenType, ParserTokenType
 
-SOME = PowangSome.type
+ANY = PowangSome.type
 NOVA = PowangNova.type
 BOOLEAN = PowangBoolean.type
 INTEGER = PowangInteger.type
@@ -58,7 +58,7 @@ TASK = PowangTask.type
 
 ## `function` and `file` are runtime types but are absent from the parser's
 ## NATI_TYPES set, so they need explicit handling here.
-NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, TASK}
+NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE}
 
 ARRAY_OPEN = f'{ARRAY}['
 ARRAY_CLOSE = ']'
@@ -75,15 +75,15 @@ def _is_array_type(type_name: str) -> bool:
 
 def _array_element_type(type_name: str) -> str:
     if type_name == ARRAY:
-        return SOME
+        return ANY
     if _is_array_type(type_name):
         return type_name[len(ARRAY_OPEN):-len(ARRAY_CLOSE)]
-    return SOME
+    return ANY
 
 
 def _array_of(element_type: str) -> str:
-    if element_type == SOME:
-        return f'{ARRAY}[{SOME}]'
+    if element_type == ANY:
+        return f'{ARRAY}[{ANY}]'
     return f'{ARRAY}[{element_type}]'
 
 NUMERIC_TYPES = {INTEGER, NUMBER}
@@ -98,18 +98,18 @@ BUILTIN_RETURN_TYPES: dict[str, str] = {
     'format': STRING,
     'error' : ERROR,
     'system': INTEGER,
-    'input' : SOME,
-    'inputf': SOME,
+    'input' : ANY,
+    'inputf': ANY,
     'typeof': STRING,
     'size'  : INTEGER,
     'open'  : BOOLEAN,
     'close' : BOOLEAN,
-    'write' : SOME,
+    'write' : ANY,
     'read'  : STRING,
     ## Tasks are opaque to the checker: a spawned call is always `task`,
     ## while the awaited result type is unknowable without generics.
-    'wait'  : SOME,
-    'cancel': SOME,
+    'wait'  : ANY,
+    'cancel': ANY,
     'task_status': STRING,
 }
 
@@ -225,7 +225,7 @@ class _TypeChecker:
             if not isinstance(name, str):
                 return None
             if name == 'any':
-                return SOME
+                return ANY
             return self._normalized_type_name(name)
         if node.get('type') == ParserTokenType.INDEX_EXPRESSION:
             value = node.get('value')
@@ -241,7 +241,7 @@ class _TypeChecker:
 
     def _normalized_type_name(self, name: str) -> str:
         if name == "any":
-            return SOME
+            return ANY
         seen: set[str] = set()
         while name in self.type_alias and name not in seen:
             seen.add(name)
@@ -249,14 +249,14 @@ class _TypeChecker:
             if isinstance(alias, str):
                 name = alias
             elif isinstance(alias, dict):
-                name = alias.get('value', SOME)
+                name = alias.get('value', ANY)
             else:
                 break
         if name in NATIVE_TYPE_NAMES:
             return name
         return f'{OBJECT}:{name}'
 
-    def _annotation_type(self, type_node: Any, default: str = SOME) -> str:
+    def _annotation_type(self, type_node: Any, default: str = ANY) -> str:
         if not isinstance(type_node, dict):
             return default
         inner = type_node.get('value')
@@ -276,7 +276,7 @@ class _TypeChecker:
         if element_node is None and isinstance(inner, dict):
             element_node = inner.get('element_type')
         if resolved == ARRAY and element_node is not None:
-            resolved = _array_of(self._annotation_type(element_node, SOME))
+            resolved = _array_of(self._annotation_type(element_node, ANY))
         return f'&{resolved}' if reference else resolved
 
     @staticmethod
@@ -307,7 +307,7 @@ class _TypeChecker:
         return False
 
     def _assignable(self, target: str, source: str, target_weak: bool = False) -> bool:
-        if target == SOME or source == SOME:
+        if target == ANY or source == ANY:
             return True
         if target.startswith('&') or source.startswith('&'):
             return target == source
@@ -316,11 +316,11 @@ class _TypeChecker:
         if _is_array_type(target) and _is_array_type(source):
             target_element = _array_element_type(target)
             source_element = _array_element_type(source)
-            if target_element == SOME:
+            if target_element == ANY:
                 return True
             if target_element == MIXED or source_element == MIXED:
                 return target_element == source_element
-            if source_element == SOME:
+            if source_element == ANY:
                 return True
             return self._assignable(target_element, source_element)
         if source == NOVA:
@@ -375,11 +375,11 @@ class _TypeChecker:
             return self._infer_inner(node)
         except Exception:
             # A type checker must never crash on an unexpected AST shape.
-            return SOME
+            return ANY
 
     def _infer_inner(self, node: Any) -> str:
         if not isinstance(node, dict) or not node:
-            return SOME
+            return ANY
 
         node_type = node.get('type')
         value = node.get('value')
@@ -422,15 +422,13 @@ class _TypeChecker:
         if node_type == ParserTokenType.ARRAY_EXPRESSION:
             return self._infer_array(value)
         if node_type == ParserTokenType.TUPLE_EXPRESSION:
-            elements = value.get('elements', []) if isinstance(value, dict) else []
-            element_types = [self._infer(element) for element in elements]
-            if not element_types:
-                return 'tup'
-            return 'tup[' + ', '.join(element_types) + ']'
+            for element in value.get('elements', []) if isinstance(value, dict) else []:
+                self._infer(element)
+            return 'tup'
         if node_type == ParserTokenType.KEY_VALUE_PAIR:
             self._infer(value.get('key'))
             self._infer(value.get('value'))
-            return SOME
+            return ANY
         if node_type == ParserTokenType.BLOCK_STATEMENT:
             return self._infer_block(value)
 
@@ -447,7 +445,7 @@ class _TypeChecker:
             return self._infer_match(value)
         if node_type == ParserTokenType.MATCH_EXPRESSION:
             self._infer(value.get('subject'))
-            result_type = SOME
+            result_type = ANY
             for case in value.get('cases', []) if isinstance(value.get('cases'), list) else []:
                 if not isinstance(case, dict):
                     continue
@@ -457,13 +455,13 @@ class _TypeChecker:
                     if name is not None:
                         self._scope_push()
                         try:
-                            self._bind(name, SOME, False)
+                            self._bind(name, ANY, False)
                             guard = case.get('guard')
                             if guard is not None:
                                 self._infer(guard)
                             if case.get('is_expression'):
                                 case_type = self._infer(case.get('value'))
-                                if result_type == SOME:
+                                if result_type == ANY:
                                     result_type = case_type
                         finally:
                             self._scope_pop()
@@ -473,7 +471,7 @@ class _TypeChecker:
                         self._infer(guard)
                     if case.get('is_expression'):
                         case_type = self._infer(case.get('value'))
-                        if result_type == SOME:
+                        if result_type == ANY:
                             result_type = case_type
             return result_type
         if node_type == ParserTokenType.DECLARATION_UNDEFINED:
@@ -506,30 +504,30 @@ class _TypeChecker:
             return self._infer_extern(value)
 
         # USE_EXPRESSION and any unknown shape: gradual skip.
-        return SOME
+        return ANY
 
     # ------------------------------------------------------------ expressions
     def _infer_reference(self, value: Any) -> str:
         """Type of `&name`: a reference to the target variable's type."""
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         name = self._identifier_name(value.get('target'))
         if name is None:
-            return SOME
+            return ANY
         variable = self._lookup(name)
-        if variable is None or variable.type in (SOME, NOVA):
-            return SOME
+        if variable is None or variable.type in (ANY, NOVA):
+            return ANY
         return f'&{variable.type}'
 
     def _infer_identifier(self, name: Any) -> str:
         if not isinstance(name, str):
-            return SOME
+            return ANY
         if name == NOVA:
             return NOVA
         if name in ('true', 'false'):
             return BOOLEAN
         if name == 'this':
-            return self.this_type if self.this_type is not None else SOME
+            return self.this_type if self.this_type is not None else ANY
         variable = self._lookup(name)
         if variable is not None:
             return variable.type
@@ -537,27 +535,27 @@ class _TypeChecker:
             return FUNCTION
         if name in self.object_types:
             return f'{OBJECT}:{name}'
-        return SOME
+        return ANY
 
     def _infer_unary(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         operator = value.get('operator')
         operator_name = operator.get('value') if isinstance(operator, dict) else None
         right_type = self._infer(value.get('right'))
         if operator_name == '!':
             return BOOLEAN
         if operator_name == '-':
-            return right_type if right_type in NUMERIC_TYPES else SOME
+            return right_type if right_type in NUMERIC_TYPES else ANY
         if operator_name == '[-]':
-            return right_type if right_type in {INTEGER, NUMBER, STRING, ARRAY} else SOME
+            return right_type if right_type in {INTEGER, NUMBER, STRING, ARRAY} else ANY
         if operator_name == '+':
             return right_type
-        return SOME
+        return ANY
 
     def _infer_binary(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         operator = value.get('operator')
         operator_name = operator.get('value') if isinstance(operator, dict) else None
         left_node = value.get('left')
@@ -574,7 +572,7 @@ class _TypeChecker:
             target_type = self._type_name_from_node(right_node)
             if target_type is None:
                 self._infer(right_node)
-                return SOME
+                return ANY
             return target_type
 
         if operator_name == '??':
@@ -584,9 +582,9 @@ class _TypeChecker:
                 return right_type
             if right_type == NOVA:
                 return left_type
-            if left_type == SOME:
+            if left_type == ANY:
                 return right_type
-            if right_type == SOME:
+            if right_type == ANY:
                 return left_type
             if left_type == right_type:
                 return left_type
@@ -594,7 +592,7 @@ class _TypeChecker:
                 return left_type
             if self._assignable(right_type, left_type):
                 return right_type
-            return SOME
+            return ANY
 
         if operator_name == ':>':
             if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.CALL_EXPRESSION:
@@ -603,7 +601,7 @@ class _TypeChecker:
                 return self._infer_call(call_value)
             self._infer(left_node)
             self._infer(right_node)
-            return SOME
+            return ANY
 
         left_type = self._infer(left_node)
         right_type = self._infer(right_node)
@@ -615,11 +613,11 @@ class _TypeChecker:
 
     def _binary_result(self, operator: Optional[str], left: str, right: str, typed: bool) -> str:
         if operator is None:
-            return SOME
-        if left == SOME or right == SOME:
-            return SOME
+            return ANY
+        if left == ANY or right == ANY:
+            return ANY
         if left == NOVA or right == NOVA:
-            return SOME
+            return ANY
 
         if operator == '*':
             if left == STRING and right in NUMERIC_TYPES:
@@ -655,33 +653,33 @@ class _TypeChecker:
             # Untyped operations cast the right operand to the left type.
             # Typed operations cast the left operand to the right type.
             target = right if typed else left
-            return target if target in NUMERIC_TYPES else SOME
+            return target if target in NUMERIC_TYPES else ANY
 
         if left == right and left in {INTEGER, NUMBER, STRING, MAP, BOOLEAN}:
             return left
         if _is_array_type(left) and _is_array_type(right):
             return self._common_array_type(left, right)
 
-        return SOME
+        return ANY
 
     def _common_array_type(self, left: str, right: str) -> str:
         if left == right:
             return left
         left_element = _array_element_type(left)
         right_element = _array_element_type(right)
-        if left_element == SOME:
+        if left_element == ANY:
             return right
-        if right_element == SOME:
+        if right_element == ANY:
             return left
         if self._assignable(left_element, right_element):
             return left
         if self._assignable(right_element, left_element):
             return right
-        return _array_of(SOME)
+        return _array_of(ANY)
 
     def _infer_call(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         callee = value.get('callee')
         arguments = value.get('arguments')
         if not isinstance(arguments, list):
@@ -698,7 +696,7 @@ class _TypeChecker:
         if callee_name is None:
             # Still walk the callee expression so nested checks are not lost.
             self._infer(callee)
-            return SOME
+            return ANY
 
         builtins = self._builtins()
         if callee_name in builtins:
@@ -708,7 +706,7 @@ class _TypeChecker:
                     ['pass the arguments positionally'],
                     where=f'function call: {callee_name}',
                 )
-                return BUILTIN_RETURN_TYPES.get(callee_name, SOME)
+                return BUILTIN_RETURN_TYPES.get(callee_name, ANY)
             entry = builtins[callee_name]
             minimum = entry[0] if len(entry) > 0 else 0
             maximum = entry[1] if len(entry) > 1 else -1
@@ -724,7 +722,7 @@ class _TypeChecker:
                     [f"expected at least {minimum}", f"but {len(argument_types)} were passed"],
                     where=f'function call: {callee_name}',
                 )
-            return BUILTIN_RETURN_TYPES.get(callee_name, SOME)
+            return BUILTIN_RETURN_TYPES.get(callee_name, ANY)
 
         if callee_name in self.functions:
             candidates = self.functions[callee_name]
@@ -735,7 +733,7 @@ class _TypeChecker:
                         [f"found {len(candidates)} overloads"],
                         where=f'function call: {callee_name}',
                     )
-                    return candidates[0].return_type if candidates else SOME
+                    return candidates[0].return_type if candidates else ANY
                 candidate = candidates[0]
                 ordered_types: list[Optional[str]] = [None] * len(candidate.parameter_types)
                 for index, argument_type in enumerate(argument_types):
@@ -801,11 +799,11 @@ class _TypeChecker:
                 ],
                 where=f'function call: {callee_name}',
             )
-            return candidates[0].return_type if candidates else SOME
+            return candidates[0].return_type if candidates else ANY
 
         # A function value stored in a variable has no statically known
         # signature. Unknown callees are skipped, never rejected.
-        return SOME
+        return ANY
 
     def _infer_spawn(self, value: Any) -> str:
         ## The enclosed call is still checked (arity, known signatures), but
@@ -822,7 +820,7 @@ class _TypeChecker:
         for index, argument_type in enumerate(argument_types):
             parameter_type = signature.parameter_types[index]
             parameter_weak = signature.parameter_weak[index]
-            if parameter_type == SOME or argument_type == SOME:
+            if parameter_type == ANY or argument_type == ANY:
                 continue
             if not self._assignable(parameter_type, argument_type, parameter_weak):
                 return False
@@ -830,7 +828,7 @@ class _TypeChecker:
 
     def _infer_method_call(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         owner_type = self._infer(value.get('owner'))
         method_name = self._identifier_name(value.get('method'))
         arguments = value.get('arguments')
@@ -844,11 +842,11 @@ class _TypeChecker:
                 methods = info.get('methods', {}).get(method_name)
                 if methods:
                     return methods[0].return_type
-        return SOME
+        return ANY
 
     def _infer_index(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         target_type = self._infer(value.get('target'))
         self._infer(value.get('index'))
         if target_type == STRING:
@@ -856,15 +854,15 @@ class _TypeChecker:
         if _is_array_type(target_type):
             return _array_element_type(target_type)
         # Map values have no statically known element type in this slice.
-        return SOME
+        return ANY
 
     def _infer_access(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         target_type = self._infer(value.get('target'))
         property_name = self._identifier_name(value.get('property'))
         if property_name is None:
-            return SOME
+            return ANY
         if target_type == ERROR:
             return {
                 'kind': STRING,
@@ -875,17 +873,17 @@ class _TypeChecker:
                 'column': INTEGER,
                 'cause': ERROR,
                 'frames': ARRAY,
-            }.get(property_name, SOME)
+            }.get(property_name, ANY)
         if isinstance(target_type, str) and target_type.startswith(f'{OBJECT}:'):
             object_name = target_type.split(':', 1)[1]
             info = self.object_types.get(object_name)
             if info is not None:
-                return info.get('props', {}).get(property_name, SOME)
-        return SOME
+                return info.get('props', {}).get(property_name, ANY)
+        return ANY
 
     def _infer_array(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         elements = value.get('elements')
         if not isinstance(elements, list):
             return MAP if value.get('type') == MAP else ARRAY
@@ -898,7 +896,7 @@ class _TypeChecker:
             return ARRAY
         common = element_types[0]
         for element_type in element_types[1:]:
-            if element_type == common or common == SOME:
+            if element_type == common or common == ANY:
                 continue
             if self._assignable(common, element_type):
                 continue
@@ -911,18 +909,18 @@ class _TypeChecker:
 
     def _infer_block(self, statements: Any) -> str:
         if not isinstance(statements, list):
-            return SOME
+            return ANY
         self._scope_push()
         try:
             for statement in statements:
                 self._infer(statement)
         finally:
             self._scope_pop()
-        return SOME
+        return ANY
 
     def _infer_unwrap(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         operand = value.get('expression')
         operand_type = self._infer(operand)
 
@@ -945,14 +943,14 @@ class _TypeChecker:
                 ["write the call first, for example: value := find(id)?;"],
                 where='unwrap operator',
             )
-            return SOME
+            return ANY
 
-        return SOME if operand_type == ERROR else operand_type
+        return ANY if operand_type == ERROR else operand_type
 
     # ------------------------------------------------------------ declarations
     def _infer_declaration_undefined(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         name = self._identifier_name(value.get('identifier'))
         type_node = value.get('type')
         declared_type = self._annotation_type(type_node)
@@ -961,7 +959,7 @@ class _TypeChecker:
 
     def _infer_declaration_typed(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         name = self._identifier_name(value.get('identifier'))
         type_node = value.get('type')
         declared_type = self._annotation_type(type_node)
@@ -987,7 +985,7 @@ class _TypeChecker:
 
     def _infer_declaration_interpret(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         name = self._identifier_name(value.get('identifier'))
         source_type = self._infer(value.get('expression'))
         if isinstance(source_type, str) and source_type.startswith('&'):
@@ -999,16 +997,16 @@ class _TypeChecker:
                 ],
                 where='variable declaration',
             )
-        inferred_type = source_type if source_type else SOME
+        inferred_type = source_type if source_type else ANY
         self._bind(name or '', inferred_type, False, False)
         return inferred_type
 
     def _infer_destructure_declaration(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         pattern = value.get('pattern')
         if not isinstance(pattern, dict):
-            return SOME
+            return ANY
         pattern_value = pattern.get('value')
         if not isinstance(pattern_value, dict):
             pattern_value = pattern
@@ -1019,7 +1017,7 @@ class _TypeChecker:
         group_reference = bool(pattern_value.get('group_reference'))
         source_type = self._infer(value.get('expression'))
 
-        array_element = _array_element_type(source_type) if _is_array_type(source_type) else SOME
+        array_element = _array_element_type(source_type) if _is_array_type(source_type) else ANY
         object_props: Optional[dict] = None
         if isinstance(source_type, str) and source_type.startswith(f'{OBJECT}:'):
             object_name = source_type.split(':', 1)[1]
@@ -1041,19 +1039,19 @@ class _TypeChecker:
             elif group_type_node is not None:
                 entry_type = self._annotation_type(group_type_node)
             elif object_props is not None:
-                entry_type = object_props.get(name, SOME)
+                entry_type = object_props.get(name, ANY)
                 explicit = False
             else:
                 entry_type = array_element
                 explicit = False
             if entry_type == MIXED:
-                entry_type = SOME
+                entry_type = ANY
 
             if explicit and not reference:
-                source_entry_type = object_props.get(name, SOME) if object_props is not None else array_element
+                source_entry_type = object_props.get(name, ANY) if object_props is not None else array_element
                 if source_entry_type == MIXED:
-                    source_entry_type = SOME
-                if source_entry_type != SOME and entry_type != SOME and \
+                    source_entry_type = ANY
+                if source_entry_type != ANY and entry_type != ANY and \
                         not self._assignable(entry_type, source_entry_type):
                     self._assign_error(f'destructuring: {name}', entry_type, source_entry_type)
 
@@ -1062,7 +1060,7 @@ class _TypeChecker:
 
     def _infer_assignment(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         target = value.get('target')
         source_type = self._infer(value.get('expression'))
         if isinstance(source_type, str) and source_type.startswith('&'):
@@ -1090,12 +1088,12 @@ class _TypeChecker:
                     )
         elif target_type == ParserTokenType.ACCESS_EXPRESSION:
             declared_type = self._infer_access(target.get('value'))
-            if declared_type not in (SOME, NOVA, ERROR):
+            if declared_type not in (ANY, NOVA, ERROR):
                 if not self._assignable(declared_type, source_type):
                     self._assign_error('property assignment', declared_type, source_type)
         elif target_type == ParserTokenType.INDEX_EXPRESSION:
             declared_type = self._infer_index(target.get('value'))
-            if declared_type not in (SOME, NOVA, ERROR, MIXED):
+            if declared_type not in (ANY, NOVA, ERROR, MIXED):
                 if not self._assignable(declared_type, source_type):
                     self._assign_error('index assignment', declared_type, source_type)
         else:
@@ -1107,7 +1105,7 @@ class _TypeChecker:
         if not self.in_function or self.return_type is None:
             # Top-level return is a runtime concern; the checker skips it.
             return source_type
-        if source_type == SOME:
+        if source_type == ANY:
             return source_type
         if self.return_allows_error and source_type == ERROR:
             return source_type
@@ -1118,7 +1116,7 @@ class _TypeChecker:
     # -------------------------------------------------------------- statements
     def _infer_if(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         self._scope_push()
         try:
             self._infer(value.get('expression'))
@@ -1128,11 +1126,11 @@ class _TypeChecker:
         else_block = value.get('else')
         if else_block is not None:
             self._infer(else_block)
-        return SOME
+        return ANY
 
     def _infer_match(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         subject_type = self._infer(value.get('subject'))
         cases = value.get('cases')
         if isinstance(cases, list):
@@ -1148,11 +1146,11 @@ class _TypeChecker:
                             name = self._identifier_name(pattern.get('value'))
                             type_node = pattern.get('type')
                             bind_type = self._annotation_type(type_node) if type_node is not None else subject_type
-                            if type_node is not None and subject_type != SOME:
+                            if type_node is not None and subject_type != ANY:
                                 if not self._assignable(bind_type, subject_type):
                                     self._assign_error('match pattern', bind_type, subject_type)
                             if bind_type == MIXED:
-                                bind_type = SOME
+                                bind_type = ANY
                             self._bind(name or '', bind_type, type_node is not None, False)
                         elif kind == 'literal':
                             self._infer(pattern.get('value'))
@@ -1162,11 +1160,11 @@ class _TypeChecker:
                     self._infer(case.get('block'))
                 finally:
                     self._scope_pop()
-        return SOME
+        return ANY
 
     def _infer_try(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         self._infer(value.get('block'))
         catches = value.get('catches')
         if isinstance(catches, list):
@@ -1184,11 +1182,11 @@ class _TypeChecker:
         finally_block = value.get('finally_block')
         if finally_block is not None:
             self._infer(finally_block)
-        return SOME
+        return ANY
 
     def _infer_for(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         self._scope_push()
         try:
             self._infer(value.get('start_expression'))
@@ -1201,17 +1199,17 @@ class _TypeChecker:
             self._infer(value.get('block'))
         finally:
             self._scope_pop()
-        return SOME
+        return ANY
 
     def _infer_for_each(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         self._scope_push()
         try:
             iterable_node = value.get('expression')
             iterable_type = self._infer(iterable_node)
             iterator = value.get('iterator')
-            element_type = _array_element_type(iterable_type) if _is_array_type(iterable_type) else SOME
+            element_type = _array_element_type(iterable_type) if _is_array_type(iterable_type) else ANY
             is_literal = isinstance(iterable_node, dict) and \
                 iterable_node.get('type') == ParserTokenType.ARRAY_EXPRESSION
 
@@ -1224,11 +1222,11 @@ class _TypeChecker:
                 if iterator_kind == ParserTokenType.DECLARATION_UNDEFINED and iterator_value.get('inferred'):
                     ## Bare `for x >> values` takes the arr element type.
                     name = self._identifier_name(iterator_value.get('identifier'))
-                    bind_type = element_type if element_type not in (SOME, MIXED) else SOME
+                    bind_type = element_type if element_type not in (ANY, MIXED) else ANY
                     self._bind(name or '', bind_type, False, False)
                 else:
                     declared_type = self._annotation_type(iterator_value.get('type'))
-                    if not is_literal and declared_type not in (SOME, NOVA) and element_type not in (SOME, MIXED):
+                    if not is_literal and declared_type not in (ANY, NOVA) and element_type not in (ANY, MIXED):
                         weak = self._annotation_weak(iterator_value.get('type'))
                         if not self._assignable(declared_type, element_type, weak):
                             self._assign_error('for each iterator', declared_type, element_type)
@@ -1242,7 +1240,7 @@ class _TypeChecker:
             self._infer(value.get('block'))
         finally:
             self._scope_pop()
-        return SOME
+        return ANY
 
     def _check_for_each_elements(self, array_node: dict, iterator: dict) -> None:
         iterator_type = iterator.get('type')
@@ -1256,7 +1254,7 @@ class _TypeChecker:
             return
         type_node = iterator_value.get('type')
         declared_type = self._annotation_type(type_node)
-        if declared_type == SOME:
+        if declared_type == ANY:
             return
         weak = self._annotation_weak(type_node)
         elements = array_node.get('elements')
@@ -1264,7 +1262,7 @@ class _TypeChecker:
             return
         for element in elements:
             element_type = self._infer(element)
-            if element_type == SOME:
+            if element_type == ANY:
                 continue
             if not self._assignable(declared_type, element_type, weak):
                 self._assign_error('for each iterator', declared_type, element_type)
@@ -1273,10 +1271,10 @@ class _TypeChecker:
     # ------------------------------------------------------------- user types
     def _infer_type_declaration(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         name = self._identifier_name(value.get('identifier'))
         if name is None:
-            return SOME
+            return ANY
         info = {'props': {}, 'methods': {}}
         self.object_types[name] = info
 
@@ -1335,7 +1333,7 @@ class _TypeChecker:
         for argument in arguments:
             if not isinstance(argument, dict):
                 parameter_names.append('')
-                parameter_types.append(SOME)
+                parameter_types.append(ANY)
                 parameter_weak.append(False)
                 continue
             argument_value = argument.get('value')
@@ -1430,7 +1428,7 @@ class _TypeChecker:
     # ----------------------------------------------------------------- extern
     def _infer_extern(self, value: Any) -> str:
         if not isinstance(value, dict):
-            return SOME
+            return ANY
         powang = value.get('powang')
         if isinstance(powang, dict):
             powang_type = powang.get('type')
@@ -1438,7 +1436,7 @@ class _TypeChecker:
                 self._check_function(powang, register=True)
             elif powang_type == ParserTokenType.TYPE_DECLARATION:
                 self._infer_type_declaration(powang.get('value'))
-        return SOME
+        return ANY
 
 
 def type_check(program_ast: Any, path: Optional[str] = None) -> list[PowangError]:

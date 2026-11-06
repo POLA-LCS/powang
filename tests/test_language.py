@@ -201,7 +201,7 @@ class FunctionTests(LanguageTestCase):
     def test_function_value_assignment_with_some_type(self) -> None:
         source = (
             "fun add(left: int, right: int): int { return left + right; }\n"
-            "f: some = add;\n"
+            "f: any = add;\n"
             'print(typeof(f)); print("\\n");\n'
         )
         self.assert_program_output(source, "function\n")
