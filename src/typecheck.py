@@ -191,6 +191,12 @@ class _TypeChecker:
     def _bind(self, name: str, type_name: str, annotated: bool, weak: bool = False):
         if not name:
             return
+        if name in self.scopes[-1]:
+            self._error(
+                f"variable '{name}' is already declared in this scope",
+                ["choose a different name or assign to the existing variable with '='"],
+                where='variable declaration',
+            )
         self.scopes[-1][name] = _VariableInfo(type_name, annotated, weak)
 
     def _error(self, message: str, details: Optional[list[str]] = None, where: str = 'type checker'):
@@ -234,6 +240,8 @@ class _TypeChecker:
         return None
 
     def _normalized_type_name(self, name: str) -> str:
+        if name == "any":
+            return SOME
         seen: set[str] = set()
         while name in self.type_alias and name not in seen:
             seen.add(name)
