@@ -13,7 +13,7 @@ println($"max score: {MAX_SCORE}");
 more than one line. !#
 
 ## Trailing commas are allowed.
-numbers := [1, 2, 3,];
+numbers: arr[int] = [1, 2, 3,];
 pairs := ["a" >> 1, "b" >> 2,];
 
 ## Range iteration: start, step, end. The end is exclusive.

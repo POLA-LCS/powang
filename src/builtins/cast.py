@@ -91,6 +91,29 @@ def explicitCastArray(left: PowangAny) -> Optional[PowangArray]:
         return PowangArray()
     if left.type == PowangString.type:
         return PowangArray([PowangString(char) for char in left.data])
+    if left.type == PowangTuple.type:
+        return PowangArray(list(left.data))
+    if left.type == PowangMap.type:
+        result: list[PowangAny] = []
+        for key, value in left.data.items():
+            result.append(PowangTuple([key, value]))
+        return PowangArray(result)
+    return None
+
+
+def explicitCastTuple(left: PowangAny) -> Optional[PowangTuple]:
+    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    if (cast_result := PowangTuple.cast(left)) is not None:
+        return cast_result
+    if not left.weak.has_value or left.type == PowangNova.type:
+        return PowangTuple()
+    if left.type == PowangArray.type:
+        return PowangTuple(list(left.data))
+    if left.type == PowangMap.type:
+        result: list[PowangAny] = []
+        for key, value in left.data.items():
+            result.append(PowangTuple([key, value]))
+        return PowangTuple(result)
     return None
 
 def explicitCastMap(left: PowangAny) -> Optional[PowangMap]:
@@ -112,4 +135,6 @@ def explicitCast(type: str, left: PowangAny):
             return explicitCastArray(left)
         case PowangMap.type:
             return PowangMap.cast(left)
+        case PowangTuple.type:
+            return explicitCastTuple(left)
     return None

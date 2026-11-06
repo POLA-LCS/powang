@@ -208,8 +208,8 @@ def getCastTypeName(where: str, node: DictRepr) -> str:
                 target = value.get('target')
                 if isinstance(target, dict) and \
                         target.get('type') == LexerTokenType.IDENTIFIER and \
-                        target.get('value') == PowangArray.type:
-                    return PowangArray.type
+                        target.get('value') in (PowangArray.type, PowangTuple.type, PowangMap.type):
+                    return target.get('value')
     raise powang_throw(powang_error_syntax('cast expression', 'Expected a type name after `as`', [
         'write a primitive type, a user type or arr[element]'
     ]))
