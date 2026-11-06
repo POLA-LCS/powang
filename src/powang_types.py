@@ -128,7 +128,7 @@ class PowangSome(PowangTypeBase):
 # ====== BOOL =========
 class PowangBoolean(PowangTypeBase):
     data: bool
-    type: Literal['boolean'] = 'boolean'
+    type: Literal['bool'] = 'bool'
     def __init__(self, data: bool = False):
         super().__init__(data)
         
@@ -146,7 +146,7 @@ class PowangBoolean(PowangTypeBase):
         # elif right.type == PowangNova.type:
         #     result.data = False
         # elif right.type == PowangObjectType.type:
-        #     result.data = right.methods['boolean']().data # type: ignore
+        #     result.data = right.methods['bool']().data # type: ignore
         return result
 
     def __add__(self, right: 'PowangAny'):

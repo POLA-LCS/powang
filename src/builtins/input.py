@@ -44,8 +44,8 @@ def builtin_input(receptor: Optional[PowangAny] = None):
                     receptor.data = float(python_input)
                     receptor.some = PowangNumber.type
                 except ValueError:
-                    if (boolean := {'true': True, 'false': False}.get(python_input)) is not None:
-                        receptor.data = boolean        
+                    if (bool := {'true': True, 'false': False}.get(python_input)) is not None:
+                        receptor.data = bool        
                         receptor.some = PowangBoolean.type
                     else:
                         receptor.data = python_input

@@ -3,4 +3,4 @@
 
 export extern fun get(name: str): @str >> "stdlib_env.get";
 export extern fun get_or(name: str, default: str): str >> "stdlib_env.get_or";
-export extern fun has(name: str): boolean >> "stdlib_env.has";
+export extern fun has(name: str): bool >> "stdlib_env.has";

@@ -264,7 +264,7 @@ class Parser:
         assert identifier['value'] not in {'true', 'false'}, powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
-                f"which is a literal boolean value"
+                f"which is a literal bool value"
             ]
         )
         

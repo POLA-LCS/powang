@@ -99,7 +99,7 @@ All notable changes to powang are documented here.
 - For-each iterators were invisible to the loop body.
 - `write` was registered with the wrong arity.
 - Division and chunking by zero now return nova or a clean error instead of a traceback.
-- Extern booleans no longer collapse to nova.
+- Extern bools no longer collapse to nova.
 - Overload ties now raise an ambiguity error instead of silently picking one.
 - `typeof` on user instances returns the concrete type name.
 - Many documentation inaccuracies, including the `while` checklist and arithmetic comments.

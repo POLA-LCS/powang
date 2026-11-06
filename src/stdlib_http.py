@@ -40,10 +40,10 @@ def _require_text(value: Any, argument: str) -> str:
     return value
 
 
-def _require_boolean(value: Any, argument: str) -> bool:
+def _require_bool(value: Any, argument: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(
-            f"options: {argument} must be a boolean, got {type(value).__name__}"
+            f"options: {argument} must be a bool, got {type(value).__name__}"
         )
     return value
 
@@ -107,7 +107,7 @@ def _normalize_headers(headers: Any) -> dict[str, str]:
         else:
             raise ValueError(
                 f"headers: value for {key!r} must be a string, number or "
-                f"boolean, got {type(value).__name__}"
+                f"bool, got {type(value).__name__}"
             )
         normalized[key] = text
     return normalized
@@ -268,8 +268,8 @@ def _perform(
     body = _require_text(body, "body")
     headers = _normalize_headers(headers)
     timeout_seconds = _timeout_seconds(timeout_ms)
-    follow_redirects = _require_boolean(follow_redirects, "follow_redirects")
-    verify_tls = _require_boolean(verify_tls, "verify_tls")
+    follow_redirects = _require_bool(follow_redirects, "follow_redirects")
+    verify_tls = _require_bool(verify_tls, "verify_tls")
 
     try:
         return _execute(

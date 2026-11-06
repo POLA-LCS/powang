@@ -1,4 +1,4 @@
-## Arithmetics: int, num, boolean, str and arr operators.
+## Arithmetics: int, num, bool, str and arr operators.
 
 print(7 + 3); ## 10
 print("\n");

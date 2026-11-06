@@ -328,7 +328,7 @@ class PowangRequestHandler(http.server.BaseHTTPRequestHandler):
                 text = str(value)
             else:
                 raise _BadResponse(
-                    f"header {name!r} must be a string, number or boolean"
+                    f"header {name!r} must be a string, number or bool"
                 )
             if '\r' in text or '\n' in text:
                 raise _BadResponse(f"header {name!r} contains a newline")

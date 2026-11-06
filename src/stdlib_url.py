@@ -50,7 +50,7 @@ def _to_text(value: Any, key: str) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     raise ValueError(
-        f"query value for {key!r} must be a string, number, boolean or nova, "
+        f"query value for {key!r} must be a string, number, bool or nova, "
         f"got {type(value).__name__}"
     )
 

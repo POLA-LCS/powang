@@ -87,7 +87,7 @@ class ArithmeticTests(LanguageTestCase):
             ["2", "nova"],
         )
 
-    def test_boolean_arithmetic(self) -> None:
+    def test_bool_arithmetic(self) -> None:
         source = (
             'print(true + true); print("\\n");\n'
             'print(true - false); print("\\n");\n'
