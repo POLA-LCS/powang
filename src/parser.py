@@ -8,7 +8,7 @@ import copy
 
 NATI_TYPES: set[str] = {
     PowangNova.type   ,
-    PowangSome.type   ,
+    PowangAnyType.type   ,
     PowangInteger.type,
     PowangNumber.type ,
     PowangBoolean.type,
@@ -740,7 +740,7 @@ class Parser:
                     start_expression = doToken(ParserTokenType.DECLARATION_UNDEFINED, {
                         "identifier": synthetic_identifier,
                         "type": doToken(ParserTokenType.TYPE, {
-                            'value': PowangSome.type,
+                            'value': PowangAnyType.type,
                             'const': False,
                             'weak': False,
                             'reference': None,
@@ -770,7 +770,7 @@ class Parser:
                 start_expression = doToken(ParserTokenType.DECLARATION_UNDEFINED, {
                     "identifier": start_expression,
                     "type": doToken(ParserTokenType.TYPE, {
-                        'value': PowangSome.type,
+                        'value': PowangAnyType.type,
                         'const': False,
                         'weak': False,
                         'reference': None,
@@ -1383,7 +1383,7 @@ class Parser:
 
         ## `any` is the gradual unknown used by bare `arr` sugar.
         if type_identifier == 'any':
-            type_identifier = PowangSome.type
+            type_identifier = PowangAnyType.type
 
         ## A trailing `?` marks an error-union return annotation:
         ## `fun find(id: int): map? { ... }` may also return `error`.

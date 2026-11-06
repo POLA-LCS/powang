@@ -35,21 +35,21 @@ def builtin_input(receptor: Optional[PowangAny] = None):
             receptor.data = float(python_input)
         elif receptor.type == PowangString.type:
             receptor.data = python_input
-        elif receptor.type == PowangSome.type:
+        elif receptor.type == PowangAnyType.type:
             try:
                 receptor.data = int(python_input)
-                receptor.some = PowangInteger.type
+                receptor.any = PowangInteger.type
             except ValueError:
                 try:
                     receptor.data = float(python_input)
-                    receptor.some = PowangNumber.type
+                    receptor.any = PowangNumber.type
                 except ValueError:
                     if (bool := {'true': True, 'false': False}.get(python_input)) is not None:
                         receptor.data = bool        
-                        receptor.some = PowangBoolean.type
+                        receptor.any = PowangBoolean.type
                     else:
                         receptor.data = python_input
-                        receptor.some = PowangString.type
+                        receptor.any = PowangString.type
         else:
             raise powang_throw(powang_error_type_match('builtin: input', 'primitive type', receptor.type))
     except ValueError:

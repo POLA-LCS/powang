@@ -31,7 +31,7 @@ from .powang_types import (
     PowangNova,
     PowangNumber,
     PowangObjectType,
-    PowangSome,
+    PowangAnyType,
     PowangString,
     PowangTask,
 )
@@ -42,7 +42,7 @@ from .error import (
 )
 from .lexer.token import LexerTokenType, ParserTokenType
 
-ANY = PowangSome.type
+ANY = PowangAnyType.type
 NOVA = PowangNova.type
 BOOLEAN = PowangBoolean.type
 INTEGER = PowangInteger.type

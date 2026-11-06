@@ -236,8 +236,8 @@ def _evaluateDestructureDeclaration(where: str, expr_value: DictRepr) -> PowangA
         return None
 
     source = evaluateAstExpression(expr_value.get('expression'))
-    if source.type == PowangSome.type:
-        source = PowangTypeMap(source.some)(source.data)
+    if source.type == PowangAnyType.type:
+        source = PowangTypeMap(source.any)(source.data)
 
     if source.type == PowangArray.type:
         for index, entry in enumerate(entries):
@@ -333,7 +333,7 @@ def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> P
     if checkReturnsNova(where, target_value, right_value):
         return target_value
 
-    if target_value.type != right_value.type and target_value.type != PowangSome.type:
+    if target_value.type != right_value.type and target_value.type != PowangAnyType.type:
         casted_right_value = PowangTypeCast(target_value.type, right_value)
         if casted_right_value is None:
             raise powang_throw(powang_error_type_match(
@@ -345,8 +345,8 @@ def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> P
     return PowangCopyConstruct(right_value)
 
 def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny, force_object_assign: bool):
-    if right_value.type == PowangSome.type:
-        right_value = PowangTypeMap(right_value.some)(right_value.data)
+    if right_value.type == PowangAnyType.type:
+        right_value = PowangTypeMap(right_value.any)(right_value.data)
 
     if target_value.const:
         assert not target_value.defined or target_value.const.can_change, powang_error_format(
@@ -362,11 +362,11 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
                 "use &variable directly as a &parameter argument",
             ]))
 
-    if target_value.type == PowangSome.type:
+    if target_value.type == PowangAnyType.type:
         # PowangCopyConstruct handles types whose constructor signature is not
         # (data,) - e.g. PowangFunction(args, data, return_expr).
         target_value.data = PowangCopyConstruct(right_value).data
-        target_value.some = right_value.type
+        target_value.any = right_value.type
 
     elif target_value.type == PowangErrorValue.type and right_value.type == PowangErrorValue.type:
         ## Error values carry a structured payload beside `data`; copy both.
@@ -399,10 +399,10 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
     return target_value
 
 def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bool) -> PowangAny:
-    if left.type == PowangSome.type:
-        left = PowangTypeMap(left.some)(left.data)
-    if right.type == PowangSome.type:
-        right = PowangTypeMap(right.some)(right.data)
+    if left.type == PowangAnyType.type:
+        left = PowangTypeMap(left.any)(left.data)
+    if right.type == PowangAnyType.type:
+        right = PowangTypeMap(right.any)(right.data)
     if operator in {'+', '-', '*', '/', '%'}:
         assert left.type != PowangNova.type and left.weak.has_value, powang_error_unsupported_operation(
             'operation', f'nova weak {left.type}', operator, right.type)
@@ -460,8 +460,8 @@ def getIndexedValue(where: str, expression: DictRepr, subscript_check: bool):
     assert target_value.defined, powang_error_undefined_reference(
         TokenToString(ParserTokenType.ASSIGNMENT),
         expression['target']['value'])
-    if target_value.type == PowangSome.type:
-        target_value = PowangTypeMap(target_value.some)(target_value.data)
+    if target_value.type == PowangAnyType.type:
+        target_value = PowangTypeMap(target_value.any)(target_value.data)
     index = evaluateAstExpression(expression['index'])
     if subscript_check:
         assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "str type is not subscriptable for now.")
@@ -508,7 +508,7 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
                 candidates[func_index] += 3
             elif match_arg_type == param.type:
                 candidates[func_index] += 3
-            elif match_arg_type == PowangSome.type:
+            elif match_arg_type == PowangAnyType.type:
                 candidates[func_index] += 1
             elif match_arg_type in NATI_TYPES:
                 if PowangTypeCast(match_arg_type, param) is not None:
@@ -562,7 +562,7 @@ def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, c
                     f"but {argument.type} was encountered",
                 ])
             expected = param_type.get('value')
-            assert argument.target_type in {expected, PowangSome.type}, powang_error_format(
+            assert argument.target_type in {expected, PowangAnyType.type}, powang_error_format(
                 'REFERENCE', 'function call', "Reference type does not match", [
                     f"expected &{expected}",
                     f"but &{argument.target_type} was encountered",
@@ -1095,7 +1095,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 type_condition: bool = True
                 if expr_value['right']['type'] == LexerTokenType.IDENTIFIER:
                     type_condition = expr_value['right']['value'] == (
-                        binary_left.type_name if binary_left.type != PowangSome.type else binary_left.some
+                        binary_left.type_name if binary_left.type != PowangAnyType.type else binary_left.any
                     )
 
                     # if expr_value['right']['value']['weak']:
@@ -1115,8 +1115,8 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
             if binary_operator == 'as':
                 binary_right = getCastTypeName(where, expr_value['right'])
-                if binary_left.type == PowangSome.type:
-                    binary_left = PowangTypeMap(binary_left.some)(binary_left.data)
+                if binary_left.type == PowangAnyType.type:
+                    binary_left = PowangTypeMap(binary_left.any)(binary_left.data)
 
                 if binary_right in get_state().type_alias:
                     binary_right = get_state().type_alias[binary_right]['value']
@@ -1244,7 +1244,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     "weak" : right_value.weak.it_is,
                     "const": right_value.const.it_is,
                     "value" : {
-                        PowangSome.type: right_value.some,
+                        PowangAnyType.type: right_value.any,
                         PowangObjectType.type: right_value.type_name
                     }.get(right_value.type, right_value.type),
                 })
@@ -1324,8 +1324,8 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 ]
             )
             unwrap_value = evaluateAstExpression(expr_value['expression'])
-            if unwrap_value.type == PowangSome.type:
-                unwrap_value = PowangTypeMap(unwrap_value.some)(unwrap_value.data)
+            if unwrap_value.type == PowangAnyType.type:
+                unwrap_value = PowangTypeMap(unwrap_value.any)(unwrap_value.data)
             if unwrap_value.type == PowangErrorValue.type:
                 ScopeStack.return_value = PowangCopyConstruct(unwrap_value)
                 return ScopeStack.return_value
@@ -1680,8 +1680,8 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ])
 
             return_expr_value = evaluateAstExpression(expr_value)
-            if return_expr_value.type == PowangSome.type:
-                return_expr_value = PowangTypeMap(return_expr_value.some)(return_expr_value.data)
+            if return_expr_value.type == PowangAnyType.type:
+                return_expr_value = PowangTypeMap(return_expr_value.any)(return_expr_value.data)
             ScopeStack.return_value = PowangCopyConstruct(return_expr_value)
 
         case ParserTokenType.TYPE_DECLARATION:

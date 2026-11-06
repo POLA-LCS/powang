@@ -176,11 +176,11 @@ def copy_for_task(value: PowangAny) -> PowangAny:
     normal copy semantics.
     """
     copied = PowangCopyConstruct(value)
-    if value.type == PowangSome.type and value.some:
+    if value.type == PowangAnyType.type and value.any:
         ## A weak/inferred value stores its concrete payload in `data`.
         ## Recurse through a concrete wrapper so nested containers copy too.
         try:
-            concrete = PowangTypeMap(value.some)(value.data)
+            concrete = PowangTypeMap(value.any)(value.data)
         except (KeyError, TypeError):
             pass
         else:

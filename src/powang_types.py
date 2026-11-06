@@ -27,7 +27,7 @@ class PowangTypeBase:
     type      : Any  = None
     type_name : str  = ''
     defined   : bool = True
-    some      : str  = ''
+    any       : str  = ''
     const     : PropertyConst
     weak      : PropertyWeak
     sizeable  : bool = False
@@ -47,7 +47,7 @@ class PowangTypeBase:
             'defined'     : self.defined,
             'const'       : self.const,
             'weak'        : self.weak,
-            'some'        : self.some,
+            'any'        : self.any,
         }
         
     def __hash__(self) -> int:
@@ -114,12 +114,12 @@ class PowangNova(PowangTypeBase):
         return None
     
 # ====== SOME =========
-class PowangSome(PowangTypeBase):
+class PowangAnyType(PowangTypeBase):
     data: Any
     type: Literal['any'] = 'any'
     def __init__(self, data: Any = 0):
         super().__init__(data)
-        self.some = 'nova'
+        self.any = 'nova'
 
     @staticmethod
     def cast(right: 'PowangAny'):
@@ -594,7 +594,7 @@ class PowangReference(PowangTypeBase):
 
     type: Literal['reference'] = 'reference'
 
-    def __init__(self, owner: dict[str, Any], name: str, target_type: str = 'some'):
+    def __init__(self, owner: dict[str, Any], name: str, target_type: str = 'any'):
         super().__init__(None)
         self.owner = owner
         self.name = name
@@ -659,7 +659,7 @@ class PowangPropertyReference(PowangTypeBase):
 class PowangReference(PowangTypeBase):
     type: Literal['reference'] = 'reference'
 
-    def __init__(self, owner: dict[str, Any], name: str, target_type: str = 'some'):
+    def __init__(self, owner: dict[str, Any], name: str, target_type: str = 'any'):
         super().__init__(None)
         self.owner = owner
         self.name = name
@@ -731,7 +731,7 @@ class PowangTask(PowangTypeBase):
 # ====== ANY =========
 PowangAny = Union[
     PowangNova,        # None
-    PowangSome,        # Any
+    PowangAnyType,        # Any
     PowangBoolean,     # bool
     PowangInteger,     # int
     PowangNumber,      # float
@@ -751,7 +751,7 @@ PowangAny = Union[
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
     return {
         PowangNova.type       : PowangNova,
-        PowangSome.type       : PowangSome,
+        PowangAnyType.type       : PowangAnyType,
         PowangInteger.type    : PowangInteger,
         PowangNumber.type     : PowangNumber,
         PowangBoolean.type    : PowangBoolean,

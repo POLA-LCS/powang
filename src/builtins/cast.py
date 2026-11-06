@@ -10,8 +10,8 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
     if (cast_result := PowangString.cast(left)) is not None:
         return cast_result
 
-    if left.type == PowangSome.type:
-        defined_some = PowangTypeMap(left.some)(left.data)
+    if left.type == PowangAnyType.type:
+        defined_some = PowangTypeMap(left.any)(left.data)
         assert (cast_result := explicitCastString(defined_some)) is not None, powang_error_invalid_cast(
             None, PowangString.type, left.type, True
         )
