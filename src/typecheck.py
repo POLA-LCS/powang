@@ -58,7 +58,7 @@ TASK = PowangTask.type
 
 ## `function` and `file` are runtime types but are absent from the parser's
 ## NATI_TYPES set, so they need explicit handling here.
-NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE}
+NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, TASK}
 
 ARRAY_OPEN = f'{ARRAY}['
 ARRAY_CLOSE = ']'
@@ -422,9 +422,11 @@ class _TypeChecker:
         if node_type == ParserTokenType.ARRAY_EXPRESSION:
             return self._infer_array(value)
         if node_type == ParserTokenType.TUPLE_EXPRESSION:
-            for element in value.get('elements', []) if isinstance(value, dict) else []:
-                self._infer(element)
-            return 'tup'
+            elements = value.get('elements', []) if isinstance(value, dict) else []
+            element_types = [self._infer(element) for element in elements]
+            if not element_types:
+                return 'tup'
+            return 'tup[' + ', '.join(element_types) + ']'
         if node_type == ParserTokenType.KEY_VALUE_PAIR:
             self._infer(value.get('key'))
             self._infer(value.get('value'))

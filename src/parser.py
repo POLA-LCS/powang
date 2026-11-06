@@ -17,6 +17,7 @@ NATI_TYPES: set[str] = {
     PowangMap.type    ,
     PowangErrorValue.type,
     'tup',
+    PowangTask.type,
 }
 
 
