@@ -211,32 +211,63 @@ class _TypeChecker:
     def _identifier_name(node: Any) -> Optional[str]:
         if not isinstance(node, dict):
             return None
-        if node.get('type') != LexerTokenType.IDENTIFIER:
-            return None
-        value = node.get('value')
-        return value if isinstance(value, str) else None
+        if node.get('type') == LexerTokenType.IDENTIFIER:
+            value = node.get('value')
+            return value if isinstance(value, str) else None
+        if node.get('type') == ParserTokenType.TYPE:
+            inner = node.get('value')
+            if isinstance(inner, dict):
+                value = inner.get('value')
+                if isinstance(value, str):
+                    return value
+        return None
 
     def _type_name_from_node(self, node: Any) -> Optional[str]:
         """Resolve a type name used after `as`, including `arr[...]`."""
         if not isinstance(node, dict):
+            return None
+        if node.get('type') == ParserTokenType.TYPE:
+            inner = node.get('value')
+            if isinstance(inner, dict):
+                name = inner.get('value')
+                if isinstance(name, str):
+                    if name == 'any':
+                        return 'any'
+                    return self._normalized_type_name(name)
             return None
         if node.get('type') == LexerTokenType.IDENTIFIER:
             name = node.get('value')
             if not isinstance(name, str):
                 return None
             if name == 'any':
-                return ANY
+                return 'any'
             return self._normalized_type_name(name)
         if node.get('type') == ParserTokenType.INDEX_EXPRESSION:
             value = node.get('value')
             if not isinstance(value, dict):
                 return None
-            if self._identifier_name(value.get('target')) != ARRAY:
-                return None
-            element = self._type_name_from_node(value.get('index'))
-            if element is None:
-                return ARRAY
-            return _array_of(element)
+            target_name = self._identifier_name(value.get('target'))
+            index_node = value.get('index')
+            if target_name == ARRAY:
+                element = self._type_name_from_node(index_node)
+                if element is None:
+                    return ARRAY
+                return _array_of(element)
+            if target_name == 'tup':
+                if isinstance(index_node, dict) and index_node.get('type') == ParserTokenType.TUPLE_EXPRESSION:
+                    elems = index_node.get('value', {}).get('elements', []) if isinstance(index_node.get('value'), dict) else index_node.get('elements', [])
+                    if not isinstance(elems, list):
+                        elems = []
+                    types = [self._type_name_from_node(e) for e in elems]
+                    types = [t if t is not None else SOME for t in types]
+                    return 'tup[' + ', '.join(types) + ']'
+                element = self._type_name_from_node(index_node)
+                if element is None:
+                    return 'tup'
+                return 'tup[' + element + ']'
+            if target_name == MAP:
+                return MAP
+            return None
         return None
 
     def _normalized_type_name(self, name: str) -> str:
@@ -277,6 +308,13 @@ class _TypeChecker:
             element_node = inner.get('element_type')
         if resolved == ARRAY and element_node is not None:
             resolved = _array_of(self._annotation_type(element_node, ANY))
+        if resolved == 'tup':
+            generics = None
+            if isinstance(inner, dict):
+                generics = inner.get('generics')
+            if isinstance(generics, list) and generics:
+                types = [self._annotation_type(g, ANY) if isinstance(g, dict) else ANY for g in generics]
+                resolved = 'tup[' + ', '.join(types) + ']'
         return f'&{resolved}' if reference else resolved
 
     @staticmethod

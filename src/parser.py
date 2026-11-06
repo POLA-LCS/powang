@@ -1157,6 +1157,14 @@ class Parser:
     def IndexExpression(self, target: DictRepr):
         self.consume(LexerTokenType.LEFT_BRACKET)
         index = self.Expression()
+        if self.next.type == LexerTokenType.COMMA:
+            elements = [index]
+            while self.next.type == LexerTokenType.COMMA:
+                self.advance()
+                elements.append(self.Expression())
+            index = doToken(ParserTokenType.TUPLE_EXPRESSION, {
+                "elements": elements,
+            }).toDict()
         self.consume(LexerTokenType.RIGHT_BRACKET)
         return doToken(ParserTokenType.INDEX_EXPRESSION, {
             "target": target,

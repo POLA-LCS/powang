@@ -9,11 +9,13 @@ const LABEL = "powang";
 println($"== {LABEL} ==");
 println($"max score: {MAX_SCORE}");
 
-#! Block comments can span
-more than one line. !#
+#! 
+Block comments can span
+more than one line. 
+!#
 
 ## Trailing commas are allowed.
-numbers: arr[int] = [1, 2, 3,];
+numbers := [1, 2, 3];
 pairs := ["a" >> 1, "b" >> 2,];
 
 ## Range iteration: start, step, end. The end is exclusive.
