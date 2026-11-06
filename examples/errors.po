@@ -35,7 +35,7 @@ try {
 }
 
 try {
-    pieces := "abc" / 0;
+    "abc" / 0;
 } catch problem {
     print(problem.kind);
     print(": ");
