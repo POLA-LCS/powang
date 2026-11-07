@@ -249,6 +249,18 @@ class UserTypeTests(LanguageTestCase):
         self.assert_program_output(source, "0 1\n")
 
 
+    def test_static_named_arguments_are_checked(self) -> None:
+        result = run_source(
+            "type Math[+] {\n"
+            "    fun add(a: int, b: int): int { return a + b; }\n"
+            "}\n"
+            "value: str = Math.add(a >> 1, b >> 2);\n"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("TYPE ERROR", result.combined)
+        assert_no_traceback(self, result)
+
+
 class MapTests(LanguageTestCase):
     def test_map_literal_and_non_destructive_concat(self) -> None:
         source = (

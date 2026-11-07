@@ -2517,11 +2517,35 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                             where, f"method: {expr_value['method']['value']}", [
                                 "perhaps is a private static method?"
                             ]))
-                    static_arguments = [
-                        evaluateAstExpression(call_arg)
-                        for call_arg in expr_value['arguments']
-                    ]
-                    candidate = getFunctionCandidate(static_methods, static_arguments)
+                    static_arguments: list[PowangAny] = []
+                    static_named: list[tuple[str, PowangAny]] = []
+                    for call_arg in expr_value['arguments']:
+                        if isinstance(call_arg, dict) and \
+                                call_arg.get('type') == ParserTokenType.NAMED_ARGUMENT:
+                            named_value = call_arg.get('value')
+                            if isinstance(named_value, dict):
+                                name_node = named_value.get('name')
+                                name = name_node.get('value') if isinstance(name_node, dict) else None
+                                if isinstance(name, str):
+                                    static_named.append(
+                                        (name, evaluateAstExpression(named_value.get('value')))
+                                    )
+                            continue
+                        static_arguments.append(evaluateAstExpression(call_arg))
+                    if static_named and len(static_methods) != 1:
+                        raise powang_throw(powang_error_format(
+                            'ARGUMENT', where,
+                            f"Named arguments for '{expr_value['method']['value']}' require a single overload", [
+                                f"found {len(static_methods)} overloads",
+                            ],
+                        ))
+                    candidate = getFunctionCandidate(
+                        static_methods,
+                        static_arguments + [value for _, value in static_named],
+                    )
+                    static_arguments = resolveNamedArguments(
+                        where, candidate, static_arguments, static_named
+                    )
                     ScopeStack.static_method_stack.append(user_type.type_name)
                     try:
                         return callFunction(

@@ -127,6 +127,15 @@ class MapMethodTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.combined)
         self.assertEqual(result.stdout, "1 0\n")
 
+    def test_popget_returns_the_value_type(self) -> None:
+        result = run_source(
+            'values := ["a" >> 1];\n'
+            'value: int = map.popget(&values, "a");\n'
+            'print(value); print("\\n");\n'
+        )
+        self.assertEqual(result.returncode, 0, result.combined)
+        self.assertEqual(result.stdout, "1\n")
+
     def test_merge_and_keys_values(self) -> None:
         result = run_source(
             "first := [\"a\" >> 1];\n"
