@@ -876,60 +876,129 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangHandle.type     : PowangHandle,
     }[type]
 
-def PowangCopyConstruct(any: PowangAny) -> PowangAny:
+def _copy_common(source: PowangAny, destination: PowangAny) -> PowangAny:
+    destination.defined = source.defined
+    destination.any = source.any
+    destination.structure_locked = source.structure_locked
+    destination.elements_locked = source.elements_locked
+    destination.sizeable = source.sizeable
+    destination.indexable = source.indexable
+    destination.weak = PowangTypeBase.PropertyWeak(source.weak.it_is, source.weak.has_value)
+    destination.const = PowangTypeBase.PropertyConst(source.const.it_is, source.const.can_change)
+    if hasattr(source, 'declared_spec'):
+        destination.declared_spec = source.declared_spec
+    return destination
+
+
+def PowangCopyConstruct(any: PowangAny, _memo: Optional[dict[int, PowangAny]] = None) -> PowangAny:
+    if _memo is None:
+        _memo = {}
+    key = id(any)
+    if key in _memo:
+        return _memo[key]
+
     if any.type == PowangObjectType.type:
-        return PowangCopyConstructObjectType(any)
-    if any.type == PowangFileStream.type:
-        # File streams are external resources: a "copy" is the same stream
-        # reference, never a new PowangFileStream (which would need mode/open).
+        return PowangCopyConstructObjectType(any, _memo)
+
+    if any.type in {
+        PowangFileStream.type,
+        PowangErrorValue.type,
+        PowangModule.type,
+        PowangTask.type,
+        PowangReference.type,
+        PowangProject.type,
+        PowangHandle.type,
+    }:
+        # External resources, immutable namespaces, task handles, handles,
+        # project configuration and explicit aliases keep their identity.
+        _memo[key] = any
         return any
-    if any.type == PowangErrorValue.type:
-        # Error values are immutable snapshots; sharing the reference is safe.
-        return any
-    if any.type == PowangModule.type:
-        # Modules are immutable namespaces; copies stay the same reference.
-        return any
-    if any.type == PowangTask.type:
-        # A task handle names one piece of running work. Copying it must not
-        # duplicate or restart that work, so the reference is preserved.
-        return any
+
+    if any.type == PowangAnyType.type:
+        value = PowangAnyType(0)
+        _memo[key] = value
+        if isinstance(any.data, PowangTypeBase):
+            value.data = PowangCopyConstruct(any.data, _memo)
+        else:
+            value.data = any.data
+        if hasattr(any, 'concrete_value'):
+            value.concrete_value = PowangCopyConstruct(any.concrete_value, _memo)
+        return _copy_common(any, value)
+
     if any.type == PowangTuple.type:
-        return PowangTuple(list(any.data))
-    if any.type == PowangReference.type:
-        # A reference is an alias, not a value. Copying it must keep pointing
-        # at the same slot, so the reference itself is preserved.
-        return any
-    if any.type == PowangErrorValue.type:
-        ## Preserve the structured payload (kind, message, details) across
-        ## copies; only `data` holds the printable form.
-        value = PowangErrorValue(any.data)
-        value.error = any.error
-    elif any.type == PowangFunction.type:
+        value = PowangTuple([])
+        _memo[key] = value
+        value.data = [PowangCopyConstruct(item, _memo) for item in any.data]
+        return _copy_common(any, value)
+
+    if any.type == PowangArray.type:
+        value = PowangArray([])
+        _memo[key] = value
+        value.data = [PowangCopyConstruct(item, _memo) for item in any.data]
+        return _copy_common(any, value)
+
+    if any.type == PowangMap.type:
+        value = PowangMap({})
+        _memo[key] = value
+        value.data = {
+            PowangCopyConstruct(key_value, _memo): PowangCopyConstruct(item, _memo)
+            for key_value, item in any.data.items()
+        }
+        return _copy_common(any, value)
+
+    if any.type == PowangSet.type:
+        value = PowangSet([])
+        _memo[key] = value
+        value.data = {
+            PowangCopyConstruct(item, _memo): None for item in any.data.keys()
+        }
+        return _copy_common(any, value)
+
+    if any.type == PowangFunction.type:
         value = PowangFunction(
-            args     = list(any.args),
-            data     = list(any.data),
-            return_expr = any.return_expr,
+            args=list(any.args),
+            data=list(any.data),
+            return_expr=any.return_expr,
         )
+        _memo[key] = value
         value.min_argc = any.min_argc
         if hasattr(any, 'closure'):
             value.closure = any.closure
         if hasattr(any, 'external'):
             value.external = any.external
-    elif any.type == PowangSet.type:
-        value = PowangSet(list(any.data.keys()))
-    else:
-        value = PowangTypeMap(any.type)(any.data)
-    value.defined = any.defined
-    value.any = any.any
-    value.structure_locked = any.structure_locked
-    value.elements_locked = any.elements_locked
-    value.weak = PowangTypeBase.PropertyWeak(any.weak.it_is, any.weak.has_value)
-    value.const = PowangTypeBase.PropertyConst(any.const.it_is, any.const.can_change)
-    if hasattr(any, 'declared_spec'):
-        value.declared_spec = any.declared_spec
-    if hasattr(any, 'concrete_value'):
-        value.concrete_value = PowangCopyConstruct(any.concrete_value)
-    return value
+        return _copy_common(any, value)
+
+    value = PowangTypeMap(any.type)(any.data)
+    _memo[key] = value
+    return _copy_common(any, value)
+
+
+def PowangCopyConstructObjectType(
+    anyType: PowangObjectType,
+    _memo: Optional[dict[int, PowangAny]] = None,
+) -> PowangObjectType:
+    if _memo is None:
+        _memo = {}
+    key = id(anyType)
+    if key in _memo:
+        return _memo[key]
+    value = PowangObjectType()
+    _memo[key] = value
+    value.data = {
+        prop_name: PowangCopyConstruct(prop, _memo)
+        for prop_name, prop in anyType.data.items()
+    }
+    value.private_props = {
+        prop_name: PowangCopyConstruct(prop, _memo)
+        for prop_name, prop in anyType.private_props.items()
+    }
+    value.public_meths = {name: list(methods) for name, methods in anyType.public_meths.items()}
+    value.private_meths = {name: list(methods) for name, methods in anyType.private_meths.items()}
+    value.public_static_meths = {name: list(methods) for name, methods in anyType.public_static_meths.items()}
+    value.private_static_meths = {name: list(methods) for name, methods in anyType.private_static_meths.items()}
+    value.type_name = anyType.type_name
+    value.is_enum = getattr(anyType, 'is_enum', False)
+    return _copy_common(anyType, value)
 
 
 def PowangUnwrapAny(value: PowangAny) -> PowangAny:
@@ -954,27 +1023,6 @@ def PowangUnwrapAny(value: PowangAny) -> PowangAny:
     concrete.weak = PowangTypeBase.PropertyWeak(value.weak.it_is, value.weak.has_value)
     concrete.const = PowangTypeBase.PropertyConst(value.const.it_is, value.const.can_change)
     return concrete
-
-def PowangCopyConstructObjectType(anyType: PowangObjectType) -> PowangObjectType:
-    # Props are copied by value, not by reference: instances must never share
-    # mutable property state between each other nor with their base type.
-    value = PowangObjectType(
-        {key: PowangCopyConstruct(prop) for key, prop in anyType.data.items()},
-        {key: PowangCopyConstruct(prop) for key, prop in anyType.private_props.items()},
-        {key: list(methods) for key, methods in anyType.public_meths.items()},
-        {key: list(methods) for key, methods in anyType.private_meths.items()},
-        {key: list(methods) for key, methods in anyType.public_static_meths.items()},
-        {key: list(methods) for key, methods in anyType.private_static_meths.items()},
-    )
-    value.type_name = anyType.type_name
-    value.is_enum = getattr(anyType, 'is_enum', False)
-    value.defined = anyType.defined
-    value.any = anyType.any
-    value.structure_locked = anyType.structure_locked
-    value.elements_locked = anyType.elements_locked
-    value.weak = PowangTypeBase.PropertyWeak(anyType.weak.it_is, anyType.weak.has_value)
-    value.const = PowangTypeBase.PropertyConst(anyType.const.it_is, anyType.const.can_change)
-    return value
 
 def PowangTypeCast(type: str, any: PowangAny) -> PowangAny | None:
     return PowangTypeMap(type).cast(any) # type: ignore

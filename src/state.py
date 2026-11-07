@@ -179,37 +179,26 @@ class ScopeState:
         return True
 
 
-def copy_for_task(value: PowangAny) -> PowangAny:
+def copy_for_task(value: PowangAny, _memo: Optional[dict[int, PowangAny]] = None) -> PowangAny:
     """Deep-copy a value for task isolation.
 
-    ``PowangCopyConstruct`` already knows the per-type copy rules, but it keeps
-    container storage shared. Tasks must not share mutable storage, so arrays,
-    maps and user-type property bags are copied recursively on top of it.
-    Scalars, functions, modules, error values and task handles keep their
-    normal copy semantics.
+    A reference is snapshotted by copying the value it currently points at, so
+    a spawned task cannot mutate the parent through ``&x``. The memo keeps
+    shared references and cycles intact within one task clone.
     """
-    copied = PowangCopyConstruct(value)
-    if value.type == PowangAnyType.type and value.any:
-        ## A weak or union value stores its concrete payload beside the holder.
-        concrete = PowangUnwrapAny(value)
-        if concrete is not value:
-            copied.data = copy_for_task(concrete).data
-            copied.concrete_value = PowangCopyConstruct(concrete)
-    elif value.type == PowangArray.type:
-        copied.data = [copy_for_task(item) for item in value.data]
-    elif value.type == PowangMap.type:
-        copied.data = {
-            copy_for_task(key): copy_for_task(item)
-            for key, item in value.data.items()
-        }
-    elif value.type == PowangObjectType.type:
-        copied.data = {
-            key: copy_for_task(item) for key, item in value.data.items()
-        }
-        copied.private_props = {
-            key: copy_for_task(item) for key, item in value.private_props.items()
-        }
-    return copied
+    if _memo is None:
+        _memo = {}
+    if value.type == PowangReference.type:
+        raise powang_throw(powang_error_format(
+            'TASK',
+            'spawn',
+            'References cannot be sent to a task',
+            [
+                "a reference only lives for the duration of one call",
+                "pass a value or a copy instead",
+            ],
+        ))
+    return PowangCopyConstruct(value, _memo)
 
 
 class InterpreterState:
@@ -341,6 +330,7 @@ class InterpreterState:
         clone_scope = clone.scope
 
         global_variables = source_scope.variables[0] if source_scope.variables else {}
+        task_memo: dict[int, PowangAny] = {}
         for name, value in global_variables.items():
             if value.type in {PowangTask.type, PowangFileStream.type, PowangHandle.type}:
                 raise powang_throw(powang_error_format(
@@ -352,7 +342,7 @@ class InterpreterState:
                         "make the binding local or remove it before spawning",
                     ],
                 ))
-            clone_scope.variables[0][name] = copy_for_task(value)
+            clone_scope.variables[0][name] = copy_for_task(value, task_memo)
 
         ## Function overload sets and user-type templates are treated as
         ## immutable definitions, so sharing them avoids copying bytecode.
