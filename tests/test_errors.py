@@ -88,6 +88,29 @@ class ErrorDiagnosticTests(unittest.TestCase):
                 self.assertRegex(result.combined, DIAGNOSTIC_RE)
                 self.assertEqual(result.stderr, "")
 
+    def test_check_renders_line(self) -> None:
+        result = run_source(
+            "type Person[+] {\n"
+            "    | name: str;\n"
+            "    | address: str;\n"
+            "}\n"
+            'person := Person.["Ada"];\n',
+            args=("--check",),
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ln: 5", result.combined)
+        self.assertIn("address", result.combined)
+        assert_no_traceback(self, result)
+
+    def test_with_line_is_idempotent(self) -> None:
+        from src.error import PowangError
+
+        error = PowangError("TYPE", "boom")
+        once = error.with_line(3)
+        twice = once.with_line(4)
+        self.assertIs(twice, once)
+        self.assertEqual(str(once), "ln: 3 | [TYPE ERROR] boom")
+
     def test_successful_program_has_no_diagnostics(self) -> None:
         result = run_source('print("ok"); print("\\n");\n')
         self.assertEqual(result.stdout, "ok\n")

@@ -2892,6 +2892,8 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
     except PowangError as ass:
         if getattr(ass, '_from_type_check', False):
             raise ass from None
+        if ass.line is not None:
+            raise ass from None
         error_line = program_parser.tokenizer.row + 1 if program_parser is not None else None
         raise ass.with_line(error_line) from None
     except AssertionError as ass:
@@ -2899,6 +2901,8 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
         if converted_error is None:
             ## Not a language error: keep the Python assertion visible.
             raise
+        if converted_error.line is not None:
+            raise converted_error from None
         error_line = program_parser.tokenizer.row + 1 if program_parser is not None else None
         raise converted_error.with_line(error_line) from None
     finally:

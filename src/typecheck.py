@@ -318,6 +318,8 @@ class _TypeChecker:
         if self._position is not None:
             error.line = self._position[0] + 1
             error.column = self._position[1]
+            error.text = error.render_text()
+            error.args = (error.text,)
         self.errors.append(error)
 
     def _assign_error(self, where: str, expected: str, encountered: str):
@@ -325,6 +327,8 @@ class _TypeChecker:
         if self._position is not None:
             error.line = self._position[0] + 1
             error.column = self._position[1]
+            error.text = error.render_text()
+            error.args = (error.text,)
         self.errors.append(error)
 
     @staticmethod

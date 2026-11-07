@@ -53,13 +53,19 @@ class PowangError(AssertionError):
         self.column: Optional[int] = column
         self.frames: list[str] = list(frames) if frames else []
         self.cause: Optional['PowangError'] = cause
-        self.text: str = text if text is not None else _format_error_text(
+        self._base_text: str = text if text is not None else _format_error_text(
             None if self.kind == 'ERROR' else self.kind,
             self.where,
             self.message,
             self.details,
         )
+        self.text: str = self.render_text()
         AssertionError.__init__(self, self.text)
+
+    def render_text(self) -> str:
+        if self.line is None:
+            return self._base_text
+        return f"ln: {self.line} | {self._base_text}"
 
     def __str__(self) -> str:
         return self.text
@@ -68,8 +74,8 @@ class PowangError(AssertionError):
         return f'PowangError({self.kind!r}, {self.message!r})'
 
     def with_line(self, line: Optional[int]) -> 'PowangError':
-        """Return a copy carrying a source line, keeping the rendered text stable."""
-        if line is None:
+        """Return a copy carrying a source line, without double prefixes."""
+        if line is None or self.line is not None:
             return self
         copy = PowangError(
             self.kind,
@@ -80,7 +86,7 @@ class PowangError(AssertionError):
             self.column,
             self.frames,
             self.cause,
-            text=f"ln: {line} | {str(self)}",
+            text=self._base_text,
         )
         end_column = getattr(self, 'end_column', None)
         if end_column is not None:

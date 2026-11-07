@@ -113,11 +113,12 @@ def run_source(
     name: str = "program.po",
     timeout: int = DEFAULT_TIMEOUT,
     optimize: bool = False,
+    args: tuple[str, ...] = (),
 ) -> RunResult:
     """Write ``source`` to a temporary ``.po`` file and run it."""
     with tempfile.TemporaryDirectory(prefix="powang-test-") as directory:
         path = write_po(directory, name, source)
-        return run_file(path, timeout=timeout, optimize=optimize)
+        return run_file(path, *args, timeout=timeout, optimize=optimize)
 
 
 def run_source_with_input(
