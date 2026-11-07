@@ -992,10 +992,22 @@ def PowangCopyConstructObjectType(
         prop_name: PowangCopyConstruct(prop, _memo)
         for prop_name, prop in anyType.private_props.items()
     }
-    value.public_meths = {name: list(methods) for name, methods in anyType.public_meths.items()}
-    value.private_meths = {name: list(methods) for name, methods in anyType.private_meths.items()}
-    value.public_static_meths = {name: list(methods) for name, methods in anyType.public_static_meths.items()}
-    value.private_static_meths = {name: list(methods) for name, methods in anyType.private_static_meths.items()}
+    value.public_meths = {
+        name: [_memo.get(id(method), method) for method in methods]
+        for name, methods in anyType.public_meths.items()
+    }
+    value.private_meths = {
+        name: [_memo.get(id(method), method) for method in methods]
+        for name, methods in anyType.private_meths.items()
+    }
+    value.public_static_meths = {
+        name: [_memo.get(id(method), method) for method in methods]
+        for name, methods in anyType.public_static_meths.items()
+    }
+    value.private_static_meths = {
+        name: [_memo.get(id(method), method) for method in methods]
+        for name, methods in anyType.private_static_meths.items()
+    }
     value.type_name = anyType.type_name
     value.is_enum = getattr(anyType, 'is_enum', False)
     return _copy_common(anyType, value)

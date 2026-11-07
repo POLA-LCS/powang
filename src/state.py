@@ -201,6 +201,91 @@ def copy_for_task(value: PowangAny, _memo: Optional[dict[int, PowangAny]] = None
     return PowangCopyConstruct(value, _memo)
 
 
+def _copy_function_for_task(
+    function: PowangFunction,
+    _memo: dict[int, PowangAny],
+) -> PowangFunction:
+    key = id(function)
+    if key in _memo:
+        return _memo[key]
+    copied = PowangFunction(
+        args=list(function.args),
+        data=list(function.data),
+        return_expr=function.return_expr,
+    )
+    _memo[key] = copied
+    copied.min_argc = function.min_argc
+    if hasattr(function, 'external'):
+        copied.external = function.external
+    copied.defined = function.defined
+    copied.any = function.any
+    copied.structure_locked = function.structure_locked
+    copied.elements_locked = function.elements_locked
+    copied.weak = PowangTypeBase.PropertyWeak(function.weak.it_is, function.weak.has_value)
+    copied.const = PowangTypeBase.PropertyConst(function.const.it_is, function.const.can_change)
+    closure = getattr(function, 'closure', None)
+    if closure is not None:
+        copied.closure = {
+            'variables': {
+                name: copy_for_task(value, _memo)
+                for name, value in closure.get('variables', {}).items()
+            },
+            'functions': {
+                name: [_copy_function_for_task(item, _memo) for item in overloads]
+                for name, overloads in closure.get('functions', {}).items()
+            },
+            'ObjectTypes': {
+                name: _copy_object_type_for_task(object_type, _memo)
+                for name, object_type in closure.get('ObjectTypes', {}).items()
+            },
+        }
+    return copied
+
+
+def _copy_object_type_for_task(
+    object_type: PowangObjectType,
+    _memo: dict[int, PowangAny],
+) -> PowangObjectType:
+    key = id(object_type)
+    if key in _memo:
+        return _memo[key]
+    copied = PowangObjectType()
+    _memo[key] = copied
+    copied.data = {
+        name: copy_for_task(value, _memo)
+        for name, value in object_type.data.items()
+    }
+    copied.private_props = {
+        name: copy_for_task(value, _memo)
+        for name, value in object_type.private_props.items()
+    }
+    copied.public_meths = {
+        name: [_copy_function_for_task(item, _memo) for item in overloads]
+        for name, overloads in object_type.public_meths.items()
+    }
+    copied.private_meths = {
+        name: [_copy_function_for_task(item, _memo) for item in overloads]
+        for name, overloads in object_type.private_meths.items()
+    }
+    copied.public_static_meths = {
+        name: [_copy_function_for_task(item, _memo) for item in overloads]
+        for name, overloads in object_type.public_static_meths.items()
+    }
+    copied.private_static_meths = {
+        name: [_copy_function_for_task(item, _memo) for item in overloads]
+        for name, overloads in object_type.private_static_meths.items()
+    }
+    copied.type_name = object_type.type_name
+    copied.is_enum = getattr(object_type, 'is_enum', False)
+    copied.defined = object_type.defined
+    copied.any = object_type.any
+    copied.structure_locked = object_type.structure_locked
+    copied.elements_locked = object_type.elements_locked
+    copied.weak = PowangTypeBase.PropertyWeak(object_type.weak.it_is, object_type.weak.has_value)
+    copied.const = PowangTypeBase.PropertyConst(object_type.const.it_is, object_type.const.can_change)
+    return copied
+
+
 class InterpreterState:
     """One execution context: every piece of run state lives here.
 
@@ -329,8 +414,23 @@ class InterpreterState:
         source_scope = self.scope
         clone_scope = clone.scope
 
-        global_variables = source_scope.variables[0] if source_scope.variables else {}
         task_memo: dict[int, PowangAny] = {}
+
+        ## Clone function definitions and user-type templates first so a
+        ## function-valued global or an object instance reuses the cloned
+        ## closure instead of sharing the parent's module scope.
+        if source_scope.functions:
+            clone_scope.functions[0] = {
+                name: [_copy_function_for_task(function, task_memo) for function in overloads]
+                for name, overloads in source_scope.functions[0].items()
+            }
+        if source_scope.ObjectTypes:
+            clone_scope.ObjectTypes[0] = {
+                name: _copy_object_type_for_task(object_type, task_memo)
+                for name, object_type in source_scope.ObjectTypes[0].items()
+            }
+
+        global_variables = source_scope.variables[0] if source_scope.variables else {}
         for name, value in global_variables.items():
             if value.type in {PowangTask.type, PowangFileStream.type, PowangHandle.type}:
                 raise powang_throw(powang_error_format(
@@ -344,12 +444,6 @@ class InterpreterState:
                 ))
             clone_scope.variables[0][name] = copy_for_task(value, task_memo)
 
-        ## Function overload sets and user-type templates are treated as
-        ## immutable definitions, so sharing them avoids copying bytecode.
-        if source_scope.functions:
-            clone_scope.functions[0] = dict(source_scope.functions[0])
-        if source_scope.ObjectTypes:
-            clone_scope.ObjectTypes[0] = dict(source_scope.ObjectTypes[0])
         if source_scope.wildcard_sources:
             clone_scope.wildcard_sources[0] = dict(source_scope.wildcard_sources[0])
         if source_scope.important:

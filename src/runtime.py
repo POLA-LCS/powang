@@ -2009,13 +2009,20 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 for spawn_arg in spawn_call['arguments']
             ]
             task_parameters = [copy_for_task(parameter) for parameter in parent_parameters]
-            task_work = _prepareTaskCall(where, spawn_call['callee'], task_parameters)
 
             parent_state = get_state()
             ## Create the pool before cloning so the clone shares it and an
             ## outer run can join tasks spawned from inside tasks.
             pool = get_task_pool(parent_state)
             task_state = parent_state.clone_for_task()
+            ## Resolve the callee inside the cloned state so a spawned local or
+            ## module function uses the clone's closure, not the parent's.
+            saved_state = get_state()
+            set_state(task_state)
+            try:
+                task_work = _prepareTaskCall(where, spawn_call['callee'], task_parameters)
+            finally:
+                set_state(saved_state)
             try:
                 return spawn_task(task_state, task_work, pool)
             except BaseException:
