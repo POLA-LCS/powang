@@ -1777,20 +1777,20 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 pipeline_callable = evaluateAstExpression(right_node)
                 return callFunctionValue(where, '<pipeline>', pipeline_callable, [binary_left])
 
-            binary_right = evaluateAstExpression(expr_value['right'])
             if binary_operator == '??':
                 if binary_left.type == PowangNova.type or not binary_left.weak.has_value:
-                    return binary_right
+                    return evaluateAstExpression(expr_value['right'])
                 return binary_left
             if binary_operator in {'&&', '||'}:
                 if binary_operator == '&&':
                     if not PowangBoolean.cast(binary_left).data:
                         return PowangBoolean(False)
-                    return PowangBoolean.cast(binary_right)
+                    return PowangBoolean.cast(evaluateAstExpression(expr_value['right']))
                 if PowangBoolean.cast(binary_left).data:
                     return PowangBoolean(True)
-                return PowangBoolean.cast(binary_right)
+                return PowangBoolean.cast(evaluateAstExpression(expr_value['right']))
 
+            binary_right = evaluateAstExpression(expr_value['right'])
             return performOperation(binary_operator, binary_left, binary_right, expr_value['typed'])
 
         case ParserTokenType.DECLARATION_UNDEFINED:
