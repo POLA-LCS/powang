@@ -311,3 +311,21 @@ Dependency order: P0, then P1, P2a, P2b, P3, P4, P5, P6, P7, P8, P9, P10, P11. L
 - Packaging layout migration beyond `modules.host`.
 - Restart backoff, full workspace indexing, incremental sync, and UTF-16 conversion.
 - Duplicate `PowangReference` cleanup and other broad dead-code removal.
+
+## 8. Implementation outcome
+
+Phase 1 was implemented with the following deviations from the plan:
+
+- The assert pass found 101 asserts, not 98. All of them carried a language error and were replaced.
+- `require` takes an error factory rather than an already evaluated error. This preserves the lazy evaluation of the original `assert condition, error` form and avoids evaluating expensive or failing messages when the condition is true.
+- Task references are rejected at the task boundary instead of being snapshotted. This matches the documented rule that a reference lives for one call and cannot be sent to a task.
+- Static method calls with named arguments were also fixed. The plan only covered the checker side, but the runtime path was already broken.
+- The vendored source pin is the powang commit containing the Phase 1 source fixes.
+
+Verification at the end of Phase 1:
+
+- powang: 223 tests pass in normal mode and under `python -O`.
+- powang: the built wheel contains `modules/host/use.po`.
+- powang-lsp: 12 Python tests and 3 Node protocol tests pass.
+- powang-lsp: `lsp_smoke.py` passes.
+- powang-lsp: version, vendored source drift and VSIX inspection checks pass.
