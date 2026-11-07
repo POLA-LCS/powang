@@ -661,8 +661,12 @@ class _TypeChecker:
             self._position = position
         try:
             return self._infer_inner(node)
-        except Exception:
-            # A type checker must never crash on an unexpected AST shape.
+        except PowangError as error:
+            self.errors.append(error)
+            return ANY
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+            # A checker must tolerate unexpected AST shapes without hiding
+            # internal programming errors such as NameError.
             return ANY
         finally:
             self._position = previous_position
@@ -1202,7 +1206,11 @@ class _TypeChecker:
             static_info = self.object_types[owner_name]
             static_methods = static_info.get('static_methods', {}).get(method_name)
             if static_methods:
-                if named_nodes:
+                has_named = any(
+                    isinstance(node, dict) and isinstance(node.get('name'), str)
+                    for node in argument_nodes
+                )
+                if has_named:
                     return static_methods[0].return_type
                 matches = [signature for signature in static_methods if self._signature_matches(signature, argument_types)]
                 return matches[0].return_type if matches else static_methods[0].return_type
@@ -1270,8 +1278,10 @@ class _TypeChecker:
                 return INTEGER
         if receiver_type == MAP:
             key_type, value_type = _map_parts(receiver)
-            if method_name == 'has' or method_name == 'popget':
+            if method_name == 'has':
                 return BOOLEAN
+            if method_name == 'popget':
+                return value_type
             if method_name == 'get':
                 return value_type
             if method_name in {'pop', 'merge', 'clear'}:
@@ -1467,17 +1477,16 @@ class _TypeChecker:
         named = bool(value.get('named'))
 
         if normalized == f'{OBJECT}:Project':
-            return f'{OBJECT}:Project'
-        if type_name == 'Project':
-            if named_form:
-                provided = {name for name, _ in named}
-                for name, _ in named:
-                    if name not in ("modules", "paths", "logLevel", "allowSystem"):
-                        self._error(
-                            f"Project has no field named '{name}'",
-                            [f"fields: modules, paths, logLevel, allowSystem"],
-                            where='project construction',
-                        )
+            for named_node in named_nodes:
+                field_name = named_node.get('name')
+                if isinstance(field_name, str) and field_name not in {
+                    "modules", "paths", "logLevel", "allowSystem"
+                }:
+                    self._error(
+                        f"Project has no field named '{field_name}'",
+                        ["fields: modules, paths, logLevel, allowSystem"],
+                        where='project construction',
+                    )
             return f'{OBJECT}:Project'
 
         if normalized in NATIVE_TYPE_NAMES:
