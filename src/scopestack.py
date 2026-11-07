@@ -68,6 +68,14 @@ class _ScopeStackMeta(type):
         _scope().method_call_stack = value
 
     @property
+    def static_method_stack(cls):
+        return _scope().static_method_stack
+
+    @static_method_stack.setter
+    def static_method_stack(cls, value):
+        _scope().static_method_stack = value
+
+    @property
     def variables(cls):
         return _scope().variables
 

@@ -50,6 +50,7 @@ class ScopeState:
         self.return_value: PowangAny | None = None
         self.important: list[ScopeType | None] = [ScopeType.GLOBAL]
         self.method_call_stack: list[PowangObjectType] = []
+        self.static_method_stack: list[str] = []
 
         self.variables: list[dict[str, PowangAny]] = [{}]
         self.functions: list[dict[str, list[PowangFunction]]] = [{}]
@@ -367,6 +368,7 @@ class InterpreterState:
         ## Fresh local stacks: the clone starts at global scope.
         clone_scope.return_value = None
         clone_scope.method_call_stack = []
+        clone_scope.static_method_stack = []
 
         clone.file_streams = {}
         clone.module_loader = None

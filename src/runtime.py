@@ -726,11 +726,23 @@ def callFunction(where: str, callee: str, candidate: PowangFunction, call_parame
         if saved_scopes is not None:
             ScopeStack.restore_scopes(saved_scopes)
 
+def _private_access_allowed(target: PowangObjectType) -> bool:
+    """Private members are visible to methods of the same user type."""
+    if ScopeStack.method_call_stack:
+        owner = ScopeStack.method_call_stack[-1]
+        if getattr(owner, 'type_name', None) == getattr(target, 'type_name', None):
+            return True
+    if ScopeStack.static_method_stack:
+        return ScopeStack.static_method_stack[-1] == getattr(target, 'type_name', None)
+    return False
+
+
 def callMethod(where: str, owner: PowangObjectType, method_name: str, method: PowangFunction, arguments: list[PowangAny]):
     ScopeStack.method_call_stack.append(owner)
-    return_value = callFunction(where, method_name, method, arguments)
-    ScopeStack.method_call_stack.pop()
-    return return_value
+    try:
+        return callFunction(where, method_name, method, arguments)
+    finally:
+        ScopeStack.method_call_stack.pop()
 
 
 def callExternalFunction(
@@ -1745,7 +1757,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                         "Currently only user types can perform a method call.", [
                             f"but trying to call from a {owner_value.type}"
                         ]))
-                    match_methods = owner_value.getMethods(method_value['method']['value'], len(ScopeStack.method_call_stack) > 0)
+                    match_methods = owner_value.getMethods(method_value['method']['value'], _private_access_allowed(owner_value))
                     if match_methods is None:
                         raise powang_throw(powang_error_identifier_not_found(
                             where, f"method: {method_value['method']['value']}", [
@@ -2423,7 +2435,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ]))
             property_identifier = getValidIdentifier(where, expr_value['property'])
             require(safe_target.defined, lambda: powang_error_undefined_reference(where, expr_value['target']['value']))
-            is_private: bool = len(ScopeStack.method_call_stack) > 0
+            is_private: bool = _private_access_allowed(safe_target)
             property_value = safe_target.getProperty(property_identifier, is_private)
             require(property_value is not None, lambda: powang_error_identifier_not_found(where, property_identifier, [
                 "perhaps it is a private property?"
@@ -2456,7 +2468,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 f"Trying to access property {property_identifier} from a nova weak {target.type_name}"
             ]))
 
-            is_private: bool = len(ScopeStack.method_call_stack) > 0
+            is_private: bool = _private_access_allowed(target)
             property_value = target.getProperty(property_identifier, is_private)
             require(property_value is not None, lambda: powang_error_identifier_not_found(where, property_identifier, [
                 "perhaps it is a private property?"
@@ -2481,7 +2493,8 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if isinstance(owner_node, dict) and owner_node.get('type') == LexerTokenType.IDENTIFIER:
                 user_type = ScopeStack.get_ObjectType(owner_node.get('value'))
                 if user_type is not None:
-                    static_methods = user_type.getStaticMethods(expr_value['method']['value'], False)
+                    private_allowed = _private_access_allowed(user_type)
+                    static_methods = user_type.getStaticMethods(expr_value['method']['value'], private_allowed)
                     if static_methods is None:
                         raise powang_throw(powang_error_identifier_not_found(
                             where, f"method: {expr_value['method']['value']}", [
@@ -2492,12 +2505,16 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                         for call_arg in expr_value['arguments']
                     ]
                     candidate = getFunctionCandidate(static_methods, static_arguments)
-                    return callFunction(
-                        where,
-                        f"{owner_node['value']}.{expr_value['method']['value']}",
-                        candidate,
-                        static_arguments,
-                    )
+                    ScopeStack.static_method_stack.append(user_type.type_name)
+                    try:
+                        return callFunction(
+                            where,
+                            f"{owner_node['value']}.{expr_value['method']['value']}",
+                            candidate,
+                            static_arguments,
+                        )
+                    finally:
+                        ScopeStack.static_method_stack.pop()
             owner_value = evaluateAstExpression(expr_value['owner'])
             owner_value = unwrap_any_value(owner_value)
             call_parameters = [evaluateAstExpression(call_arg) for call_arg in expr_value['arguments']]
@@ -2521,7 +2538,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ]))
 
 
-            match_methods = owner_value.getMethods(expr_value['method']['value'], len(ScopeStack.method_call_stack) > 0)
+            match_methods = owner_value.getMethods(expr_value['method']['value'], _private_access_allowed(owner_value))
             if match_methods is None:
                 raise powang_throw(powang_error_identifier_not_found(
                     where, f"method: {expr_value['method']['value']}", [
