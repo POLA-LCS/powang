@@ -827,14 +827,14 @@ def resolveNamedArguments(
     for name, value in named:
         if name not in arg_names:
             raise powang_throw(powang_error_format(
-                'ARGUMENT', where, f"Unknown named argument '{name}'", [
+                'ARGUMENT', where, f"has no parameter named '{name}'", [
                     f"parameters: {', '.join(arg_names)}",
                 ],
             ))
         index = arg_names.index(name)
         if resolved[index] is not None:
             raise powang_throw(powang_error_format(
-                'ARGUMENT', where, f"Duplicate argument '{name}'",
+                'ARGUMENT', where, f"received '{name}' more than once",
             ))
         resolved[index] = value
     for index, value in enumerate(resolved):
@@ -1302,12 +1302,17 @@ def _ordered_named_constructor(
         raise powang_throw(powang_error_format('ARGUMENT', where, 'Invalid named constructor call'))
 
     resolved_by_candidate: list[list[PowangAny]] = []
+    first_error: PowangError | None = None
     for candidate in compatible:
         try:
             resolved_by_candidate.append(resolveNamedArguments(where, candidate, [], named))
-        except PowangError:
+        except PowangError as error:
+            if first_error is None:
+                first_error = error
             continue
     if not resolved_by_candidate:
+        if first_error is not None:
+            raise first_error
         raise powang_throw(powang_error_format(
             'ARGUMENT', where, 'Invalid named constructor call',
         ))

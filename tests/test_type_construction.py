@@ -158,6 +158,24 @@ class ConstructorMemberTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("more than once", result.combined)
 
+    def test_unknown_named_argument_without_check(self) -> None:
+        result = run_source(
+            "type Person[+] { | name: str; }\n"
+            "person := Person.[nome >> \"Ada\"];\n",
+            args=("--no-check",),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no parameter named 'nome'", result.combined)
+
+    def test_duplicate_named_argument_without_check(self) -> None:
+        result = run_source(
+            "type Person[+] { | name: str; }\n"
+            "person := Person.[name >> \"Ada\", name >> \"Grace\"];\n",
+            args=("--no-check",),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("more than once", result.combined)
+
     def test_mixed_arguments_are_rejected(self) -> None:
         result = run_source(
             "type Person[+] {\n"
