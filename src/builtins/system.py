@@ -1,9 +1,10 @@
 from ..powang_types import *
+from ..error import require
 from ..state import get_state
 from subprocess import run
 
 def builtin_system(prompt: PowangAny):
-    assert prompt.type == PowangString.type, powang_error_type_match("builtin: system", PowangString.type, prompt.type)
+    require(prompt.type == PowangString.type, lambda: powang_error_type_match("builtin: system", PowangString.type, prompt.type))
     state = get_state()
     ## `system` runs through the shell, so it is a command-injection surface.
     ## While a server is running, refuse by default: a handler that forwards

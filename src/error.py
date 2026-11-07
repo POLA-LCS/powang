@@ -88,6 +88,21 @@ class PowangError(AssertionError):
         return copy
 
 
+def require(condition, error_factory):
+    """Raise a language error unless ``condition`` is true.
+
+    ``error_factory`` is evaluated only when the condition fails, so replacing
+    ``assert condition, powang_error_...`` keeps the original lazy message
+    evaluation and still works under ``python -O``.
+    """
+    if not condition:
+        error = error_factory() if callable(error_factory) else error_factory
+        if isinstance(error, BaseException):
+            raise error
+        raise PowangError(message=str(error), text=str(error))
+    return condition
+
+
 def powang_error_from_exception(exc: BaseException) -> Optional[PowangError]:
     """Extract a ``PowangError`` from an exception, if it carries one.
 

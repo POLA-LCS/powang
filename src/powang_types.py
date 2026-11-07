@@ -217,9 +217,9 @@ class PowangInteger(PowangTypeBase):
                 return PowangNova()
             return PowangInteger(self.data // right.data)
         if right.type == PowangString.type or right.type == PowangArray.type:
-            assert self.data > 0, powang_error_format('VALUE', f'{right.type} chunking', "Chunk size must be positive", [
+            require(self.data > 0, lambda: powang_error_format('VALUE', f'{right.type} chunking', "Chunk size must be positive", [
                 f"{right.type} cannot be divided into chunks of non-positive size {self.data}"
-            ])
+            ]))
             if right.type == PowangString.type:
                 return PowangArray([PowangString(right.data[i:i + self.data]) for i in range(0, len(right.data), self.data)])
             return PowangArray([PowangArray([element for element in right.data[i:i + self.data]]) for i in range(0, len(right.data), self.data)])
@@ -316,8 +316,8 @@ class PowangString(PowangTypeBase):
         return PowangInteger(len(self.data))
 
     def index(self, index: 'PowangAny') -> 'PowangString':
-        assert index.type == PowangInteger.type, powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type)
-        assert 0 <= index.data < (size := self.size().data), powang_error_index_out_of_range(index.data, size)
+        require(index.type == PowangInteger.type, lambda: powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type))
+        require(0 <= index.data < (size := self.size().data), lambda: powang_error_index_out_of_range(index.data, size))
         return PowangString(self.data[index.data])
 
     def iterate(self) -> 'PowangArray':
@@ -372,8 +372,8 @@ class PowangArray(PowangTypeBase):
         return PowangInteger(len(self.data))
     
     def index(self, index: 'PowangAny') -> 'PowangAny':
-        assert index.type == PowangInteger.type, powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type)
-        assert 0 <= index.data < (size := self.size().data), powang_error_index_out_of_range(index.data, size)
+        require(index.type == PowangInteger.type, lambda: powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type))
+        require(0 <= index.data < (size := self.size().data), lambda: powang_error_index_out_of_range(index.data, size))
         return self.data[index.data]
     
     def iterate(self) -> 'PowangArray':
@@ -517,8 +517,8 @@ class PowangTuple(PowangTypeBase):
         return PowangInteger(len(self.data))
 
     def index(self, index: 'PowangAny') -> 'PowangAny':
-        assert index.type == PowangInteger.type, powang_error_type_match(f'{PowangTuple.type} indexing', PowangInteger.type, index.type)
-        assert 0 <= index.data < (size := self.size().data), powang_error_index_out_of_range(index.data, size)
+        require(index.type == PowangInteger.type, lambda: powang_error_type_match(f'{PowangTuple.type} indexing', PowangInteger.type, index.type))
+        require(0 <= index.data < (size := self.size().data), lambda: powang_error_index_out_of_range(index.data, size))
         return self.data[index.data]
 
     def iterate(self) -> 'PowangArray':
@@ -547,10 +547,10 @@ class PowangMap(PowangTypeBase):
         if right.type == PowangArray.type:
             new_map = PowangMap()
             for i, item in enumerate(right.data):
-                assert item.type == PowangArray.type, powang_error_format("LOGIC", "array to map", "Invalid format", [
+                require(item.type == PowangArray.type, lambda: powang_error_format("LOGIC", "array to map", "Invalid format", [
                     f"map items must be {PowangArray.type}",
                     f"but {item.type} was encounter"
-                ])
+                ]))
                 
                 if (length := len(item.data)) != 2:
                     raise powang_throw(powang_error_format("LOGIC", "array to map", "Invalid format", [
@@ -566,7 +566,7 @@ class PowangMap(PowangTypeBase):
         return PowangInteger(len(self.data))
     
     def index(self, index: 'PowangAny') -> 'PowangAny':
-        assert index in self.data, powang_error_key(str(index))
+        require(index in self.data, lambda: powang_error_key(str(index)))
         return self.data[index]
 
     def iterate(self) -> 'PowangArray':

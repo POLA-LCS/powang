@@ -1,24 +1,25 @@
 from ..powang_types import *
+from ..error import require
 from ..parser import *
 from .output import builtin_print
 
 def builtin_inputf(receptor: PowangAny, prompt: PowangString | PowangAny):
-    assert prompt.type == PowangString.type, powang_error_type_match(
+    require(prompt.type == PowangString.type, lambda: powang_error_type_match(
         'builtin: inputf, prompt',
         PowangString.type,
         prompt.type,
-    )
+    ))
     builtin_print(prompt)
     return builtin_input(receptor)
 
 def builtin_input(receptor: Optional[PowangAny] = None):
     if receptor is None:
         receptor = PowangString()
-    assert not receptor.const or receptor.const.can_change, powang_error_constant_assign(
+    require(not receptor.const or receptor.const.can_change, lambda: powang_error_constant_assign(
         "builtin: input",
         receptor.type,
         bool(receptor.weak),
-    )
+    ))
     
     try:
         python_input = input()

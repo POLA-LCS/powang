@@ -1,5 +1,6 @@
 from .lexer import *
 from .powang_types import *
+from .error import require
 from .state import get_state
 
 from collections.abc import Iterator, MutableMapping
@@ -108,34 +109,34 @@ class Parser:
                     ))
                 self.advance() # export
                 if self.next.type == LexerTokenType.KEYWORD:
-                    assert self.next.value in {'fun', 'type', 'extern'}, powang_error_syntax(
+                    require(self.next.value in {'fun', 'type', 'extern'}, lambda: powang_error_syntax(
                         'export declaration',
                         f"export cannot be applied to {self.next.value}",
                         ["export supports fun, type, extern fun and variable declarations"],
-                    )
+                    ))
                 else:
-                    assert self.next.type == LexerTokenType.IDENTIFIER, powang_error_syntax(
+                    require(self.next.type == LexerTokenType.IDENTIFIER, lambda: powang_error_syntax(
                         'export declaration',
                         "Expected a declaration after export",
                         [
                             f"but {LexerTokenType.toStr(self.next.type)} was encountered",
                         ],
-                    )
+                    ))
                 exported_statement = self.ExpressionStatement()
-                assert exported_statement is not None, powang_error_syntax(
+                require(exported_statement is not None, lambda: powang_error_syntax(
                     'export declaration', "Reached end of file",
-                )
-                assert exported_statement['type'] in {
+                ))
+                require(exported_statement['type'] in {
                     ParserTokenType.DECLARATION_FUN,
                     ParserTokenType.DECLARATION_UNDEFINED,
                     ParserTokenType.DECLARATION_TYPED_VAR,
                     ParserTokenType.DECLARATION_INTERPRET,
                     ParserTokenType.TYPE_DECLARATION,
                     ParserTokenType.EXTERN_REFERENCE,
-                }, powang_error_syntax(
+                }, lambda: powang_error_syntax(
                     'export declaration',
                     f"cannot export a {TokenToString(exported_statement['type'])}",
-                )
+                ))
                 exported_statement['exported'] = True
                 return exported_statement
             if keyword == 'spawn':
@@ -202,15 +203,15 @@ class Parser:
         if self.isNextKeyword('fun'):
             self.advance()
             powang_mapping = self.helper_FunDeclaration(allow_body=False)
-            assert powang_mapping['value']['block']['value'] is None, powang_error_syntax('extern function', "Expected function signature but function definition was encountered")
+            require(powang_mapping['value']['block']['value'] is None, lambda: powang_error_syntax('extern function', "Expected function signature but function definition was encountered"))
         else:
-            assert self.isNextKeyword('type'), powang_error_syntax('extern signature', "There's only external functions and types", [
+            require(self.isNextKeyword('type'), lambda: powang_error_syntax('extern signature', "There's only external functions and types", [
                 f"encountered: {TokenToString(self.next.type)}"
-            ])
+            ]))
             self.advance()
             identifier = self.Identifier()
             powang_mapping = self.helper_TypeObjectDeclaration(identifier, True)
-            assert powang_mapping['value']['properties'] is None, powang_error_syntax('extern type', "Expected type signature but type definition was encountered")
+            require(powang_mapping['value']['properties'] is None, lambda: powang_error_syntax('extern type', "Expected type signature but type definition was encountered"))
             powang_mapping['value']['properties'] = []
             powang_mapping['value']['methods'] = []
         self.consume(LexerTokenType.RIGHT_ARROW, 'extern mapping')
@@ -264,24 +265,24 @@ class Parser:
         }).toDict()
 
     def helper_TypeObjectDeclaration(self, identifier: DictRepr, is_signature: bool = False):
-        assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
+        require(identifier['value'] not in NATI_TYPES, lambda: powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
                 "a powang native type"
             ]
-        )
-        assert identifier['value'] not in self.type_alias, powang_error_redefined(
+        ))
+        require(identifier['value'] not in self.type_alias, lambda: powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
                 f"a type alias for {self.type_alias[identifier['value']]['value']}"
             ]
-        )
-        assert identifier['value'] not in {'true', 'false'}, powang_error_redefined(
+        ))
+        require(identifier['value'] not in {'true', 'false'}, lambda: powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
                 f"which is a literal bool value"
             ]
-        )
+        ))
         
         if is_signature:
             return doToken(ParserTokenType.TYPE_DECLARATION, {
@@ -573,22 +574,22 @@ class Parser:
 
 
     def helper_EnumDeclaration(self, identifier: DictRepr):
-        assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
+        require(identifier['value'] not in NATI_TYPES, lambda: powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
                 "a powang native type"
             ]
-        )
+        ))
         self.consume(LexerTokenType.LEFT_BRACE)
         variants: list[str] = []
         while self.next.type != LexerTokenType.RIGHT_BRACE:
             variant_name = self.Identifier()['value']
-            assert variant_name not in variants, powang_error_redefined(
+            require(variant_name not in variants, lambda: powang_error_redefined(
                 TokenToString(ParserTokenType.TYPE_DECLARATION),
                 variant_name, [
                     f"duplicate variant in enum {identifier['value']}"
                 ]
-            )
+            ))
             variants.append(variant_name)
             if self.next.type == LexerTokenType.COMMA:
                 self.advance()
@@ -829,7 +830,7 @@ class Parser:
             block = self.BlockStatement()
         else:
             block = self.ExpressionStatement()
-            assert block is not None, powang_error_syntax('if expression', "Reached end of file")
+            require(block is not None, lambda: powang_error_syntax('if expression', "Reached end of file"))
             block = doToken(ParserTokenType.BLOCK_STATEMENT, [block]).toDict()
         
         else_block: DictRepr | None = None
@@ -840,7 +841,7 @@ class Parser:
                 else_block = self.BlockStatement()
             else:
                 else_block = self.ExpressionStatement()
-                assert else_block is not None, powang_error_syntax('else expression', "Reached end of file")
+                require(else_block is not None, lambda: powang_error_syntax('else expression', "Reached end of file"))
                 else_block = doToken(ParserTokenType.BLOCK_STATEMENT, [else_block]).toDict()
 
         return doToken(ParserTokenType.IF_STATEMENT, {
@@ -939,7 +940,7 @@ class Parser:
                 block = self.BlockStatement()
             else:
                 statement = self.ExpressionStatement()
-                assert statement is not None, powang_error_syntax('match case', 'Reached end of file')
+                require(statement is not None, lambda: powang_error_syntax('match case', 'Reached end of file'))
                 block = doToken(ParserTokenType.BLOCK_STATEMENT, [statement]).toDict()
             cases.append({
                 'pattern': pattern,
@@ -1004,8 +1005,7 @@ class Parser:
             }:
                 ## Bare identifier head (`for x >> arr {}`): implicitly declare
                 ## the iterator as weakly-typed `some` so any element binds.
-                assert start_expression['type'] == LexerTokenType.IDENTIFIER, \
-                    powang_error_syntax('for each expression', 'iterator must be a variable declaration or an identifier')
+                require(start_expression['type'] == LexerTokenType.IDENTIFIER, lambda: powang_error_syntax('for each expression', 'iterator must be a variable declaration or an identifier'))
                 start_expression = doToken(ParserTokenType.DECLARATION_UNDEFINED, {
                     "identifier": start_expression,
                     "type": doToken(ParserTokenType.TYPE, {
@@ -1096,9 +1096,9 @@ class Parser:
 
             if_expression: DictRepr | None = None
             if self.next.type == LexerTokenType.KEYWORD:
-                assert self.next.value == 'if', powang_error_syntax('for each expression', f"{self.next.value} is not a valid keyword in this context", [
+                require(self.next.value == 'if', lambda: powang_error_syntax('for each expression', f"{self.next.value} is not a valid keyword in this context", [
                     "for each last expression only accepts if keyword"
-                ])
+                ]))
                 self.advance()
                 if_expression = self.Expression()
             block = self.BlockStatement()
@@ -1181,13 +1181,13 @@ class Parser:
         while has_parameter_list and self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
             statement = self.Statement()
             if not has_defaults:
-                assert statement['type'] in {
+                require(statement['type'] in {
                     ParserTokenType.DECLARATION_UNDEFINED,
                     ParserTokenType.DECLARATION_TYPED_VAR
-                }, powang_error_syntax('fun declaration', "Invalid argument expression", [
+                }, lambda: powang_error_syntax('fun declaration', "Invalid argument expression", [
                     "Expected a variable declaration",
                     f"but {TokenToString(statement['type'])} was encountered"
-                ])
+                ]))
                 if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
                     has_defaults = True
                 else:
@@ -1198,12 +1198,12 @@ class Parser:
                     "this is not the case..."
                 ]))
             else:
-                assert statement['type'] in {
+                require(statement['type'] in {
                     ParserTokenType.DECLARATION_TYPED_VAR
-                }, powang_error_syntax('fun declaration', "Invalid argument expression", [
+                }, lambda: powang_error_syntax('fun declaration', "Invalid argument expression", [
                     "Expected a variable declaration with default value",
                     f"but {TokenToString(statement['type'])} was encountered"
-                ])
+                ]))
             args.append(statement)
             if self.next.type == LexerTokenType.COMMA:
                 self.advance()
@@ -1217,11 +1217,11 @@ class Parser:
         if self.next.type == LexerTokenType.LEFT_BRACE:
             block = self.BlockStatement()
         elif allow_body and self.next.type == LexerTokenType.RIGHT_ARROW:
-            assert return_expr is not None, powang_error_syntax(
+            require(return_expr is not None, lambda: powang_error_syntax(
                 'function body',
                 'Expression-bodied functions require a return type',
                 ['add a return type after the closing parenthesis'],
-            )
+            ))
             self.advance('function body')
             expression = self.Expression()
             block = doToken(ParserTokenType.BLOCK_STATEMENT, [
@@ -1344,14 +1344,14 @@ class Parser:
         if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'spawn':
             self.advance('spawn expression')
             spawned = self.UnaryExpression()
-            assert spawned['type'] == ParserTokenType.CALL_EXPRESSION, powang_error_syntax(
+            require(spawned['type'] == ParserTokenType.CALL_EXPRESSION, lambda: powang_error_syntax(
                 'spawn expression',
                 "spawn expects a function call",
                 [
                     "write it as: spawn function_name(args)",
                     f"but {TokenToString(spawned['type'])} was encountered",
                 ],
-            )
+            ))
             return doToken(ParserTokenType.SPAWN_EXPRESSION, {
                 "call": spawned,
             }).toDict()
@@ -1786,9 +1786,9 @@ class Parser:
             if is_map:
                 expr = self.helper_KeyValuePair(expr)
             elif self.next.type == LexerTokenType.RIGHT_ARROW:
-                assert len(elements) == 0, powang_error_syntax('Container Expression', 'Trying to do a mix up of array and map', [
+                require(len(elements) == 0, lambda: powang_error_syntax('Container Expression', 'Trying to do a mix up of array and map', [
                     "the array has elements before pair key-value appeared"
-                ])
+                ]))
                 is_map = True
                 expr = self.helper_KeyValuePair(expr)
             elements.append(expr)
@@ -1820,7 +1820,7 @@ class Parser:
         statements: list[DictRepr] = []
         while self.next.type != condition_token:
             stmt = self.ExpressionStatement()
-            assert stmt is not None, powang_error_syntax(where, "Reached end of file")
+            require(stmt is not None, lambda: powang_error_syntax(where, "Reached end of file"))
             statements.append(stmt)
         self.consume(condition_token)
         return statements
@@ -1914,10 +1914,10 @@ class Parser:
                         "references point at an existing variable"
                     ]))
 
-            if weak: assert type_identifier != PowangNova.type, powang_error_format(
+            if weak: require(type_identifier != PowangNova.type, lambda: powang_error_format(
                 "LOGIC", 'type notation', "A nova type can't be weak", [
                     "this has no sense"
-            ])
+            ]))
 
             const = False
             error_union = False
@@ -1978,13 +1978,13 @@ class Parser:
                         if reference:
                             aliased_inner['reference'] = True
                     return aliased_node
-                if weak: assert not alias['weak'], powang_error_format('LOGIC', 'type notation', 'Weak notation in a weak type alias', [
+                if weak: require(not alias['weak'], lambda: powang_error_format('LOGIC', 'type notation', 'Weak notation in a weak type alias', [
                     f"type alias {type_identifier} already refers to a weak {alias['value']}"
-                ])
+                ]))
                 weak = alias['weak']
-                if const: assert not alias['const'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
+                if const: require(not alias['const'], lambda: powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
                     f"type alias {type_identifier} already refers to a constant {alias['value']}"
-                ])
+                ]))
                 const = alias['const']
                 if element_type is None and alias.get('element_type') is not None:
                     element_type = alias['element_type']
@@ -2057,7 +2057,7 @@ class Parser:
         }).toDict()
 
     def Literal(self, where: Optional[str] = None):
-        assert self.next is not None, powang_error_syntax_unexpected_end(where, self.tokenizer)
+        require(self.next is not None, lambda: powang_error_syntax_unexpected_end(where, self.tokenizer))
         match self.next.type:
             case LexerTokenType.NOVA_LITERAL:
                 return self.NovaLiteral()
@@ -2219,7 +2219,7 @@ class Parser:
 
     def consume(self, token_type: LexerTokenType, where: Optional[str] = None):
         token = self.next
-        assert token is not None, powang_error_syntax_unexpected_end(None, self.tokenizer)
+        require(token is not None, lambda: powang_error_syntax_unexpected_end(None, self.tokenizer))
 
         if token.type != token_type:
             raise powang_throw(powang_error_with_position(

@@ -33,11 +33,11 @@ def builtin_format(
     format_string: PowangString | PowangAny,
     *args: PowangAny,
 ):
-    assert format_string.type == PowangString.type, powang_error_type_match(
+    require(format_string.type == PowangString.type, lambda: powang_error_type_match(
         'function: format',
         PowangString.type,
         format_string.type,
-    )
+    ))
     
     string_args: list[str] = []
     for arg in args:
@@ -97,10 +97,10 @@ def builtin_fail(
 ) -> PowangErrorValue:
     ## Value constructor counterpart to `error(...)`: returns an error value
     ## instead of raising, so `?` can propagate it from `T?` functions.
-    assert kind.type == PowangString.type, powang_error_type_match('builtin: fail, kind', PowangString.type, kind.type)
-    assert message.type == PowangString.type, powang_error_type_match('builtin: fail, message', PowangString.type, message.type)
+    require(kind.type == PowangString.type, lambda: powang_error_type_match('builtin: fail, kind', PowangString.type, kind.type))
+    require(message.type == PowangString.type, lambda: powang_error_type_match('builtin: fail, message', PowangString.type, message.type))
     for arg in args:
-        assert arg.type == PowangString.type, powang_error_type_match('builtin: fail, argument', PowangString.type, arg.type)
+        require(arg.type == PowangString.type, lambda: powang_error_type_match('builtin: fail, argument', PowangString.type, arg.type))
     created_error = powang_error_format(kind.data, 'builtin: fail', message.data, [arg.data for arg in args])
     return PowangErrorValue.from_error(created_error)
 
@@ -108,7 +108,7 @@ def builtin_error(
     message: PowangString | PowangAny,
     *args: PowangString,
 ):  
-    assert message.type == PowangString.type, powang_error_type_match('builtin: error, message', PowangString.type, message.type)
+    require(message.type == PowangString.type, lambda: powang_error_type_match('builtin: error, message', PowangString.type, message.type))
     for arg in args:
-        assert arg.type == PowangString.type, powang_error_type_match('builtin: error, argument', PowangString.type, arg.type)
+        require(arg.type == PowangString.type, lambda: powang_error_type_match('builtin: error, argument', PowangString.type, arg.type))
     raise powang_throw(powang_error_format("USER", 'builtin: error', message.data, [arg.data for arg in args]))

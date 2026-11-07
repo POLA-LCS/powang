@@ -198,10 +198,10 @@ def _powang_function_to_python(function: PowangFunction, state) -> Callable:
 
 def getValidIdentifier(where: str, identifier: DictRepr) -> str:
     identifier_name = evaluateAstExpression(identifier, True)
-    assert isinstance(identifier_name, str), powang_error_syntax_unexpected_token(
+    require(isinstance(identifier_name, str), lambda: powang_error_syntax_unexpected_token(
         where,
         identifier_name.type if isinstance(identifier_name, PowangTypeBase) else repr(identifier_name),
-        TokenToString(LexerTokenType.IDENTIFIER))
+        TokenToString(LexerTokenType.IDENTIFIER)))
     return identifier_name
 
 
@@ -362,13 +362,13 @@ def castToObjectType(where: str, user_type: PowangObjectType, target_value: Powa
     constructor_return: Optional[PowangAny] = None
     constructor_candidate = getFunctionCandidate(constructor_methods, right_value.data)
     constructor_return = callMethod(where, user_type, CONSTRUCTOR_METHOD_NAME, constructor_candidate, right_value.data)
-    assert constructor_return.type == PowangObjectType.type and constructor_return.type_name == user_type.type_name, powang_error_type_match(where, target_value.type_name, constructor_return.type_name)
+    require(constructor_return.type == PowangObjectType.type and constructor_return.type_name == user_type.type_name, lambda: powang_error_type_match(where, target_value.type_name, constructor_return.type_name))
     return constructor_return
 
 
 def checkReturnsNova(where: str, target_value: PowangAny, right_value: PowangAny) -> bool:
     if not target_value.weak.it_is and target_value.type != PowangNova.type:
-        assert right_value.weak.has_value, powang_error_strong_nova_assign(where, target_value.type)
+        require(right_value.weak.has_value, lambda: powang_error_strong_nova_assign(where, target_value.type))
 
     elif not right_value.weak.has_value:
         return True
@@ -397,9 +397,9 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
         right_value = PowangUnwrapAny(right_value)
 
     if target_value.const:
-        assert not target_value.defined or target_value.const.can_change, powang_error_format(
+        require(not target_value.defined or target_value.const.can_change, lambda: powang_error_format(
             "CONST", where, "Trying to assign to a strong const", [
-                f"{right_value.type} -> {target_value.type}!"])
+                f"{right_value.type} -> {target_value.type}!"]))
         target_value.const.can_change = False
 
 
@@ -466,10 +466,10 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
     if right.type == PowangAnyType.type:
         right = unwrap_any_value(right)
     if operator in {'+', '-', '*', '/', '%'}:
-        assert left.type != PowangNova.type and left.weak.has_value, powang_error_unsupported_operation(
-            'operation', f'nova weak {left.type}', operator, right.type)
-        assert right.type != PowangNova.type and right.weak.has_value, powang_error_unsupported_operation(
-            'operation', left.type, operator, f'nova weak {right.type}')
+        require(left.type != PowangNova.type and left.weak.has_value, lambda: powang_error_unsupported_operation(
+            'operation', f'nova weak {left.type}', operator, right.type))
+        require(right.type != PowangNova.type and right.weak.has_value, lambda: powang_error_unsupported_operation(
+            'operation', left.type, operator, f'nova weak {right.type}'))
     result: PowangAny | None = None
     match operator:
         case '+' : result = left + right
@@ -480,9 +480,9 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
         case _:
             result = PowangBoolean(False)
             if not left.weak.has_value or not right.weak.has_value:
-                assert operator in {'==', '!='}, powang_error_format("VALUE", 'comparisson', "Invalid weak comparisson", [
+                require(operator in {'==', '!='}, lambda: powang_error_format("VALUE", 'comparisson', "Invalid weak comparisson", [
                     "trying to compare greatness or lessness with non strong values"
-                ])
+                ]))
                 if operator == '==':
                     return PowangBoolean(left.weak.has_value == right.weak.has_value)
                 return PowangBoolean(left.weak.has_value != right.weak.has_value)
@@ -490,7 +490,7 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
                 if typed:
                     return result
                 casted = PowangTypeCast(left.type, right)
-                assert casted is not None, powang_error_unsupported_operation('comparisson', left.type, operator, right.type)
+                require(casted is not None, lambda: powang_error_unsupported_operation('comparisson', left.type, operator, right.type))
                 return performOperation(operator, left, casted, False)
             match operator:
                 case '==':
@@ -509,24 +509,24 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
     if result is None:
         if typed:
             casted = PowangTypeCast(right.type, left)
-            assert casted is not None, powang_error_unsupported_operation('implicit typed operation', left.type, operator, right.type)
+            require(casted is not None, lambda: powang_error_unsupported_operation('implicit typed operation', left.type, operator, right.type))
             return performOperation(operator, casted, right, False)
         else:
             casted = PowangTypeCast(left.type, right)
-            assert casted is not None, powang_error_unsupported_operation('implicit operation', left.type, operator, right.type)
+            require(casted is not None, lambda: powang_error_unsupported_operation('implicit operation', left.type, operator, right.type))
         return performOperation(operator, left, casted, typed)
     return result
 
 def getIndexedValue(where: str, expression: DictRepr, subscript_check: bool):
     target_value = evaluateAstExpression(expression['target'])
-    assert target_value.defined, powang_error_undefined_reference(
+    require(target_value.defined, lambda: powang_error_undefined_reference(
         TokenToString(ParserTokenType.ASSIGNMENT),
-        expression['target']['value'])
+        expression['target']['value']))
     if target_value.type == PowangAnyType.type:
         target_value = unwrap_any_value(target_value)
     index = evaluateAstExpression(expression['index'])
     if subscript_check:
-        assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "str type is not subscriptable for now.")
+        require(target_value.type != PowangString.type, lambda: powang_error_format("ASSIGN", where, "str type is not subscriptable for now."))
     return target_value.index(index)
 
 def getErrorProperty(where: str, error_value: PowangErrorValue, property_identifier: str) -> PowangAny:
@@ -911,8 +911,8 @@ def _executeCallNode(where: str, callee_node: DictRepr, call_parameters: list[Po
     if call_callee in BUILTINS:
         call_min_argc, call_max_argc, call_func = BUILTINS[call_callee]
         if call_max_argc != -1:
-            assert len(call_parameters) <= call_max_argc, powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
-        assert len(call_parameters) >= call_min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
+            require(len(call_parameters) <= call_max_argc, lambda: powang_error_format("ARGUMENT", 'Function call', 'too many arguments'))
+        require(len(call_parameters) >= call_min_argc, lambda: powang_error_format("ARGUMENT", 'Function call', 'not enought arguments'))
         return call_func(*call_parameters)
 
     # First-class function values: a variable may hold a PowangFunction.
@@ -963,8 +963,8 @@ def _prepareTaskCall(where: str, callee_node: DictRepr, call_parameters: list[Po
     if call_callee in BUILTINS:
         call_min_argc, call_max_argc, call_func = BUILTINS[call_callee]
         if call_max_argc != -1:
-            assert len(call_parameters) <= call_max_argc, powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
-        assert len(call_parameters) >= call_min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
+            require(len(call_parameters) <= call_max_argc, lambda: powang_error_format("ARGUMENT", 'Function call', 'too many arguments'))
+        require(len(call_parameters) >= call_min_argc, lambda: powang_error_format("ARGUMENT", 'Function call', 'not enought arguments'))
         return lambda: call_func(*call_parameters)
 
     if (call_variable := ScopeStack.get_variable(call_callee)) is not None \
@@ -1580,7 +1580,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ## function values can be referenced and inferred with :=
             if (identifier_functions := ScopeStack.get_functions(expr_value)) is not None:
                 return identifier_functions[-1]
-            assert False, powang_error_identifier_not_found(None, expr_value)
+            require(False, lambda: powang_error_identifier_not_found(None, expr_value))
             return PowangNova()
 
         case LexerTokenType.INTEGER_LITERAL:
@@ -1741,10 +1741,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     ]
                     if owner_value.type == PowangModule.type:
                         return callModuleMember(where, owner_value, method_value['method']['value'], pipeline_parameters)
-                    assert owner_value.type == PowangObjectType.type, powang_error_format('IMPLEMENTATION', where,
+                    require(owner_value.type == PowangObjectType.type, lambda: powang_error_format('IMPLEMENTATION', where,
                         "Currently only user types can perform a method call.", [
                             f"but trying to call from a {owner_value.type}"
-                        ])
+                        ]))
                     match_methods = owner_value.getMethods(method_value['method']['value'], len(ScopeStack.method_call_stack) > 0)
                     if match_methods is None:
                         raise powang_throw(powang_error_identifier_not_found(
@@ -1795,18 +1795,18 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.DECLARATION_UNDEFINED:
             undefined_identifier = getValidIdentifier(where, expr_value['identifier'])
-            assert undefined_identifier not in ScopeStack.variables[-1], powang_error_format('REDEFINE', where, "Cannot redefine variables", [
+            require(undefined_identifier not in ScopeStack.variables[-1], lambda: powang_error_format('REDEFINE', where, "Cannot redefine variables", [
                 f"redefined: {undefined_identifier}"
-            ])
+            ]))
             undefined_variable = getUndefinedVariable(where, expr_value['type']['value'])
             ScopeStack.new_variable(expr_value['identifier']['value'], undefined_variable)
             return undefined_variable
 
         case ParserTokenType.DECLARATION_TYPED_VAR:
             typed_identifier = getValidIdentifier(where, expr_value['identifier'])
-            assert typed_identifier not in ScopeStack.variables[-1], powang_error_format('REDEFINE', where, "Cannot redefine variables", [
+            require(typed_identifier not in ScopeStack.variables[-1], lambda: powang_error_format('REDEFINE', where, "Cannot redefine variables", [
                 f"redefined: {typed_identifier}"
-            ])
+            ]))
             undefined_value = getUndefinedVariable(where, expr_value['type']['value'])
             right_value = evaluateAstExpression(expr_value['expression'])
             typed_variable = assignWithChecks(where, undefined_value, right_value, False)
@@ -1818,9 +1818,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.DECLARATION_INTERPRET:
             typed_identifier = getValidIdentifier(where, expr_value['identifier'])
-            assert typed_identifier not in ScopeStack.variables[-1], powang_error_format('REDEFINE', where, "Cannot redefine variables", [
+            require(typed_identifier not in ScopeStack.variables[-1], lambda: powang_error_format('REDEFINE', where, "Cannot redefine variables", [
                 f"redefined: {typed_identifier}"
-            ])
+            ]))
             right_value = evaluateAstExpression(expr_value['expression'])
             if right_value.type in {
                 PowangFunction.type,
@@ -1946,9 +1946,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.INDEX_EXPRESSION:
             index_expression_value = getIndexedValue(where, expression['value'], False)
-            assert index_expression_value is not None, powang_error_format(
+            require(index_expression_value is not None, lambda: powang_error_format(
                 'IMPLEMENTATION', where, "Index to that type is not implemented yet."
-            )
+            ))
             return index_expression_value
 
         case ParserTokenType.POSTFIX_UNWRAP:
@@ -1956,12 +1956,12 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ## current function. The enclosing block sees `return_value` set
             ## and unwinds exactly like a `return` statement.
             current_scope_type = ScopeStack.current_scope_type()
-            assert current_scope_type == ScopeType.FUNCTION, powang_error_format(
+            require(current_scope_type == ScopeType.FUNCTION, lambda: powang_error_format(
                 'LOGIC', where,
                 "Trying to use the '?' operator outside a function scope", [
                     f"the scope you are trying to unwrap from it's {ScopeType.toStr(current_scope_type)}"
                 ]
-            )
+            ))
             unwrap_value = evaluateAstExpression(expr_value['expression'])
             if unwrap_value.type == PowangAnyType.type:
                 unwrap_value = PowangUnwrapAny(unwrap_value)
@@ -2234,9 +2234,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ScopeStack.push()
             try:
                 for_each_iterable = unwrap_any_value(evaluateAstExpression(for_each_iterable_expression))
-                assert for_each_iterable.type in {PowangArray.type, PowangString.type, PowangMap.type, PowangSet.type}, powang_error_format("VALUE", where, "Expression is not an iterable value", [
+                require(for_each_iterable.type in {PowangArray.type, PowangString.type, PowangMap.type, PowangSet.type}, lambda: powang_error_format("VALUE", where, "Expression is not an iterable value", [
                     f"Expression is of type {for_each_iterable.type}"
-                ])
+                ]))
 
                 for_each_iterator_expression = expr_value['iterator']
 
@@ -2272,7 +2272,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.DECLARATION_FUN:
             fun_identifier = getValidIdentifier(where, expr_value['identifier'])
-            assert fun_identifier not in NATI_TYPES, powang_error_identifier_names_type(where, fun_identifier)
+            require(fun_identifier not in NATI_TYPES, lambda: powang_error_identifier_names_type(where, fun_identifier))
             functions: list[PowangFunction] | None = ScopeStack.get_functions(fun_identifier)
             if functions is not None:
                 for func in functions:
@@ -2289,9 +2289,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                             is_different = True
                             break
 
-                    assert is_different, powang_error_redefined(where, fun_identifier, [
+                    require(is_different, lambda: powang_error_redefined(where, fun_identifier, [
                         f"remember, type qualifiers such as const does not determine function signatures, same with return types"
-                    ])
+                    ]))
 
             ## Synthesize the default return type locally; never write back
             ## into the AST node (the interpreter must not mutate the tree).
@@ -2314,9 +2314,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.RETURN_EXPRESSION:
             current_scope_type = ScopeStack.current_scope_type()
-            assert current_scope_type == ScopeType.FUNCTION, powang_error_format('LOGIC', None, "Trying to return with a non function scope", [
+            require(current_scope_type == ScopeType.FUNCTION, lambda: powang_error_format('LOGIC', None, "Trying to return with a non function scope", [
                 f"the scope you are trying to return from it's {ScopeType.toStr(current_scope_type)}"
-            ])
+            ]))
 
             return_expr_value = evaluateAstExpression(expr_value)
             if return_expr_value.type == PowangAnyType.type:
@@ -2418,16 +2418,16 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if safe_target.type == PowangModule.type:
                 property_identifier = getValidIdentifier(where, expr_value['property'])
                 return moduleMemberValue(where, safe_target, property_identifier)
-            assert safe_target.type == PowangObjectType.type, powang_error_syntax(where, "Invalid safe access", [
+            require(safe_target.type == PowangObjectType.type, lambda: powang_error_syntax(where, "Invalid safe access", [
                 f"{safe_target.type} cannot be accessed in any way or has no properties"
-            ])
+            ]))
             property_identifier = getValidIdentifier(where, expr_value['property'])
-            assert safe_target.defined, powang_error_undefined_reference(where, expr_value['target']['value'])
+            require(safe_target.defined, lambda: powang_error_undefined_reference(where, expr_value['target']['value']))
             is_private: bool = len(ScopeStack.method_call_stack) > 0
             property_value = safe_target.getProperty(property_identifier, is_private)
-            assert property_value is not None, powang_error_identifier_not_found(where, property_identifier, [
+            require(property_value is not None, lambda: powang_error_identifier_not_found(where, property_identifier, [
                 "perhaps it is a private property?"
-            ] if not is_private else [])
+            ] if not is_private else []))
             return property_value
 
         case ParserTokenType.ACCESS_EXPRESSION:
@@ -2447,20 +2447,20 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 raise powang_throw(powang_error_identifier_not_found(where, property_identifier, [
                     "perhaps it is a private variant?"
                 ]))
-            assert target.type == PowangObjectType.type, powang_error_syntax(where, "Invalid access", [
+            require(target.type == PowangObjectType.type, lambda: powang_error_syntax(where, "Invalid access", [
                 f"{target.type} cannot be accessed in any way or has no properties"
-            ])
+            ]))
             property_identifier = getValidIdentifier(where, expr_value['property'])
-            assert target.defined, powang_error_undefined_reference(where, expr_value['target']['value'])
-            assert target.weak.has_value, powang_error_format("VALUE", where, f"Invalid access", [
+            require(target.defined, lambda: powang_error_undefined_reference(where, expr_value['target']['value']))
+            require(target.weak.has_value, lambda: powang_error_format("VALUE", where, f"Invalid access", [
                 f"Trying to access property {property_identifier} from a nova weak {target.type_name}"
-            ])
+            ]))
 
             is_private: bool = len(ScopeStack.method_call_stack) > 0
             property_value = target.getProperty(property_identifier, is_private)
-            assert property_value is not None, powang_error_identifier_not_found(where, property_identifier, [
+            require(property_value is not None, lambda: powang_error_identifier_not_found(where, property_identifier, [
                 "perhaps it is a private property?"
-            ] if not is_private else [])
+            ] if not is_private else []))
             return property_value
 
         case ParserTokenType.METHOD_CALL:
@@ -2515,10 +2515,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     expr_value['method']['value'],
                     call_parameters,
                 )
-            assert owner_value.type == PowangObjectType.type, powang_error_format('IMPLEMENTATION', where,
+            require(owner_value.type == PowangObjectType.type, lambda: powang_error_format('IMPLEMENTATION', where,
                 "Currently only user types can perform a method call.", [
                     f"but trying to call from a {owner_value.type}"
-            ])
+            ]))
 
 
             match_methods = owner_value.getMethods(expr_value['method']['value'], len(ScopeStack.method_call_stack) > 0)
@@ -2585,7 +2585,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             extern_signature = evaluateAstExpression(powang)
 
             if powang['type'] == ParserTokenType.DECLARATION_FUN:
-                assert extern_signature.type == PowangFunction.type, powang_error_format('DEVELOPMENT', 'extern function', "Somehow you get here without a function")
+                require(extern_signature.type == PowangFunction.type, lambda: powang_error_format('DEVELOPMENT', 'extern function', "Somehow you get here without a function"))
                 ## The callable rides on the signature so module-qualified
                 ## calls (`math.sqrt`) can find it without relying on a global
                 ## name that another module could shadow.

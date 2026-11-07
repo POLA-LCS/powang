@@ -60,9 +60,13 @@ def run_command(
     input_text: str | None = None,
     cwd: Path | str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    optimize: bool = False,
 ) -> RunResult:
     """Run ``python powang.py <args>`` and capture decoded output."""
-    command = [sys.executable, str(POWANG), *args]
+    command = [sys.executable]
+    if optimize:
+        command.append("-O")
+    command.extend([str(POWANG), *args])
     completed = subprocess.run(
         command,
         input=input_text.encode("utf-8") if input_text is not None else None,
@@ -86,12 +90,13 @@ def run_file(
     *args: str,
     cwd: Path | str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    optimize: bool = False,
 ) -> RunResult:
     """Run one ``.po`` file by path. Relative paths resolve against the repo."""
     resolved = Path(path)
     if not resolved.is_absolute():
         resolved = ROOT / resolved
-    return run_command([str(resolved), *args], cwd=cwd, timeout=timeout)
+    return run_command([str(resolved), *args], cwd=cwd, timeout=timeout, optimize=optimize)
 
 
 def write_po(directory: Path | str, name: str, source: str) -> Path:
@@ -107,11 +112,12 @@ def run_source(
     *,
     name: str = "program.po",
     timeout: int = DEFAULT_TIMEOUT,
+    optimize: bool = False,
 ) -> RunResult:
     """Write ``source`` to a temporary ``.po`` file and run it."""
     with tempfile.TemporaryDirectory(prefix="powang-test-") as directory:
         path = write_po(directory, name, source)
-        return run_file(path, timeout=timeout)
+        return run_file(path, timeout=timeout, optimize=optimize)
 
 
 def run_source_with_input(

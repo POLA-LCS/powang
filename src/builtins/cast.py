@@ -80,7 +80,7 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
     return None
 
 def explicitCastInteger(left: PowangAny) -> Optional[PowangInteger]:
-    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
     if (cast_result := PowangInteger.cast(left)) is not None:
         return cast_result
     if not left.weak.has_value or left.type == PowangNova.type:
@@ -89,13 +89,13 @@ def explicitCastInteger(left: PowangAny) -> Optional[PowangInteger]:
         try:
             return PowangInteger(int(left.data))
         except ValueError:
-            assert powang_error_format("RUNTIME", 'explicit cast', "Invalid int string", [
+            raise powang_error_format("RUNTIME", 'explicit cast', "Invalid int string", [
                 f"\"{left.data}\""
             ])
     return PowangInteger.cast(left)
 
 def explicitCastNumber(left: PowangAny) -> Optional[PowangNumber]:
-    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
 
     if (cast_result := PowangNumber.cast(left)) is not None:
         return cast_result
@@ -105,13 +105,13 @@ def explicitCastNumber(left: PowangAny) -> Optional[PowangNumber]:
         try:
             return PowangNumber(float(left.data))
         except ValueError:
-            assert powang_error_format("RUNTIME", 'explicit cast', "Invalid num string", [
+            raise powang_error_format("RUNTIME", 'explicit cast', "Invalid num string", [
                 f"\"{left.data}\""
             ])
     return None
 
 def explicitCastArray(left: PowangAny) -> Optional[PowangArray]:
-    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
     if (cast_result := PowangArray.cast(left)) is not None:
         return cast_result
     if not left.weak.has_value or left.type == PowangNova.type:
@@ -129,7 +129,7 @@ def explicitCastArray(left: PowangAny) -> Optional[PowangArray]:
 
 
 def explicitCastSet(left: PowangAny) -> Optional[PowangSet]:
-    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
     if (cast_result := PowangSet.cast(left)) is not None:
         return cast_result
     if not left.weak.has_value or left.type == PowangNova.type:
@@ -138,7 +138,7 @@ def explicitCastSet(left: PowangAny) -> Optional[PowangSet]:
 
 
 def explicitCastTuple(left: PowangAny) -> Optional[PowangTuple]:
-    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
     if (cast_result := PowangTuple.cast(left)) is not None:
         return cast_result
     if not left.weak.has_value or left.type == PowangNova.type:
@@ -153,7 +153,7 @@ def explicitCastTuple(left: PowangAny) -> Optional[PowangTuple]:
     return None
 
 def explicitCastMap(left: PowangAny) -> Optional[PowangMap]:
-    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
     if (cast_result := PowangMap.cast(left)) is not None:
         return cast_result
 

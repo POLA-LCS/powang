@@ -5,11 +5,11 @@ def builtin_size(*args: PowangAny):
     """Returns the sumatory of the sizes"""
     size_result = PowangInteger(0)
     for i, arg in enumerate(args):
-        assert arg.defined, powang_error_undefined_argument(
+        require(arg.defined, lambda: powang_error_undefined_argument(
             'function: size',
             i + 1,
             arg.type,
-        )
+        ))
         
         if arg.type == PowangAnyType.type:
             arg = PowangUnwrapAny(arg)
