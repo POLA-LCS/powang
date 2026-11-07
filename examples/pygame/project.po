@@ -1,0 +1,7 @@
+module project;
+
+export project: Project = Project.[
+    modules >> ["pygame_host"],
+    paths >> ["."],
+    logLevel >> "info"
+];

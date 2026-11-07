@@ -1,7 +1,7 @@
 ## Modules: namespaces, aliases, wildcard imports and exports.
 
-use "./lib/greeting.po" as greeting;
 use "./lib/greeting.po" as *;
+use "./lib/greeting.po" as greeting;
 
 print(greeting.hello("powang"));
 print("\n");

@@ -1,0 +1,11 @@
+module pygame;
+
+export extern fun init(): int >> "pygame_host.init";
+export extern fun quit(): int >> "pygame_host.quit";
+export extern fun set_mode(width: int, height: int): handle >> "pygame_host.set_mode";
+export extern fun fill(screen: handle, r: int, g: int, b: int): int >> "pygame_host.fill";
+export extern fun draw_rect(screen: handle, x: int, y: int, w: int, h: int, r: int, g: int, b: int): int >> "pygame_host.draw_rect";
+export extern fun flip(screen: handle): int >> "pygame_host.flip";
+export extern fun make_clock(): handle >> "pygame_host.make_clock";
+export extern fun tick(clock: handle, fps: int): num >> "pygame_host.tick";
+export extern fun event_quit(): bool >> "pygame_host.event_quit";

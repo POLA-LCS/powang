@@ -20,7 +20,7 @@ LEVELS: dict[str, int] = {
 
 def _state():
     ## Imported lazily to avoid a cycle with state -> powang_types.
-    from .state import get_state
+    from ..state import get_state
     return get_state()
 
 

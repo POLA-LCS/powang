@@ -15,6 +15,9 @@ NATI_TYPES: set[str] = {
     PowangString.type ,
     PowangArray.type  ,
     PowangMap.type    ,
+    PowangSet.type    ,
+    PowangHandle.type ,
+    PowangProject.type,
     PowangErrorValue.type,
     'tup',
 }
@@ -68,10 +71,16 @@ class Parser:
         ## Type tables belong to the run that is parsing, never to the module
         ## object, so an alias from one embedded run is invisible to the next.
         state = get_state()
+        self.state = state
         self.type_alias: dict[str, DictRepr] = state.type_alias
         self.user_types: set[str] = state.user_types
+        ## Types declared by this file. The parser uses the set only for
+        ## disambiguation (`Name[...]` versus `name[index]`), never for
+        ## semantic decisions.
+        self.declared_types: set[str] = set()
         self._synthetic_counter: int = 0
         self._consts: dict[str, DictRepr] = {}
+        self._type_member_context: bool = False
 
 
     def parse(self):
@@ -138,6 +147,12 @@ class Parser:
                 return expression
             self.consume(LexerTokenType.KEYWORD)
             match keyword:
+                case 'module':
+                    identifier = self.Identifier()
+                    self.consume(LexerTokenType.SEMI_COLON)
+                    return doToken(ParserTokenType.MODULE_DECLARATION, {
+                        'identifier': identifier,
+                    }).toDict()
                 case 'if':
                     return self.helper_IfStatement()
                 case 'try':
@@ -273,57 +288,211 @@ class Parser:
                 'identifier' : identifier,
                 'properties' : None,
                 'methods'    : None,
+                'access_default': None,
+                'type_parameters': [],
             }).toDict()  
-        
+
+        access_default: Optional[str] = None
+        type_parameters: list[str] = []
+        for _ in range(2):
+            if access_default is None and self.next.type == LexerTokenType.OPERATOR_SUMATORY:
+                access_default = '+'
+                self.advance('type access default')
+                continue
+            if access_default is None and self.next.type == LexerTokenType.OPERATOR_INVERSE:
+                access_default = '-'
+                self.advance('type access default')
+                continue
+            if not type_parameters and self.next.type == LexerTokenType.LEFT_BRACKET:
+                self.consume(LexerTokenType.LEFT_BRACKET, 'type parameters')
+                while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    parameter = self.Identifier()['value']
+                    if parameter in type_parameters:
+                        raise powang_throw(powang_error_redefined(
+                            'type parameter', parameter,
+                        ))
+                    type_parameters.append(parameter)
+                    if self.next.type == LexerTokenType.COMMA:
+                        self.advance()
+                    elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'type parameters', "Expected ',' or ']' in type parameters",
+                        )))
+                self.consume(LexerTokenType.RIGHT_BRACKET)
+                continue
+            break
+
         properties: list[tuple[bool, DictRepr]] = []
         methods   : list[tuple[bool, DictRepr]] = []
+        constructor_members: list[DictRepr] = []
+        explicit_constructor: tuple[bool, DictRepr] | None = None
+        ignored_constructor_members: bool = False
+        ignored_member_token: DictRepr | None = None
+
         self.consume(LexerTokenType.LEFT_BRACE)
-        has_default_constructor: bool = False
         while self.next.type != LexerTokenType.RIGHT_BRACE:
-            assert self.next.type in {
-                LexerTokenType.OPERATOR_PLUS,
-                LexerTokenType.OPERATOR_MINUS
-            },  powang_error_syntax_unexpected_token(
-                TokenToString(ParserTokenType.TYPE_DECLARATION),
-                TokenToString(self.next.type),
-                'privacy operator + or -'
-            )
-            
-            is_public: bool = self.next.type == LexerTokenType.OPERATOR_PLUS
-            self.advance()
-            statement = self.ExpressionStatement()
-            assert statement is not None, powang_error_syntax('type declaration', "Reached end of file")
+            pipe_token = None
+            pipe = False
+            if self.next.type == LexerTokenType.PIPE:
+                pipe_token = self.next
+                pipe = True
+                self.advance('constructor member')
+
+            access_token = None
+            explicit_access: Optional[str] = None
+            if self.next.type == LexerTokenType.OPERATOR_PLUS:
+                access_token = self.next
+                explicit_access = '+'
+                self.advance('member access')
+            elif self.next.type == LexerTokenType.OPERATOR_MINUS:
+                access_token = self.next
+                explicit_access = '-'
+                self.advance('member access')
+            elif access_default is None:
+                raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                    'type declaration',
+                    f"type '{identifier['value']}' has no default access",
+                    [
+                        "declare the type as type T[+] or type T[-]",
+                        "or prefix every member with + or -",
+                    ],
+                )))
+
+            if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'const':
+                if pipe:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'constructor member',
+                        "the const keyword cannot be combined with |",
+                        [
+                            "declare a write-once member as name: type! instead",
+                        ],
+                    )))
+                raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                    'type member',
+                    "the const keyword is not supported inside a type body",
+                    ["declare a write-once member as name: type!"],
+                )))
+
+            effective_access = explicit_access if explicit_access is not None else access_default
+            is_public: bool = effective_access == '+'
+
+            if access_token is not None and access_default is not None \
+                    and explicit_access == access_default:
+                self.state.warn(
+                    f"unnecessary access specifier '{explicit_access}' in type '{identifier['value']}'",
+                    access_token.line,
+                    access_token.column,
+                    access_token.column + 1 if access_token.column is not None else None,
+                    'PW201',
+                )
+
+            previous_member_context = self._type_member_context
+            self._type_member_context = True
+            try:
+                statement = self.ExpressionStatement()
+            finally:
+                self._type_member_context = previous_member_context
+            if statement is None:
+                raise powang_throw(self._syntax_at_current(
+                    powang_error_syntax('type declaration', "Reached end of file")
+                ))
+            statement.setdefault('value', {})
+            if isinstance(statement['value'], dict):
+                statement['value']['explicit_access'] = explicit_access
+                statement['value']['constructor_member'] = pipe
+
             if statement['type'] in {
                 ParserTokenType.DECLARATION_UNDEFINED,
                 ParserTokenType.DECLARATION_TYPED_VAR
-            }:  properties.append((is_public, statement))
+            }:
+                if pipe:
+                    member_type = statement['value'].get('type')
+                    if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR and \
+                            self._type_node_is_const(member_type):
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'constructor member',
+                            "a write-once member cannot have both an initializer and |",
+                            [
+                                "remove the initializer so the constructor performs the single write",
+                            ],
+                        )))
+                    constructor_members.append(statement)
+                properties.append((is_public, statement))
             elif statement['type'] == ParserTokenType.DECLARATION_FUN:
+                if pipe:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'constructor member',
+                        "a method cannot be marked as a constructor parameter",
+                    )))
                 fun_identifier = statement['value']['identifier']
                 fun_return     = statement['value']['return']
                 if fun_identifier['value'] == CONSTRUCTOR_METHOD_NAME:
-                    assert is_public, powang_error_format('LOGIC', 'constructor declaration', "Type constructor must be public")
-                    if len(statement['value']['args']) == 0:
-                        has_default_constructor = True
+                    if not is_public:
+                        raise powang_throw(powang_error_format(
+                            'LOGIC', 'constructor declaration', "Type constructor must be public"
+                        ))
+                    explicit_constructor = (is_public, statement)
                     # Sets the default constructor return type to the object type
                     if fun_return is None:
                         statement['value']['return'] = self.simulate_Type(identifier['value'], False, False)
                     else:
                         # Check if the return type matches the object type
-                        assert fun_return['value']['value'] == identifier['value'], powang_error_format(
-                            'LOGIC', 'constructor declaration', 'Return type must be the object type', [
-                                f'expected {identifier['value']}',
-                                f'but {fun_return['value']['value']} was encountered'
-                            ]
-                        )
+                        if fun_return['value']['value'] != identifier['value']:
+                            raise powang_throw(powang_error_format(
+                                'LOGIC', 'constructor declaration', 'Return type must be the object type', [
+                                    f'expected {identifier['value']}',
+                                    f'but {fun_return['value']['value']} was encountered'
+                                ]
+                            ))
                     
                     # Return "this" default return
                     statement['value']['block']['value'].append(
                         doToken(ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')
                     ).toDict())
                 methods.append((is_public, statement))
+            else:
+                raise powang_throw(powang_error_syntax(
+                    'type declaration',
+                    "Expected a member declaration",
+                    [
+                        f"but {TokenToString(statement['type'])} was encountered",
+                    ],
+                ))
         self.advance()
 
-        if not has_default_constructor:
+        member_names: set[str] = set()
+        for member in constructor_members:
+            member_name = member['value']['identifier']['value']
+            if member_name in member_names:
+                raise powang_throw(powang_error_redefined(
+                    'constructor member', member_name, [
+                        "constructor parameter names must be unique",
+                    ]
+                ))
+            member_names.add(member_name)
+
+        if explicit_constructor is not None:
+            constructor_statement = explicit_constructor[1]
+            constructor_args = constructor_statement['value']['args']
+            if constructor_members and len(constructor_args) == 0:
+                ## Zero-parameter explicit constructor: body hook.
+                constructor_statement['value']['args'] = self._constructor_arguments(
+                    constructor_members
+                )
+                constructor_statement['value']['min_argc'] = sum(
+                    1 for arg in constructor_statement['value']['args']
+                    if arg['type'] == ParserTokenType.DECLARATION_UNDEFINED
+                )
+                constructor_statement['value']['block']['value'] = (
+                    self._constructor_assignments(constructor_members)
+                    + constructor_statement['value']['block']['value']
+                )
+            elif constructor_members:
+                ignored_constructor_members = True
+                ignored_member_token = constructor_members[0]['value']['identifier']
+        elif constructor_members:
+            methods.append((True, self._generated_constructor(identifier, constructor_members)))
+        else:
             methods.append((True, doToken(ParserTokenType.DECLARATION_FUN, {
                 'identifier': self.simulate_Identifier(CONSTRUCTOR_METHOD_NAME),
                 'args': [],
@@ -334,11 +503,74 @@ class Parser:
                 ]).toDict()
             }).toDict()))
 
+        if ignored_constructor_members:
+            self.state.warn(
+                f"constructor members in type '{identifier['value']}' are ignored because an explicit constructor with parameters is declared",
+                ignored_member_token.get('line') if isinstance(ignored_member_token, dict) else None,
+                ignored_member_token.get('column') if isinstance(ignored_member_token, dict) else None,
+                None,
+                'PW202',
+            )
+
+        self.declared_types.add(identifier['value'])
         return doToken(ParserTokenType.TYPE_DECLARATION, {
             'identifier' : identifier,
             'properties' : properties,
             'methods'    : methods,
+            'access_default': access_default,
+            'type_parameters': type_parameters,
         }).toDict()
+
+    def _type_node_is_const(self, type_node: Optional[DictRepr]) -> bool:
+        if not isinstance(type_node, dict):
+            return False
+        inner = type_node.get('value')
+        return isinstance(inner, dict) and bool(inner.get('const'))
+
+    def _constructor_arguments(self, constructor_members: list[DictRepr]) -> list[DictRepr]:
+        arguments: list[DictRepr] = []
+        for member in constructor_members:
+            member_value = member['value']
+            ## Constructor parameters are always required: the member
+            ## initializer, when present, runs before the constructor body and
+            ## the generated assignment then overrides it.
+            arguments.append(doToken(ParserTokenType.DECLARATION_UNDEFINED, {
+                'identifier': copy.deepcopy(member_value['identifier']),
+                'type': copy.deepcopy(member_value['type']),
+            }).toDict())
+        return arguments
+
+    def _constructor_assignments(self, constructor_members: list[DictRepr]) -> list[DictRepr]:
+        assignments: list[DictRepr] = []
+        for member in constructor_members:
+            member_name = member['value']['identifier']['value']
+            target = doToken(ParserTokenType.ACCESS_EXPRESSION, {
+                'target': self.simulate_Identifier('this'),
+                'property': self.simulate_Identifier(member_name),
+            }).toDict()
+            assignments.append(self.simulate_Assignment(
+                target, self.simulate_Identifier(member_name)
+            ))
+        return assignments
+
+    def _generated_constructor(self, identifier: DictRepr,
+                               constructor_members: list[DictRepr]) -> DictRepr:
+        arguments = self._constructor_arguments(constructor_members)
+        body = self._constructor_assignments(constructor_members)
+        body.append(doToken(
+            ParserTokenType.RETURN_EXPRESSION, self.simulate_Identifier('this')
+        ).toDict())
+        return doToken(ParserTokenType.DECLARATION_FUN, {
+            'identifier': self.simulate_Identifier(CONSTRUCTOR_METHOD_NAME),
+            'args': arguments,
+            'min_argc': sum(
+                1 for arg in arguments
+                if arg['type'] == ParserTokenType.DECLARATION_UNDEFINED
+            ),
+            'return': self.simulate_Type(identifier['value'], False, False),
+            'block': doToken(ParserTokenType.BLOCK_STATEMENT, body).toDict(),
+        }).toDict()
+
 
     def helper_EnumDeclaration(self, identifier: DictRepr):
         assert identifier['value'] not in NATI_TYPES, powang_error_redefined(
@@ -366,6 +598,7 @@ class Parser:
                         f"but {TokenToString(self.next.type)} was encountered",
                     ]))
         self.consume(LexerTokenType.RIGHT_BRACE)
+        self.declared_types.add(identifier['value'])
         return doToken(ParserTokenType.TYPE_DECLARATION, {
             'identifier' : identifier,
             'properties' : None,
@@ -744,6 +977,12 @@ class Parser:
                             'const': False,
                             'weak': False,
                             'reference': None,
+                            'error_union': False,
+                            'element_type': None,
+                            'generics': [],
+                            'variadic': False,
+                            'alternatives': [],
+                            'auto': False,
                         }).toDict(),
                         "inferred": True,
                     }).toDict()
@@ -774,6 +1013,12 @@ class Parser:
                         'const': False,
                         'weak': False,
                         'reference': None,
+                        'error_union': False,
+                        'element_type': None,
+                        'generics': [],
+                        'variadic': False,
+                        'alternatives': [],
+                        'auto': False,
                     }).toDict(),
                     "inferred": True,
                 }).toDict()
@@ -904,13 +1149,36 @@ class Parser:
         return None
 
     def helper_FunDeclaration(self, allow_body: bool = True):
-        identifier = self.Identifier()
-        self.consume(LexerTokenType.LEFT_PARENTHESIS)
+        instance_method = False
+        if self.next.type == LexerTokenType.DOT:
+            self.advance('instance method marker')
+            instance_method = True
+            identifier = self.Identifier()
+        else:
+            token = self.consume(LexerTokenType.IDENTIFIER)
+            if token.value == 'this' and self.next.type == LexerTokenType.DOT:
+                self.advance('instance method marker')
+                instance_method = True
+                identifier = self.Identifier()
+            else:
+                identifier = token.toDict(token.value)
+                identifier['line'] = token.line
+                identifier['column'] = token.column
         args: list[DictRepr] = []
         has_defaults = False
         i = 1
         min_argc: int = 0
-        while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+        has_parameter_list = self.next.type == LexerTokenType.LEFT_PARENTHESIS
+        if not has_parameter_list:
+            if identifier['value'] != CONSTRUCTOR_METHOD_NAME or self.next.type != LexerTokenType.LEFT_BRACE:
+                raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                    'fun declaration',
+                    "Expected '(' after the function name",
+                    [f"but {TokenToString(self.next.type)} was encountered"],
+                )))
+        else:
+            self.consume(LexerTokenType.LEFT_PARENTHESIS)
+        while has_parameter_list and self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
             statement = self.Statement()
             if not has_defaults:
                 assert statement['type'] in {
@@ -940,7 +1208,8 @@ class Parser:
             if self.next.type == LexerTokenType.COMMA:
                 self.advance()
             i += 1
-        self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+        if has_parameter_list:
+            self.consume(LexerTokenType.RIGHT_PARENTHESIS)
         return_expr = None
         if self.next.type == LexerTokenType.COLON:
             self.advance()
@@ -967,15 +1236,17 @@ class Parser:
             "args": args,
             "min_argc": min_argc,
             "return": return_expr,
-            "block": block
+            "block": block,
+            "instance_method": instance_method,
         }).toDict()
 
     def Expression(self):
-        return self.Level_Pipeline()
+        return self.Level_Coalesce()
 
     def Level_Pipeline(self):
-        return self.helper_BinaryExpression(self.Level_Coalesce, (
+        return self.helper_BinaryExpression(self.Level_3_Expression, (
             LexerTokenType.PIPELINE,
+            LexerTokenType.REFERENCE_PIPELINE,
         ))
 
     def Level_Coalesce(self):
@@ -1002,7 +1273,7 @@ class Parser:
         ))
 
     def Level_2_Expression(self):
-        return self.helper_BinaryExpression(self.Level_3_Expression, (
+        return self.helper_BinaryExpression(self.Level_Pipeline, (
             LexerTokenType.OPERATOR_PLUS,
             LexerTokenType.OPERATOR_MINUS
         ))
@@ -1023,11 +1294,29 @@ class Parser:
         left = next_level()
         while self.next and self.next.type in operators:
             operator = self.advance()
+            if operator.type == LexerTokenType.REFERENCE_PIPELINE:
+                if left.get('type') != LexerTokenType.IDENTIFIER:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'reference pipeline',
+                        "The left side of &> must be a variable",
+                        ["write x &> function(...) instead"],
+                    )))
+                left = doToken(ParserTokenType.REFERENCE_EXPRESSION, {
+                    'target': left,
+                }).toDict()
+                operator = LexerToken(LexerTokenType.PIPELINE, ':>', operator.line, operator.column)
             typed = False
             if self.next.type == LexerTokenType.COLON:
                 self.consume(self.next.type)
                 typed = True
-            right = next_level()
+            if operator.type in {
+                LexerTokenType.COMPARE_EQ_TYPE,
+                LexerTokenType.COMPARE_NEQ_TYPE,
+                LexerTokenType.OPERATOR_CAST_AS,
+            }:
+                right = self.Type()
+            else:
+                right = next_level()
             left = doToken(ParserTokenType.BINARY_EXPRESSION, {
                 "left": left,
                 "operator": operator.toDict(),
@@ -1088,8 +1377,19 @@ class Parser:
             elif self.next.type == LexerTokenType.LEFT_PARENTHESIS:
                 expr = self.CallExpression(expr)
             elif self.next.type == LexerTokenType.LEFT_BRACKET:
+                if expr.get('type') == LexerTokenType.IDENTIFIER:
+                    type_reference = self._tryParameterizedTypeReference(expr)
+                    if type_reference is not None:
+                        expr = type_reference
+                        continue
                 expr = self.IndexExpression(expr)
             elif self.next.type == LexerTokenType.DOT:
+                if expr.get('type') in {
+                    LexerTokenType.IDENTIFIER,
+                    ParserTokenType.TYPE_REFERENCE,
+                } and self._dot_starts_instantiation():
+                    expr = self.InstantiationExpression(expr)
+                    continue
                 self.advance() # DOT
                 # FAKE METHOD CALL
                 if self.next.type == LexerTokenType.DOT:
@@ -1125,6 +1425,134 @@ class Parser:
             else:
                 break
         return expr
+
+    def _dot_starts_instantiation(self) -> bool:
+        state = self._saveParserState()
+        try:
+            self.advance('instantiation lookahead')
+            return self.next.type == LexerTokenType.LEFT_BRACKET
+        finally:
+            self._restoreParserState(state)
+
+    def _tryParameterizedTypeReference(self, identifier: DictRepr) -> Optional[DictRepr]:
+        """Parse ``Name[types]`` only when ``.[`` follows, otherwise back off."""
+        name = identifier.get('value')
+        if not isinstance(name, str):
+            return None
+        if name not in NATI_TYPES and name not in self.declared_types and name not in self.type_alias:
+            return None
+        state = self._saveParserState()
+        try:
+            type_reference = self._parseTypeReference(name)
+            if self.next.type != LexerTokenType.DOT:
+                self._restoreParserState(state)
+                return None
+            if not self._dot_starts_instantiation():
+                self._restoreParserState(state)
+                return None
+            return type_reference
+        except Exception:
+            self._restoreParserState(state)
+            return None
+
+    def _parseTypeReference(self, name: str) -> DictRepr:
+        type_parameters: list[DictRepr] = []
+        variadic = False
+        if self.next.type == LexerTokenType.LEFT_BRACKET:
+            self.consume(LexerTokenType.LEFT_BRACKET, 'type parameters')
+            while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                if self.next.type == LexerTokenType.ELLIPSIS:
+                    self.advance('variadic type reference')
+                    variadic = True
+                    break
+                type_parameters.append(self.Type())
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    raise powang_throw(powang_error_syntax(
+                        'type parameters', "Expected ',' or ']'", [
+                            f"but {TokenToString(self.next.type)} was encountered",
+                        ]))
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+        return doToken(ParserTokenType.TYPE_REFERENCE, {
+            'name': name,
+            'type_parameters': type_parameters,
+            'variadic': variadic,
+        }).toDict()
+
+    def InstantiationExpression(self, target: DictRepr) -> DictRepr:
+        if target.get('type') == ParserTokenType.TYPE_REFERENCE:
+            type_reference = copy.deepcopy(target['value'])
+        else:
+            type_reference = {'name': target['value'], 'type_parameters': []}
+        type_name = type_reference['name']
+        line = self.next.line if self.next is not None else None
+        column = self.next.column if self.next is not None else None
+        self.consume(LexerTokenType.DOT, 'instantiation')
+        self.consume(LexerTokenType.LEFT_BRACKET, 'instantiation')
+
+        arguments: list[DictRepr] = []
+        named = False
+        positional = False
+        while self.next is not None and self.next.type != LexerTokenType.RIGHT_BRACKET:
+            if type_name == PowangMap.type:
+                value = self.Expression()
+                if self.next.type == LexerTokenType.RIGHT_ARROW:
+                    value = self.helper_KeyValuePair(value)
+                arguments.append({'name': None, 'value': value})
+                positional = True
+            elif (type_name not in NATI_TYPES or type_name == 'Project') and self.next.type == LexerTokenType.IDENTIFIER:
+                state = self._saveParserState()
+                name_node = self.Identifier()
+                if self.next.type == LexerTokenType.RIGHT_ARROW:
+                    self.advance('named argument')
+                    arguments.append({
+                        'name': name_node['value'],
+                        'value': self.Expression(),
+                    })
+                    named = True
+                    if self.next.type == LexerTokenType.COMMA:
+                        self.consume(LexerTokenType.COMMA)
+                    continue
+                self._restoreParserState(state)
+                arguments.append({'name': None, 'value': self.Expression()})
+                positional = True
+            else:
+                arguments.append({'name': None, 'value': self.Expression()})
+                positional = True
+            if self.next.type == LexerTokenType.COMMA:
+                self.consume(LexerTokenType.COMMA)
+        self.consume(LexerTokenType.RIGHT_BRACKET, 'instantiation')
+        if named and positional:
+            raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                'instantiation',
+                "Named and positional arguments cannot be mixed",
+                ["use all names or all positions, never both"],
+            )))
+        return doToken(ParserTokenType.INSTANTIATION, {
+            'type_ref': type_reference,
+            'arguments': arguments,
+            'named': named,
+            'line': line,
+            'column': column,
+        }).toDict()
+
+    @staticmethod
+    def _auto_type_node() -> DictRepr:
+        return doToken(ParserTokenType.TYPE, {
+            'value': 'auto',
+            'weak': False,
+            'const': False,
+            'error_union': False,
+            'reference': False,
+            'element_type': None,
+            'generics': [],
+            'variadic': False,
+            'alternatives': [],
+            'auto': True,
+            'line': None,
+            'column': None,
+        }).toDict()
 
     def CallExpression(self, callee: DictRepr):
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
@@ -1180,7 +1608,10 @@ class Parser:
         
     def Identifier(self):
         token = self.consume(LexerTokenType.IDENTIFIER)
-        return token.toDict(token.value)
+        result = token.toDict(token.value)
+        result['line'] = token.line
+        result['column'] = token.column
+        return result
         
     def Keyword(self):
         token = self.consume(LexerTokenType.KEYWORD)
@@ -1195,15 +1626,17 @@ class Parser:
         if self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
             self.consume(LexerTokenType.OPERATOR_ASSIGNMENT)
             expression = self.Expression()
+            self._warn_single_tuple(identifier, expression)
             return doToken(ParserTokenType.DECLARATION_INTERPRET, {
                 "identifier": identifier,
                 "expression": expression,
             }).toDict()
 
-        type = self.Type()
+        type = self.Type(pipe_can_start_member=self._type_member_context)
         if self.next.type == LexerTokenType.OPERATOR_ASSIGNMENT:
             self.consume(LexerTokenType.OPERATOR_ASSIGNMENT)
             expression = self.Expression()
+            self._warn_single_tuple(identifier, expression)
             return doToken(ParserTokenType.DECLARATION_TYPED_VAR, {
                 "identifier": identifier,
                 "type": type,
@@ -1214,6 +1647,27 @@ class Parser:
             "identifier": identifier,
             "type": type,
         }).toDict()
+
+    def _warn_single_tuple(self, identifier: DictRepr, expression: DictRepr) -> None:
+        if not isinstance(expression, dict) or expression.get('type') != ParserTokenType.INSTANTIATION:
+            return
+        value = expression.get('value')
+        if not isinstance(value, dict):
+            return
+        type_ref = value.get('type_ref')
+        if not isinstance(type_ref, dict) or type_ref.get('name') != PowangTuple.type:
+            return
+        arguments = value.get('arguments')
+        if not isinstance(arguments, list) or len(arguments) != 1:
+            return
+        name = identifier.get('value', 'value')
+        self.state.warn(
+            f"single-element tuple assigned to '{name}' has no advantage over the value itself, write {name} := <value> instead",
+            identifier.get('line'),
+            identifier.get('column'),
+            None,
+            'PW203',
+        )
 
     def Assignment(self, identifier: DictRepr):
         self.consume(LexerTokenType.OPERATOR_ASSIGNMENT)
@@ -1265,8 +1719,15 @@ class Parser:
             if self.next.type == LexerTokenType.COMMA:
                 self.advance()
         self.consume(LexerTokenType.RIGHT_BRACKET)
-        return doToken(ParserTokenType.TUPLE_EXPRESSION, {
-            "elements": elements,
+        return doToken(ParserTokenType.INSTANTIATION, {
+            'type_ref': {
+                'name': PowangTuple.type,
+                'type_parameters': [self._auto_type_node() for _ in elements],
+            },
+            'arguments': [{'name': None, 'value': element} for element in elements],
+            'named': False,
+            'line': None,
+            'column': None,
         }).toDict()
 
     def ParenthesizedExpression(self):
@@ -1277,7 +1738,47 @@ class Parser:
 
     def ContainerExpression(self):
         self.consume(LexerTokenType.LEFT_BRACKET)
-        
+
+        if self.next is not None and self.next.type == LexerTokenType.RIGHT_ARROW:
+            self.advance('empty map literal')
+            if self.next is None or self.next.type != LexerTokenType.RIGHT_BRACKET:
+                raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                    'map literal',
+                    "[>>] is only the empty map literal",
+                    ["write non-empty maps as [\"key\" >> value]"],
+                )))
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+            return doToken(ParserTokenType.INSTANTIATION, {
+                'type_ref': {'name': PowangMap.type, 'type_parameters': []},
+                'arguments': [],
+                'named': False,
+                'line': None,
+                'column': None,
+            }).toDict()
+
+        if self.next is not None and self.next.type == LexerTokenType.SLASH:
+            self.advance('set literal')
+            elements: list = []
+            while self.next is not None and self.next.type != LexerTokenType.RIGHT_BRACKET:
+                elements.append(self.Expression())
+                if self.next.type == LexerTokenType.COMMA:
+                    self.consume(LexerTokenType.COMMA)
+                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'set literal', "Expected ',' or ']' in set literal",
+                    )))
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+            return doToken(ParserTokenType.INSTANTIATION, {
+                'type_ref': {
+                    'name': PowangSet.type,
+                    'type_parameters': [self._auto_type_node()],
+                },
+                'arguments': [{'name': None, 'value': element} for element in elements],
+                'named': False,
+                'line': None,
+                'column': None,
+            }).toDict()
+
         elements: list = []
         is_map: bool = False
         while self.next is not None and self.next.type != LexerTokenType.RIGHT_BRACKET:
@@ -1296,12 +1797,23 @@ class Parser:
             # if self.next.type != LexerTokenType.RIGHT_BRACKET:
                 
         self.consume(LexerTokenType.RIGHT_BRACKET)
-        return doToken(ParserTokenType.ARRAY_EXPRESSION, {
-            "elements": elements,
-            "type": {
-                True: PowangMap.type,
-                False: PowangArray.type,
-            }[is_map]
+        if is_map:
+            return doToken(ParserTokenType.INSTANTIATION, {
+                'type_ref': {'name': PowangMap.type, 'type_parameters': []},
+                'arguments': [{'name': None, 'value': element} for element in elements],
+                'named': False,
+                'line': None,
+                'column': None,
+            }).toDict()
+        return doToken(ParserTokenType.INSTANTIATION, {
+            'type_ref': {
+                'name': PowangArray.type,
+                'type_parameters': [self._auto_type_node()],
+            },
+            'arguments': [{'name': None, 'value': element} for element in elements],
+            'named': False,
+            'line': None,
+            'column': None,
         }).toDict()
 
     def helper_getMultipleStatements(self, where: str, condition_token: LexerTokenType):
@@ -1318,102 +1830,223 @@ class Parser:
         statements = self.helper_getMultipleStatements('block expression', LexerTokenType.RIGHT_BRACE)
         return doToken(ParserTokenType.BLOCK_STATEMENT, statements).toDict()
 
-    def Type(self):
-        weak = const = False
-        error_union = False
+    def Type(self, pipe_can_start_member: bool = False):
+        """Parse a type annotation, including union alternatives.
+
+        ``pipe_can_start_member`` is enabled only for a member type inside a
+        type body, where a following ``|`` may start the next member instead of
+        another union branch.
+        """
+        return self._TypeUnion(pipe_can_start_member)
+
+    def _TypeUnion(self, pipe_can_start_member: bool = False) -> DictRepr:
+        branches: list[DictRepr] = [self._TypePrimary(pipe_can_start_member)]
+        while self.next is not None and self.next.type == LexerTokenType.PIPE:
+            if pipe_can_start_member and self._pipe_starts_member():
+                break
+            self.advance('union type')
+            branches.append(self._TypePrimary(pipe_can_start_member))
+        if len(branches) == 1:
+            return branches[0]
+        first_inner = copy.deepcopy(branches[0]['value'])
+        first_inner['alternatives'] = branches
+        return doToken(ParserTokenType.TYPE, first_inner).toDict()
+
+    def _TypePrimary(self, pipe_can_start_member: bool = False) -> DictRepr:
         reference = False
-        element_type: Optional[DictRepr] = None
-
+        weak = False
         if self.next.type == LexerTokenType.AMPERSAND:
-            self.advance('reference type')
+            self.advance('type reference')
             reference = True
-
         if self.next.type == LexerTokenType.ARROBA:
-            self.advance('type prefix')
+            self.advance('weak type')
             weak = True
 
-        type_identifier: str = self.Identifier()['value']
+        if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
+            self.advance('parenthesized type')
+            node = self.Type()
+            self.consume(LexerTokenType.RIGHT_PARENTHESIS, 'parenthesized type')
+        else:
+            start_token = self.next
+            type_identifier: str = self.Identifier()['value']
+            original_identifier = type_identifier
+            generics: list = []
+            variadic: bool = False
+            element_type: Optional[DictRepr] = None
 
-        generics: list = []
-        variadic: bool = False
-        if type_identifier in ('tup', PowangMap.type) and self.next.type == LexerTokenType.LEFT_BRACKET:
-            self.consume(LexerTokenType.LEFT_BRACKET)
-            while self.next.type != LexerTokenType.RIGHT_BRACKET:
-                if self.next.type == LexerTokenType.ELLIPSIS:
-                    self.advance('variadic type')
-                    variadic = True
-                    break
-                generics.append(self.Type())
-                if self.next.type == LexerTokenType.COMMA:
-                    self.advance()
-                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
-                    raise powang_throw(powang_error_syntax('generic type', "Expected ',' or ']' in type[...]", [
-                        f"but {TokenToString(self.next.type)} was encountered",
+            if type_identifier in ('tup', PowangMap.type) and self.next.type == LexerTokenType.LEFT_BRACKET:
+                self.consume(LexerTokenType.LEFT_BRACKET)
+                while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    if self.next.type == LexerTokenType.ELLIPSIS:
+                        self.advance('variadic type')
+                        variadic = True
+                        break
+                    generics.append(self.Type())
+                    if self.next.type == LexerTokenType.COMMA:
+                        self.advance()
+                    elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                        raise powang_throw(powang_error_syntax('generic type', "Expected ',' or ']' in type[...]", [
+                            f"but {TokenToString(self.next.type)} was encountered",
+                        ]))
+                self.consume(LexerTokenType.RIGHT_BRACKET)
+            elif type_identifier != PowangArray.type and self.next.type == LexerTokenType.LEFT_BRACKET:
+                self.consume(LexerTokenType.LEFT_BRACKET, 'type arguments')
+                while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    generics.append(self.Type())
+                    if self.next.type == LexerTokenType.COMMA:
+                        self.advance()
+                    elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'type arguments', "Expected ',' or ']' in type arguments",
+                        )))
+                self.consume(LexerTokenType.RIGHT_BRACKET)
+
+            ## `arr[element]` is the typed form. Bare `arr` is sugar for
+            ## `arr[any]`, where `any` resolves to the gradual `some` type.
+            if type_identifier == PowangArray.type and self.next is not None and self.next.type == LexerTokenType.LEFT_BRACKET:
+                self.consume(LexerTokenType.LEFT_BRACKET, 'arr element type')
+                element_type = self.Type()
+                self.consume(LexerTokenType.RIGHT_BRACKET, 'arr element type')
+
+            if reference and weak:
+                raise powang_throw(powang_error_format(
+                    "LOGIC", 'type notation', "A reference can't be weak", [
+                        "references point at an existing variable"
                     ]))
-            self.consume(LexerTokenType.RIGHT_BRACKET)
 
-        ## `arr[element]` is the typed form. Bare `arr` is sugar for
-        ## `arr[any]`, where `any` resolves to the gradual `some` type.
-        if type_identifier == PowangArray.type and self.next is not None and self.next.type == LexerTokenType.LEFT_BRACKET:
-            self.consume(LexerTokenType.LEFT_BRACKET, 'arr element type')
-            element_type = self.Type()
-            self.consume(LexerTokenType.RIGHT_BRACKET, 'arr element type')
-
-        if reference and weak:
-            raise powang_throw(powang_error_format(
-                "LOGIC", 'type notation', "A reference can't be weak", [
-                    "references point at an existing variable"
-                ]))
-
-        if weak: assert type_identifier != PowangNova.type, powang_error_format(
-            "LOGIC", 'type notation', "A nova type can't be weak", [
-                "this has no sense"
-        ])
-            
-        if self.next.type == LexerTokenType.EXCLAMATION:
-            self.advance('type postfix')
-            const = True
-
-        if reference and const:
-            raise powang_throw(powang_error_format(
-                "LOGIC", 'type notation', "A reference can't be constant", [
-                    "references point at an existing variable"
-                ]))
-
-        if type_identifier in self.type_alias:
-            alias = self.type_alias[type_identifier]
-            if weak: assert not alias['weak'], powang_error_format('LOGIC', 'type notation', 'Weak notation in a weak type alias', [
-                f"type alias {type_identifier} already refers to a weak {alias['value']}"
+            if weak: assert type_identifier != PowangNova.type, powang_error_format(
+                "LOGIC", 'type notation', "A nova type can't be weak", [
+                    "this has no sense"
             ])
-            weak = alias['weak']
-            if const: assert not alias['const'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
-                f"type alias {type_identifier} already refers to a constant {alias['value']}"
-            ])
-            const = alias['const']
-            if element_type is None and alias.get('element_type') is not None:
-                element_type = alias['element_type']
-            type_identifier = alias['value']
 
-        ## `any` is the gradual unknown used by bare `arr` sugar.
-        if type_identifier == 'any':
-            type_identifier = PowangAnyType.type
+            const = False
+            error_union = False
+            if self.next.type == LexerTokenType.EXCLAMATION:
+                self.advance('type postfix')
+                const = True
+            if self.next.type == LexerTokenType.EXCLAMATION:
+                self.advance('type inner postfix')
+                if original_identifier == PowangArray.type and isinstance(element_type, dict):
+                    element_type['value']['const'] = True
+                elif original_identifier == PowangMap.type and len(generics) >= 2:
+                    generics[1]['value']['const'] = True
+                elif original_identifier == PowangSet.type and generics:
+                    generics[0]['value']['const'] = True
 
-        ## A trailing `?` marks an error-union return annotation:
-        ## `fun find(id: int): map? { ... }` may also return `error`.
-        if self.next.type == LexerTokenType.QUESTION_MARK:
-            self.advance('type error union')
-            error_union = True
+            if original_identifier == 'tup':
+                if const:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'tuple type', "tuple types are immutable by default",
+                        ["remove the '!' qualifier from tup[...]"],
+                    )))
+                for generic in generics:
+                    inner = generic.get('value') if isinstance(generic, dict) else None
+                    if isinstance(inner, dict) and inner.get('const') and \
+                            inner.get('value') not in {PowangArray.type, PowangMap.type, PowangSet.type, PowangTuple.type}:
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'tuple type', "tuple elements are immutable by default",
+                            ["remove the '!' qualifier from the element type"],
+                        )))
+            if original_identifier == PowangMap.type and generics:
+                key_inner = generics[0].get('value') if isinstance(generics[0], dict) else None
+                if isinstance(key_inner, dict) and key_inner.get('const'):
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'map type', "map keys are immutable by default",
+                        ["did you mean map[str, int]! ?"],
+                    )))
 
-        return doToken(ParserTokenType.TYPE, {
-            "value": type_identifier,
-            "weak": weak,
-            "const": const,
-            "error_union": error_union,
-            "reference": reference,
-            "element_type": element_type,
-            "generics": generics,
-            "variadic": variadic,
-        }).toDict()
+            if reference and const:
+                raise powang_throw(powang_error_format(
+                    "LOGIC", 'type notation', "A reference can't be constant", [
+                        "references point at an existing variable"
+                    ]))
+
+            if type_identifier in self.type_alias:
+                alias = self.type_alias[type_identifier]
+                if isinstance(alias, dict) and alias.get('alternatives'):
+                    aliased_node = doToken(
+                        ParserTokenType.TYPE, copy.deepcopy(alias)
+                    ).toDict()
+                    aliased_inner = aliased_node.get('value')
+                    if isinstance(aliased_inner, dict):
+                        if weak:
+                            aliased_inner['weak'] = True
+                        if const:
+                            aliased_inner['const'] = True
+                        if error_union:
+                            aliased_inner['error_union'] = True
+                        if reference:
+                            aliased_inner['reference'] = True
+                    return aliased_node
+                if weak: assert not alias['weak'], powang_error_format('LOGIC', 'type notation', 'Weak notation in a weak type alias', [
+                    f"type alias {type_identifier} already refers to a weak {alias['value']}"
+                ])
+                weak = alias['weak']
+                if const: assert not alias['const'], powang_error_format('LOGIC', 'type notation', 'Constant notation in a constant type lias', [
+                    f"type alias {type_identifier} already refers to a constant {alias['value']}"
+                ])
+                const = alias['const']
+                if element_type is None and alias.get('element_type') is not None:
+                    element_type = alias['element_type']
+                type_identifier = alias['value']
+
+            ## `any` is the gradual unknown used by bare `arr` sugar.
+            if type_identifier == 'any':
+                type_identifier = PowangAnyType.type
+
+            ## A trailing `?` marks an error-union return annotation:
+            ## `fun find(id: int): map? { ... }` may also return `error`.
+            if self.next.type == LexerTokenType.QUESTION_MARK:
+                self.advance('type error union')
+                error_union = True
+
+            node = doToken(ParserTokenType.TYPE, {
+                "value": type_identifier,
+                "weak": weak,
+                "const": const,
+                "error_union": error_union,
+                "reference": reference,
+                "element_type": element_type,
+                "generics": generics,
+                "variadic": variadic,
+                "alternatives": [],
+                "auto": type_identifier == 'auto',
+                "line": start_token.line if start_token is not None else None,
+                "column": start_token.column if start_token is not None else None,
+            }).toDict()
+
+        inner = node.get('value')
+        if isinstance(inner, dict):
+            if reference:
+                inner['reference'] = True
+            if weak:
+                inner['weak'] = True
+            if self.next is not None and self.next.type == LexerTokenType.EXCLAMATION:
+                self.advance('type postfix')
+                inner['const'] = True
+            if self.next is not None and self.next.type == LexerTokenType.QUESTION_MARK:
+                self.advance('type error union')
+                inner['error_union'] = True
+        return node
+
+    def _pipe_starts_member(self) -> bool:
+        """Look ahead past ``|`` to decide between a union and a new member."""
+        state = self._saveParserState()
+        try:
+            self.advance('member lookahead')
+            if self.next.type in {
+                LexerTokenType.PIPE,
+                LexerTokenType.OPERATOR_PLUS,
+                LexerTokenType.OPERATOR_MINUS,
+            }:
+                return True
+            if self.next.type == LexerTokenType.IDENTIFIER:
+                self.advance('member lookahead')
+                return self.next.type == LexerTokenType.COLON
+            return False
+        finally:
+            self._restoreParserState(state)
+
 
     def helper_KeyValuePair(self, key: DictRepr):
         self.consume(LexerTokenType.RIGHT_ARROW)
@@ -1438,11 +2071,11 @@ class Parser:
                 return self.StringLiteral()
             case LexerTokenType.INTERPOLATED_STRING_LITERAL:
                 return self.InterpolatedStringLiteral()
-        raise powang_throw(powang_error_syntax_unexpected_token(
+        raise powang_throw(self._syntax_at_current(powang_error_syntax_unexpected_token(
             where,
             LexerTokenType.toStr(self.next.type),
             'literal',
-        ))
+        )))
 
     def NovaLiteral(self):
         token = self.consume(LexerTokenType.NOVA_LITERAL)
@@ -1571,6 +2204,16 @@ class Parser:
         flush_text()
         return doToken(ParserTokenType.INTERPOLATED_STRING, {'parts': parts}).toDict()
 
+    def _syntax_at_current(self, error: PowangError) -> PowangError:
+        token = self.next
+        if token is None:
+            return error
+        return powang_error_with_position(
+            error,
+            (token.line + 1) if getattr(token, 'line', None) is not None else None,
+            getattr(token, 'column', None),
+        )
+
     def advance(self, where: Optional[str] = None):
         return self.consume(self.next.type, where)
 
@@ -1579,10 +2222,14 @@ class Parser:
         assert token is not None, powang_error_syntax_unexpected_end(None, self.tokenizer)
 
         if token.type != token_type:
-            raise powang_throw(powang_error_syntax_unexpected_token(
-                where,
-                f"{LexerTokenType.toStr(token.type)}",
-                f"{LexerTokenType.toStr(token_type)}",
+            raise powang_throw(powang_error_with_position(
+                powang_error_syntax_unexpected_token(
+                    where,
+                    f"{LexerTokenType.toStr(token.type)}",
+                    f"{LexerTokenType.toStr(token_type)}",
+                ),
+                (token.line + 1) if token.line is not None else None,
+                token.column,
             ))
 
         self.next = self.tokenizer.getNextToken()
@@ -1607,4 +2254,9 @@ class Parser:
             'const': const,
             'error_union': False,
             'reference': None,
+            'element_type': None,
+            'generics': [],
+            'variadic': False,
+            'alternatives': [],
+            'auto': False,
         }).toDict()

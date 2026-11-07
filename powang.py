@@ -1,8 +1,10 @@
 from src import *
 from src.state import fresh_state, get_state, set_state
 from src.builtins.tasks import shutdown_state_tasks
-from src.stdlib_http_server import shutdown_state_servers
-from src.stdlib_env import set_argv
+from src.stdlib.stdlib_http_server import shutdown_state_servers
+from src.stdlib.stdlib_env import set_argv
+from src.config import load_config, load_project_config
+from src.module_loader import find_entry_module
 from src.typecheck import check_source
 from sys import argv, exit as sys_exit, stdin
 import sys as _sys
@@ -21,6 +23,7 @@ def print_usage():
     print('    --ast output.json       Dumps the ast tree into a json.')
     print('    --check                 Parse and type-check only, do not execute.')
     print('    --no-check              Skip static type checking before execution.')
+    print('    --no-warnings           Do not print non-fatal warnings.')
     print('    --debug                 Print a full traceback for internal errors.')
     print('    --allow-system          Allow system() while an HTTP server is running.')
     ## `--help` intentionally exits with status 1, as documented above.
@@ -75,6 +78,7 @@ def arguments_handler(args: list[str]):
     debug: bool = False
     check_only: bool = False
     no_check: bool = False
+    no_warnings: bool = False
     allow_system: bool = False
     script_args: list[str] = []
 
@@ -94,6 +98,8 @@ def arguments_handler(args: list[str]):
                 check_only = True
             elif arg == 'no-check':
                 no_check = True
+            elif arg == 'no-warnings':
+                no_warnings = True
             elif arg == 'debug':
                 debug = True
             elif arg == 'allow-system':
@@ -116,9 +122,33 @@ def arguments_handler(args: list[str]):
         raise powang_throw(powang_error_format('USAGE', None, 'Conflicting flags', [
             "--check and --no-check cannot be used together"
         ]))
-    return input_file, ast_output, debug, check_only, no_check, script_args, allow_system
+    return input_file, ast_output, debug, check_only, no_check, no_warnings, script_args, allow_system
+
+def run_project() -> int:
+    root = Path.cwd()
+    state = fresh_state()
+    state.paths['ABSOLUTE'] = INTERPRETER_PATH
+    state.paths['RELATIVE'] = root
+    state.warnings_enabled = True
+    if not load_project_config(state, None):
+        raise powang_throw(powang_error_format(
+            'USAGE', 'run', 'project.po is required for powang run',
+        ))
+    entry = find_entry_module(root)
+    set_state(state)
+    set_argv([])
+    content = get_file_content(str(entry))
+    interpret_program(content, None, check=True, state=state)
+    return 0
+
 
 def main(args: list[str]):
+    if args and args[0] == 'run':
+        if len(args) != 1:
+            raise powang_throw(powang_error_format(
+                'USAGE', 'run', 'powang run does not accept flags or arguments',
+            ))
+        return run_project()
     result = arguments_handler(args)
     if isinstance(result, int):
         if result == 0:
@@ -126,13 +156,28 @@ def main(args: list[str]):
             repl_state = fresh_state()
             repl_state.paths['ABSOLUTE'] = INTERPRETER_PATH
             repl_state.paths['RELATIVE'] = INTERPRETER_PATH
+            repl_state.warnings_enabled = '--no-warnings' not in args
+            repl_state.allow_system = allow_system if 'allow_system' in locals() else repl_state.allow_system
+            load_project_config(repl_state, None)
+            if repl_state.project_value is None:
+                load_config(repl_state, None)
             set_state(repl_state)
             set_argv([])
             return initialize_repl(repl_state)
         elif result == 1:
             return print_usage()
 
-    input_file, ast_output, debug, check_only, no_check, script_args, allow_system = result
+    input_file, ast_output, debug, check_only, no_check, no_warnings, script_args, allow_system = result
+
+    if input_file is None and not check_only and ast_output is None:
+        repl_state = fresh_state()
+        repl_state.paths['ABSOLUTE'] = INTERPRETER_PATH
+        repl_state.paths['RELATIVE'] = INTERPRETER_PATH
+        repl_state.warnings_enabled = not no_warnings
+        repl_state.allow_system = allow_system
+        set_state(repl_state)
+        set_argv([])
+        return initialize_repl(repl_state)
 
     if check_only and input_file is None:
         raise powang_throw(powang_error_format('USAGE', None, '--check requires an input file', [
@@ -144,6 +189,9 @@ def main(args: list[str]):
     ## run in the same process.
     run_state = fresh_state()
     run_state.allow_system = allow_system
+    run_state.warnings_enabled = not no_warnings
+    if not load_project_config(run_state, input_file):
+        load_config(run_state, input_file)
     run_state.paths['ABSOLUTE'] = INTERPRETER_PATH
     if input_file:
         run_state.paths['RELATIVE'] = Path(input_file).resolve()
@@ -156,6 +204,7 @@ def main(args: list[str]):
         content = get_file_content(input_file)
         if check_only:
             type_errors = check_source(content, str(Path(input_file).resolve()))
+            run_state.emit_warnings()
             if type_errors:
                 for type_error in type_errors:
                     print(str(type_error))

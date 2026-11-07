@@ -2,6 +2,76 @@
 
 All notable changes to powang are documented here.
 
+## 0.8.0
+
+### Added
+
+- Canonical construction with `Type.[args]` for user types and native types.
+- Named constructor arguments with `name >> value`, all-or-nothing mixing rules,
+  duplicate and unknown name checks.
+- Access defaults: `type T[+]` is public by default and `type T[-]` is private by
+  default. Redundant explicit specifiers produce a warning.
+- Constructor members with `|`, including generated constructors and the
+  zero-parameter constructor body hook.
+- Write-once constructor parameters using `name: type!`.
+- Native construction for `int`, `num`, `str`, `bool`, `nova`, `arr`, `tup`,
+  `map` and `set`.
+- Structural inference for native construction, including union element types
+  such as `arr[int | num]`.
+- Union type annotations with flattening, deduplication and per-branch
+  assignability.
+- `typedeep(value)` for structural type inspection. `typeof` remains shallow.
+- `--no-warnings` and a warning sink shared by the parser, checker and runtime.
+- Native type namespaces for `str`, `arr`, `map`, `tup`, `set`, `file` and
+  `task`.
+- Static user methods called as `Type.method`.
+- Explicit instance method markers with `fun this.name` and `fun .name`.
+- Immediate type checker errors for unknown native members and user members.
+- Stronger inference for native methods, tuple indexed reads, set unions, file
+  methods and task methods.
+- Deep copying for plain function parameters.
+- Container structure and element locks through outer and inner `!` qualifiers.
+- Empty literals `[>>]` and `[/]`, plus set construction with `set[...]`.
+- Map index insertion through `map[key] = value`.
+- Generic user types with `type Box[T]` and `type Box[+][T]`.
+- Single-element tuple declaration warnings.
+- Tuple qualifier and map key qualifier errors.
+- `&>` reference pipeline sugar and optional parentheses for pipeline call
+  targets.
+- `strings.split` now has the default separator `" "`.
+
+### Changed
+
+- Array, map and tuple literals now desugar to canonical construction nodes.
+- Mixed arrays infer a union instead of `mixed`.
+- `python -O` no longer disables the new language checks.
+- `.[...] as T` remains valid as the legacy positional form.
+
+### Fixed
+
+- Copying an object no longer shares `PropertyConst` and `PropertyWeak` state
+  between instances. Write-once constructor members now work for every instance.
+- Pipeline precedence now allows `hello(name) :> strings.upper + "!"`.
+
+## 0.7.0
+
+### Added
+
+- Grammar driven `TypeSpec` representation, structural casts and rest tuple
+  templates.
+
+## 0.6.2
+
+### Added
+
+- `tup[int, ...]` type templating in casts and annotations.
+
+## 0.6.0
+
+### Changed
+
+- Bool, task and `any` type cleanup that prepared the structural type system.
+
 ## 0.5.0
 
 ### Changed

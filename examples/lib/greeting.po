@@ -7,5 +7,5 @@ export fun hello(name: str): str {
 }
 
 export fun shout(name: str): str {
-    return strings.upper(hello(name)) + "!";
+    return hello(name) :> strings.upper + "!";
 }

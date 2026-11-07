@@ -24,6 +24,7 @@ BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
 
     # INFO
     'typeof': (1,  1, builtin_typeof),
+    'typedeep': (1, 1, builtin_typedeep),
 
     # ITERABLE
     'size'  : (1, -1, builtin_size),

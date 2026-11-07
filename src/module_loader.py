@@ -18,8 +18,9 @@ from .error import (
     PowangError,
     powang_error_format,
     powang_error_from_exception,
+    powang_throw,
 )
-from .parser import Parser
+from .parser import Parser, ParserTokenType
 from .powang_types import PowangModule
 from .state import get_state
 
@@ -82,6 +83,10 @@ class ModuleLoader:
 
     def resolve(self, kind: str, name: str, base: Path | None = None) -> Path:
         if kind == 'name':
+            for base_path in self.state.module_search_paths:
+                candidate = base_path / 'modules' / name
+                if candidate.exists():
+                    return candidate.resolve()
             candidate = self.interpreter_path.parent / 'modules' / name
         else:
             importing = base if base is not None else self.default_base()
@@ -209,6 +214,36 @@ class ModuleLoader:
         wrapped.cause = error
         setattr(wrapped, '_module_error', True)
         return wrapped
+
+
+def find_entry_module(root: Path | str) -> Path:
+    root = Path(root).resolve()
+    candidates: list[Path] = []
+    for path in sorted(root.iterdir()):
+        if not path.is_file() or path.suffix != '.po':
+            continue
+        try:
+            content = _read_source(path)
+            program_ast = Parser(content, source_path=path).parse()
+        except Exception:
+            continue
+        if not program_ast or not isinstance(program_ast[0], dict):
+            continue
+        first = program_ast[0]
+        if first.get('type') != ParserTokenType.MODULE_DECLARATION:
+            continue
+        value = first.get('value')
+        if not isinstance(value, dict):
+            continue
+        if value.get('identifier', {}).get('value') != 'main':
+            continue
+        candidates.append(path)
+    if len(candidates) != 1:
+        raise powang_throw(powang_error_format(
+            'USAGE', 'run', 'expected exactly one module named main in the project directory',
+            [f"found {len(candidates)}"],
+        ))
+    return candidates[0]
 
 
 def get_loader() -> ModuleLoader:

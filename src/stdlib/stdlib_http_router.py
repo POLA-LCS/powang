@@ -30,8 +30,8 @@ import weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from .state import get_state
-from .powang_types import PowangTypeBase
+from ..state import get_state
+from ..powang_types import PowangTypeBase
 
 SUPPORTED_METHODS: frozenset[str] = frozenset({
     'GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS',

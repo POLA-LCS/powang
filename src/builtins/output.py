@@ -13,12 +13,13 @@ def builtin_print(*args: PowangAny) -> PowangInteger:
         casted_arg = explicitCastString(arg)
         if arg.type == PowangObjectType.type and casted_arg is None:
             casted_arg = PowangString(f"<type: {arg.type_name}>")
-        assert casted_arg is not None, powang_error_invalid_cast(
-            "function: print",
-            PowangString.type,
-            arg.type,
-            True,
-        )
+        if casted_arg is None:
+            raise powang_throw(powang_error_invalid_cast(
+                "function: print",
+                PowangString.type,
+                arg.type,
+                True,
+            ))
         print(casted_arg.data, sep='', end='')
     return PowangInteger(len(args))
 
@@ -40,9 +41,11 @@ def builtin_format(
     
     string_args: list[str] = []
     for arg in args:
-        assert (casted := explicitCastString(arg)) is not None, powang_error_invalid_cast(
-            'function: format', PowangString.type, arg.type, True
-        )
+        casted = explicitCastString(arg)
+        if casted is None:
+            raise powang_throw(powang_error_invalid_cast(
+                'function: format', PowangString.type, arg.type, True
+            ))
         string_args.append(casted.data)
 
     ITERABLE_TYPES = {PowangArray.type, PowangString.type, PowangMap.type}
@@ -51,7 +54,8 @@ def builtin_format(
         index = int(match.group(1))
         sep = match.group(2)
         
-        assert (0 <= index < len(args)), powang_error_index_out_of_range(index, len(args))
+        if not (0 <= index < len(args)):
+            raise powang_throw(powang_error_index_out_of_range(index, len(args)))
 
         arg = args[index]
         if arg.type not in ITERABLE_TYPES:
@@ -60,16 +64,19 @@ def builtin_format(
 
         items: list[str] = []
         for item in arg.iterate().data:
-            assert (casted := explicitCastString(item)) is not None, powang_error_invalid_cast(
-                'function: format', PowangString.type, item.type, True
-            )
+            casted = explicitCastString(item)
+            if casted is None:
+                raise powang_throw(powang_error_invalid_cast(
+                    'function: format', PowangString.type, item.type, True
+                ))
             items.append(casted.data)
         return sep.join(items)
     
     def replace_handler(match: re.Match[str]):
         index = int(match.group(1))
         
-        assert (0 <= index < len(args)), powang_error_index_out_of_range(index, len(args))
+        if not (0 <= index < len(args)):
+            raise powang_throw(powang_error_index_out_of_range(index, len(args)))
 
         return string_args[index]
 

@@ -29,6 +29,19 @@ class TypeSpecParsingTests(unittest.TestCase):
     def test_any_alias(self) -> None:
         self.assertEqual(ts.render(ts.type_of_str("any")), "any")
 
+    def test_union_round_trip(self) -> None:
+        spec = ts.type_of_str("int | num | str")
+        self.assertIs(spec.kind, ts.Kind.UNION)
+        self.assertEqual(ts.render(spec), "int | num | str")
+
+    def test_union_flattens_and_deduplicates(self) -> None:
+        spec = ts.union([
+            ts.type_of_str("int | num"),
+            ts.type_of_str("num"),
+            ts.type_of_str("str"),
+        ])
+        self.assertEqual(ts.render(spec), "int | num | str")
+
 
 class TypeSpecRelationTests(unittest.TestCase):
     def test_rest_tuple_accepts_fixed(self) -> None:
@@ -50,6 +63,14 @@ class TypeSpecRelationTests(unittest.TestCase):
 
     def test_join_mixed(self) -> None:
         self.assertEqual(ts.render(ts.join(ts.type_of_str("int"), ts.type_of_str("str"))), "mixed")
+
+    def test_union_has_no_unrelated_numeric_coercion(self) -> None:
+        self.assertTrue(ts.assignable(ts.type_of_str("int | num"), ts.type_of_str("num")))
+        self.assertFalse(ts.assignable(ts.type_of_str("int | str"), ts.type_of_str("num")))
+
+    def test_source_union_requires_all_branches(self) -> None:
+        self.assertTrue(ts.assignable(ts.type_of_str("num"), ts.type_of_str("int | num")))
+        self.assertFalse(ts.assignable(ts.type_of_str("str"), ts.type_of_str("int | num")))
 
 
 if __name__ == "__main__":

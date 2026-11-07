@@ -19,11 +19,23 @@ from __future__ import annotations
 
 import os
 from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Optional
 
 from .powang_types import *
 from .scopestack import ScopeType
+
+
+@dataclass(frozen=True)
+class WarningRecord:
+    """A non-fatal diagnostic produced by the parser, checker or runtime."""
+
+    message: str
+    line: Optional[int] = None
+    column: Optional[int] = None
+    end_column: Optional[int] = None
+    code: str = 'PW200'
 
 
 class ScopeState:
@@ -177,14 +189,11 @@ def copy_for_task(value: PowangAny) -> PowangAny:
     """
     copied = PowangCopyConstruct(value)
     if value.type == PowangAnyType.type and value.any:
-        ## A weak/inferred value stores its concrete payload in `data`.
-        ## Recurse through a concrete wrapper so nested containers copy too.
-        try:
-            concrete = PowangTypeMap(value.any)(value.data)
-        except (KeyError, TypeError):
-            pass
-        else:
+        ## A weak or union value stores its concrete payload beside the holder.
+        concrete = PowangUnwrapAny(value)
+        if concrete is not value:
             copied.data = copy_for_task(concrete).data
+            copied.concrete_value = PowangCopyConstruct(concrete)
     elif value.type == PowangArray.type:
         copied.data = [copy_for_task(item) for item in value.data]
     elif value.type == PowangMap.type:
@@ -244,9 +253,72 @@ class InterpreterState:
         self.http_servers: dict[int, object] = {}
         self.http_next_server_id: int = 1
 
-        ## Observability and hardening (ADR-0001 W36/W37).
+        ## Opaque Python object handles.
+        self.handles: dict[int, Any] = {}
+        self.next_handle_id: int = 1
+
+        ## Extern configuration.
+        self.allowed_extern_modules: set[str] = set()
+        self.module_search_paths: list[Path] = []
+        self.extern_module_cache: dict[str, Any] = {}
+        self.host_callbacks: dict[str, Any] = {}
+        self.project_value: Optional[PowangProject] = None
         self.log_level: str = os.environ.get("POWANG_LOG_LEVEL", "info").lower()
         self.allow_system: bool = os.environ.get("POWANG_ALLOW_SYSTEM") == "1"
+
+        ## Non-fatal diagnostics collected during one run. `--no-warnings`
+        ## toggles printing without changing what is collected, so the LSP can
+        ## still publish them.
+        self.warnings: list[WarningRecord] = []
+        self.warnings_enabled: bool = True
+
+    def register_handle(self, obj: Any) -> int:
+        handle_id = self.next_handle_id
+        self.next_handle_id += 1
+        self.handles[handle_id] = obj
+        return handle_id
+
+    def resolve_handle(self, handle_id: int) -> Any:
+        if handle_id not in self.handles:
+            raise powang_throw(powang_error_format(
+                'HANDLE', None, 'Unknown handle', [
+                    f"handle {handle_id} does not exist in this state",
+                ],
+            ))
+        return self.handles[handle_id]
+
+    def close(self) -> None:
+        streams = self.file_streams
+        while streams:
+            _, stream = streams.popitem()
+            try:
+                stream.close()
+            except OSError:
+                pass
+        self.handles.clear()
+
+    def warn(self, message: str, line: Optional[int] = None,
+             column: Optional[int] = None, end_column: Optional[int] = None,
+             code: str = 'PW200') -> None:
+        """Record a warning once per run, deduplicated by text and position."""
+        record = WarningRecord(message, line, column, end_column, code)
+        if record not in self.warnings:
+            self.warnings.append(record)
+
+    def take_warnings(self) -> list[WarningRecord]:
+        records = list(self.warnings)
+        self.warnings.clear()
+        return records
+
+    def emit_warnings(self, stream=None) -> None:
+        """Print collected warnings to stderr unless warnings are disabled."""
+        import sys
+        records = self.take_warnings()
+        if not self.warnings_enabled:
+            return
+        target = stream if stream is not None else sys.stderr
+        for record in records:
+            print(f"[WARNING] {record.message}", file=target)
 
     def clone_for_task(self) -> 'InterpreterState':
         """Build the shared-nothing state a spawned task runs in.
@@ -269,7 +341,7 @@ class InterpreterState:
 
         global_variables = source_scope.variables[0] if source_scope.variables else {}
         for name, value in global_variables.items():
-            if value.type in {PowangTask.type, PowangFileStream.type}:
+            if value.type in {PowangTask.type, PowangFileStream.type, PowangHandle.type}:
                 raise powang_throw(powang_error_format(
                     'TASK',
                     'spawn',
@@ -307,6 +379,7 @@ class InterpreterState:
         clone.task_pool = self.task_pool
         clone.log_level = self.log_level
         clone.allow_system = self.allow_system
+        clone.warnings_enabled = self.warnings_enabled
         return clone
 
     def close(self) -> None:

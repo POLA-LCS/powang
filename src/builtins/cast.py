@@ -12,10 +12,22 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
         return cast_result
 
     if left.type == PowangAnyType.type:
-        defined_some = PowangTypeMap(left.any)(left.data)
-        assert (cast_result := explicitCastString(defined_some)) is not None, powang_error_invalid_cast(
-            None, PowangString.type, left.type, True
-        )
+        concrete = PowangUnwrapAny(left)
+        if concrete is not left:
+            casted_concrete = explicitCastString(concrete)
+            if casted_concrete is not None:
+                return casted_concrete
+            if concrete.type == PowangObjectType.type:
+                return PowangString(f"<type: {concrete.type_name}>")
+            return None
+        defined_some = PowangUnwrapAny(left)
+        if defined_some is left:
+            return None
+        cast_result = explicitCastString(defined_some)
+        if cast_result is None:
+            raise powang_throw(powang_error_invalid_cast(
+                None, PowangString.type, left.type, True
+            ))
         return cast_result
     if left.type == PowangInteger.type or left.type == PowangNumber.type:
         return PowangString(str(left.data))
@@ -28,6 +40,20 @@ def explicitCastString(left: PowangAny) -> Optional[PowangString]:
             if cast_result is None: return None
             result_list.append(cast_result.data)
         return PowangString('[' + ', '.join(result_list) + ']')
+    if left.type == PowangSet.type:
+        result_list: list[str] = []
+        for item in left.data.keys():
+            cast_result = explicitCastString(item)
+            if cast_result is None:
+                return None
+            result_list.append(cast_result.data)
+        return PowangString('[/' + ', '.join(result_list) + ']')
+    if left.type == PowangHandle.type:
+        return PowangString(f"<handle: {left.data}>")
+    if left.type == PowangHandle.type:
+        return PowangString(f"<handle: {left.data}>")
+    if left.type == PowangProject.type:
+        return PowangString("<Project>")
     if left.type == PowangTuple.type:
         result_list: list[str] = []
         for item in left.data:
@@ -99,6 +125,15 @@ def explicitCastArray(left: PowangAny) -> Optional[PowangArray]:
         for key, value in left.data.items():
             result.append(PowangTuple([key, value]))
         return PowangArray(result)
+    return None
+
+
+def explicitCastSet(left: PowangAny) -> Optional[PowangSet]:
+    assert left.defined, powang_error_undefined_reference('explicit cast', 'left operand')
+    if (cast_result := PowangSet.cast(left)) is not None:
+        return cast_result
+    if not left.weak.has_value or left.type == PowangNova.type:
+        return PowangSet()
     return None
 
 
@@ -183,7 +218,7 @@ def cast_to_spec(left: PowangAny, target: ts.TypeSpec, mode: str = 'explicit', d
         raise powang_throw(powang_error_format(
             'RUNTIME', 'explicit cast', 'cast nesting too deep', []))
     if left.type == PowangAnyType.type:
-        left = PowangTypeMap(left.any)(left.data)
+        left = PowangUnwrapAny(left)
     if left.type == PowangReference.type:
         left = left.get()
     if not left.defined:
@@ -193,9 +228,22 @@ def cast_to_spec(left: PowangAny, target: ts.TypeSpec, mode: str = 'explicit', d
     if left.type == PowangNova.type or not left.weak.has_value:
         return _nova_to_spec(target)
 
+    if target.name == 'any':
+        return PowangCopyConstruct(left)
+
     if target.kind is ts.Kind.FUNCTION:
         if left.type == PowangFunction.type:
             return PowangCopyConstruct(left)
+        return None
+
+    if target.kind is ts.Kind.UNION:
+        for branch in target.args:
+            try:
+                converted = cast_to_spec(left, branch, mode, depth + 1)
+            except PowangError:
+                continue
+            if converted is not None:
+                return converted
         return None
 
     if target.nominal:
@@ -211,6 +259,10 @@ def cast_to_spec(left: PowangAny, target: ts.TypeSpec, mode: str = 'explicit', d
             items = _scalar_sequence(left)
         if items is None:
             return None
+        if not target.args:
+            if target.name == PowangTuple.type:
+                return PowangTuple(list(items))
+            return PowangArray(list(items))
         specs = _element_specs(target, len(items))
         converted = [cast_to_spec(item, spec, mode, depth + 1) for item, spec in zip(items, specs)]
         if any(item is None for item in converted):
@@ -223,6 +275,8 @@ def cast_to_spec(left: PowangAny, target: ts.TypeSpec, mode: str = 'explicit', d
         entries = _source_entries(left)
         if entries is None:
             return None
+        if not target.args:
+            return PowangMap({key: value for key, value in entries})
         key_spec = target.args[0] if len(target.args) > 0 else ts.TypeSpec(name='any')
         value_spec = target.args[1] if len(target.args) > 1 else ts.TypeSpec(name='any')
         result = PowangMap()
@@ -246,6 +300,12 @@ def _scalar_sequence(left: PowangAny):
 def _nova_to_spec(target: ts.TypeSpec):
     if target.weak or target.name == PowangNova.type:
         return PowangNova()
+    if target.kind is ts.Kind.UNION:
+        for branch in target.args:
+            converted = _nova_to_spec(branch)
+            if converted is not None:
+                return converted
+        return None
     head = ts.HEADS.get(target.name)
     if head is None:
         return None
@@ -257,6 +317,8 @@ def _nova_to_spec(target: ts.TypeSpec):
 
 
 def can_cast(target: ts.TypeSpec, source_type: str) -> bool:
+    if target.kind is ts.Kind.UNION:
+        return any(can_cast(branch, source_type) for branch in target.args)
     head = ts.HEADS.get(target.name)
     if head is None:
         return False
@@ -288,6 +350,8 @@ def explicitCast(type, left: PowangAny):
             return explicitCastArray(left)
         case PowangMap.type:
             return explicitCastMap(left) or PowangMap.cast(left)
+        case PowangSet.type:
+            return explicitCastSet(left)
         case PowangTuple.type:
             return explicitCastTuple(left)
     return None

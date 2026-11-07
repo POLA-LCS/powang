@@ -71,7 +71,7 @@ class PowangError(AssertionError):
         """Return a copy carrying a source line, keeping the rendered text stable."""
         if line is None:
             return self
-        return PowangError(
+        copy = PowangError(
             self.kind,
             self.message,
             self.details,
@@ -82,6 +82,10 @@ class PowangError(AssertionError):
             self.cause,
             text=f"ln: {line} | {str(self)}",
         )
+        end_column = getattr(self, 'end_column', None)
+        if end_column is not None:
+            copy.end_column = end_column
+        return copy
 
 
 def powang_error_from_exception(exc: BaseException) -> Optional[PowangError]:
@@ -140,6 +144,22 @@ def powang_error_syntax(
     if messages is None:
         messages = []
     return powang_error_format('SYNTAX', where, resume, messages)
+
+
+def powang_error_with_position(
+    error: PowangError,
+    line: Optional[int],
+    column: Optional[int],
+    end_column: Optional[int] = None,
+) -> PowangError:
+    """Attach a precise source position to an existing diagnostic."""
+    if line is not None:
+        error.line = line
+    if column is not None:
+        error.column = column
+    if end_column is not None:
+        error.end_column = end_column
+    return error
 
 
 def powang_error_syntax_unexpected_end(

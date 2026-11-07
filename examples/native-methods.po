@@ -1,0 +1,48 @@
+## Native type methods, set values, reference pipelines and container locks.
+
+values := [1, 2];
+values &> arr.push(3);
+values &> arr.add([4, 5]);
+println(values);
+
+copy := values :> arr.push(6);
+println(values);
+println(copy);
+
+names := ["Ada", "Grace"];
+names &> arr.put(1, "Linus");
+names &> arr.popval("Ada");
+println(names);
+
+text := "a b c";
+println(text :> str.div(" "));
+println("ab" :> str.add("cd"));
+println("ab" :> str.reverse);
+
+settings := [>>];
+settings["debug"] = true;
+settings["retries"] = 3;
+println(map.has(settings, "debug"));
+println(map.get(settings, "missing", 0));
+println(map.keys(settings));
+
+unique := [/1, 2, 2, 3];
+println(unique);
+println(set.has(unique, 2));
+union := set.union(unique, [/3, 4]);
+println(union);
+
+pair := .[1, 2];
+println(tup.get(pair, 0));
+println(tup.add(pair, .[3]));
+
+locked: map[str, int]! = ["a" >> 1];
+locked["a"] = 2;
+println(locked["a"]);
+
+type Box[+][T] {
+    | value: T;
+}
+
+box := Box[int].[5];
+println(box.value);

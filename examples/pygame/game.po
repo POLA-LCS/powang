@@ -1,0 +1,14 @@
+module main;
+
+use ".\\lib\\pygame" as pygame;
+
+fun commands(width: int, height: int): arr {
+    return [
+        ["clear", 0, 0, 0],
+        ["rect", 10, 20, 30, 40, 255, 0, 0]
+    ];
+}
+
+fun main(): int {
+    return 0;
+}

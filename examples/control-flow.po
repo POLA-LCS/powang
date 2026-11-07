@@ -21,22 +21,22 @@ print("\n");
 numbers := [10 20 30];
 
 ## Typed iterator
-for num: int >> numbers {
-    print(num);
+for n: int >> numbers {
+    print(n);
     print(" ");
 }
 print("\n");
 
 ## Bare identifier, implicitly weakly typed
-for num >> numbers {
-    print(num);
+for n >> numbers {
+    print(n);
     print(" ");
 }
 print("\n");
 
 ## Filtered iteration
-for num >> numbers if num > 15 {
-    print(num);
+for n >> numbers if n > 15 {
+    print(n);
     print(" ");
 }
 print("\n");

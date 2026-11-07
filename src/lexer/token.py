@@ -71,6 +71,8 @@ class LexerTokenType(TokenTypeBase):
     AND  = auto() # &&
     AMPERSAND = auto() # &
     OR = auto() # ||
+    PIPE = auto() # |
+    REFERENCE_PIPELINE = auto() # &>
     PIPELINE = auto() # :>
 
     # Extra
@@ -85,6 +87,7 @@ class ParserTokenType(TokenTypeBase):
     CALL_EXPRESSION         = auto()
     BLOCK_STATEMENT         = auto()
     TYPE                    = auto()
+    TYPE_REFERENCE          = auto()
     WEAK_TYPE               = auto()
     PAIR_TYPE_IDENTIFIER    = auto()
     DECLARATION_TYPED_VAR   = auto()
@@ -120,6 +123,8 @@ class ParserTokenType(TokenTypeBase):
     NAMED_ARGUMENT           = auto()
     PIPELINE_EXPRESSION      = auto()
     CONST_DECLARATION        = auto()
+    MODULE_DECLARATION       = auto()
+    INSTANTIATION            = auto()
 
 def TokenToString(token: TokenTypeBase):
     if isinstance(token, LexerTokenType):
@@ -130,9 +135,12 @@ TokenType = LexerTokenType | ParserTokenType
 DictRepr = dict[str | TokenType, Any]
 
 class TokenBase:
-    def __init__(self, type: TokenTypeBase, value):
+    def __init__(self, type: TokenTypeBase, value, line: Optional[int] = None,
+                 column: Optional[int] = None):
         self.type = type
         self.value = value
+        self.line = line
+        self.column = column
         
     def __repr__(self):
         return f'({self.type.toStr(self.type)}: {self.value})'
@@ -147,8 +155,9 @@ class LexerToken(TokenBase):
     type: LexerTokenType
     value: str
 
-    def __init__(self, type: LexerTokenType, value: Optional[str]):
-        super().__init__(type, value)
+    def __init__(self, type: LexerTokenType, value: Optional[str],
+                 line: Optional[int] = None, column: Optional[int] = None):
+        super().__init__(type, value, line, column)
         
 class ParserToken(TokenBase):
     type: ParserTokenType
@@ -157,8 +166,9 @@ class ParserToken(TokenBase):
     def __init__(self, type: ParserTokenType, value: DictRepr):
         super().__init__(type, value)
 
-def doToken(token_type: LexerTokenType | ParserTokenType, value: Any):
+def doToken(token_type: LexerTokenType | ParserTokenType, value: Any,
+            line: Optional[int] = None, column: Optional[int] = None):
     if isinstance(token_type, LexerTokenType):
-        return LexerToken(LexerTokenType(token_type), value) # type: ignore
+        return LexerToken(LexerTokenType(token_type), value, line, column) # type: ignore
     elif isinstance(token_type, ParserTokenType):
         return ParserToken(ParserTokenType(token_type), value) # type: ignore

@@ -30,7 +30,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from .state import get_state
+from ..state import get_state
 
 DEFAULT_WORKERS: int = 4
 DEFAULT_MAX_BODY_BYTES: int = 1024 * 1024

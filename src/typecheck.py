@@ -22,15 +22,18 @@ from .parser import Parser, NATI_TYPES, PATHS
 from .state import get_state
 from .powang_types import (
     PowangArray,
+    PowangHandle,
     PowangBoolean,
     PowangErrorValue,
     PowangFileStream,
     PowangFunction,
     PowangInteger,
     PowangMap,
+    PowangSet,
     PowangNova,
     PowangNumber,
     PowangObjectType,
+    PowangProject,
     PowangAnyType,
     PowangString,
     PowangTask,
@@ -41,7 +44,9 @@ from .error import (
     powang_error_type_match,
 )
 from .lexer.token import LexerTokenType, ParserTokenType
-
+from .builtins.native_methods import NATIVE_METHOD_TYPES, NATIVE_METHOD_NAMES
+HANDLE = PowangHandle.type
+PROJECT = PowangProject.type
 ANY = PowangAnyType.type
 NOVA = PowangNova.type
 BOOLEAN = PowangBoolean.type
@@ -50,6 +55,23 @@ NUMBER = PowangNumber.type
 STRING = PowangString.type
 ARRAY = PowangArray.type
 MAP = PowangMap.type
+SET = PowangSet.type
+FUNCTION = PowangFunction.type
+ERROR = PowangErrorValue.type
+OBJECT = PowangObjectType.type
+FILE = PowangFileStream.type
+TASK = PowangTask.type
+
+NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, HANDLE}
+ANY = PowangAnyType.type
+NOVA = PowangNova.type
+BOOLEAN = PowangBoolean.type
+INTEGER = PowangInteger.type
+NUMBER = PowangNumber.type
+STRING = PowangString.type
+ARRAY = PowangArray.type
+MAP = PowangMap.type
+SET = PowangSet.type
 FUNCTION = PowangFunction.type
 ERROR = PowangErrorValue.type
 OBJECT = PowangObjectType.type
@@ -58,7 +80,7 @@ TASK = PowangTask.type
 
 ## `function` and `file` are runtime types but are absent from the parser's
 ## NATI_TYPES set, so they need explicit handling here.
-NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE}
+NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, HANDLE}
 
 ARRAY_OPEN = f'{ARRAY}['
 ARRAY_CLOSE = ']'
@@ -86,6 +108,93 @@ def _array_of(element_type: str) -> str:
         return f'{ARRAY}[{ANY}]'
     return f'{ARRAY}[{element_type}]'
 
+
+def _is_set_type(type_name: str) -> bool:
+    return type_name == SET or (
+        isinstance(type_name, str)
+        and type_name.startswith(f'{SET}[')
+        and type_name.endswith(']')
+    )
+
+
+def _set_element_type(type_name: str) -> str:
+    if type_name == SET:
+        return ANY
+    if _is_set_type(type_name):
+        return type_name[len(SET) + 1:-1]
+    return ANY
+
+
+def _set_of(element_type: str) -> str:
+    return f'{SET}[{element_type}]'
+
+
+def _map_parts(type_name: str) -> tuple[str, str]:
+    if not isinstance(type_name, str) or not type_name.startswith('map[') or not type_name.endswith(']'):
+        return ANY, ANY
+    parts = _type_arguments(type_name)
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return ANY, ANY
+
+
+def _type_arguments(type_name: str) -> list[str]:
+    if not isinstance(type_name, str) or '[' not in type_name or not type_name.endswith(']'):
+        return []
+    inner = type_name[type_name.index('[') + 1:-1]
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in inner:
+        if char == '[':
+            depth += 1
+        elif char == ']':
+            depth -= 1
+        if char == ',' and depth == 0:
+            parts.append(''.join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    if current:
+        parts.append(''.join(current).strip())
+    return parts
+
+
+def _split_union(type_name: str) -> list[str]:
+    """Split a rendered union at top-level ``|`` characters."""
+    if not isinstance(type_name, str) or '|' not in type_name:
+        return [type_name]
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in type_name:
+        if char == '[':
+            depth += 1
+        elif char == ']':
+            depth = max(0, depth - 1)
+        if char == '|' and depth == 0:
+            parts.append(''.join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    parts.append(''.join(current).strip())
+    return [part for part in parts if part]
+
+
+def _union_of_types(types: list[str]) -> str:
+    flattened: list[str] = []
+    for type_name in types:
+        for branch in _split_union(type_name):
+            if branch == ANY:
+                return ANY
+            if branch not in flattened:
+                flattened.append(branch)
+    if not flattened:
+        return ANY
+    if len(flattened) == 1:
+        return flattened[0]
+    return ' | '.join(flattened)
+
 NUMERIC_TYPES = {INTEGER, NUMBER}
 COMPARISON_OPERATORS = {'==', '!=', '<', '>', '<=', '>='}
 TYPE_COMPARISON_OPERATORS = {'::', '!:'}
@@ -101,6 +210,7 @@ BUILTIN_RETURN_TYPES: dict[str, str] = {
     'input' : ANY,
     'inputf': ANY,
     'typeof': STRING,
+    'typedeep': STRING,
     'size'  : INTEGER,
     'open'  : BOOLEAN,
     'close' : BOOLEAN,
@@ -173,6 +283,8 @@ class _TypeChecker:
         self.return_allows_error: bool = False
         self.in_function: bool = False
         self.this_type: Optional[str] = None
+        self.type_parameters: set[str] = set()
+        self._position: Optional[tuple[int, int]] = None
 
     # ------------------------------------------------------------------ utils
     def _scope_push(self):
@@ -200,12 +312,20 @@ class _TypeChecker:
         self.scopes[-1][name] = _VariableInfo(type_name, annotated, weak)
 
     def _error(self, message: str, details: Optional[list[str]] = None, where: str = 'type checker'):
-        self.errors.append(powang_error_format(
+        error = powang_error_format(
             'TYPE', where, message, details if details is not None else []
-        ))
+        )
+        if self._position is not None:
+            error.line = self._position[0] + 1
+            error.column = self._position[1]
+        self.errors.append(error)
 
     def _assign_error(self, where: str, expected: str, encountered: str):
-        self.errors.append(powang_error_type_match(where, expected, encountered))
+        error = powang_error_type_match(where, expected, encountered)
+        if self._position is not None:
+            error.line = self._position[0] + 1
+            error.column = self._position[1]
+        self.errors.append(error)
 
     @staticmethod
     def _identifier_name(node: Any) -> Optional[str]:
@@ -229,10 +349,20 @@ class _TypeChecker:
         if node.get('type') == ParserTokenType.TYPE:
             inner = node.get('value')
             if isinstance(inner, dict):
+                alternatives = inner.get('alternatives')
+                if isinstance(alternatives, list) and alternatives:
+                    return _union_of_types([
+                        self._annotation_type(alternative, ANY)
+                        for alternative in alternatives
+                        if isinstance(alternative, dict)
+                    ])
                 name = inner.get('value')
                 if isinstance(name, str):
                     generics = inner.get('generics')
                     base = 'any' if name == 'any' else self._normalized_type_name(name)
+                    element_node = inner.get('element_type') or node.get('element_type')
+                    if name == ARRAY and isinstance(element_node, dict):
+                        return _array_of(self._type_name_from_node(element_node))
                     if isinstance(generics, list) and generics:
                         types = [self._type_name_from_node(g) for g in generics]
                         types = [t if t is not None else 'any' for t in types]
@@ -271,7 +401,7 @@ class _TypeChecker:
                     if not isinstance(elems, list):
                         elems = []
                     types = [self._type_name_from_node(e) for e in elems]
-                    types = [t if t is not None else SOME for t in types]
+                    types = [t if t is not None else ANY for t in types]
                     return 'tup[' + ', '.join(types) + ']'
                 element = self._type_name_from_node(index_node)
                 if element is None:
@@ -283,7 +413,7 @@ class _TypeChecker:
         return None
 
     def _normalized_type_name(self, name: str) -> str:
-        if name == "any":
+        if name == "any" or name in self.type_parameters:
             return ANY
         seen: set[str] = set()
         while name in self.type_alias and name not in seen:
@@ -303,6 +433,16 @@ class _TypeChecker:
         if not isinstance(type_node, dict):
             return default
         inner = type_node.get('value')
+        if isinstance(inner, dict):
+            alternatives = inner.get('alternatives')
+            if isinstance(alternatives, list) and alternatives:
+                return _union_of_types([
+                    self._annotation_type(alternative, default)
+                    for alternative in alternatives
+                    if isinstance(alternative, dict)
+                ])
+            if inner.get('auto'):
+                return ANY
         reference = False
         if isinstance(inner, str):
             name = inner
@@ -337,6 +477,12 @@ class _TypeChecker:
                 kt = self._annotation_type(generics[0], ANY) if isinstance(generics[0], dict) else ANY
                 vt = self._annotation_type(generics[1], ANY) if isinstance(generics[1], dict) else ANY
                 resolved = 'map[' + kt + ', ' + vt + ']'
+        if resolved == SET:
+            generics = None
+            if isinstance(inner, dict):
+                generics = inner.get('generics')
+            if isinstance(generics, list) and generics:
+                resolved = _set_of(self._annotation_type(generics[0], ANY))
         return f'&{resolved}' if reference else resolved
 
     @staticmethod
@@ -366,9 +512,45 @@ class _TypeChecker:
             return bool(inner.get('error_union', False))
         return False
 
+    def _union_branch_assignable(self, target: str, source: str, target_weak: bool = False) -> bool:
+        """Match one union branch without unrelated numeric coercion.
+
+        A union declares the set of accepted shapes. `int | str` must reject a
+        number, even though a standalone `int` declaration may still truncate
+        it through the legacy implicit cast rules.
+        """
+        if target == ANY or source == ANY:
+            return True
+        if target == source:
+            return True
+        if source == NOVA:
+            return target_weak or target == NOVA
+        if target == NOVA:
+            return False
+        if target.startswith('&') or source.startswith('&'):
+            return target == source
+        if target.startswith(f'{OBJECT}:'):
+            return source == target
+        if source.startswith(f'{OBJECT}:'):
+            return False
+        if _is_array_type(target) or _is_array_type(source):
+            return self._assignable(target, source)
+        if target.startswith(('tup[', 'map[')) or source.startswith(('tup[', 'map[')):
+            return self._assignable(target, source)
+        return False
+
     def _assignable(self, target: str, source: str, target_weak: bool = False) -> bool:
         if target == ANY or source == ANY:
             return True
+        source_branches = _split_union(source)
+        if len(source_branches) > 1:
+            return all(self._assignable(target, branch, target_weak) for branch in source_branches)
+        target_branches = _split_union(target)
+        if len(target_branches) > 1:
+            return any(
+                self._union_branch_assignable(branch, source, target_weak)
+                for branch in target_branches
+            )
         if target.startswith('&') or source.startswith('&'):
             return target == source
         if target == source:
@@ -387,6 +569,12 @@ class _TypeChecker:
             if target_element == MIXED or source_element == MIXED:
                 return target_element == source_element
             if source_element == ANY:
+                return True
+            return self._assignable(target_element, source_element)
+        if _is_set_type(target) and _is_set_type(source):
+            target_element = _set_element_type(target)
+            source_element = _set_element_type(source)
+            if target_element == ANY or source_element == ANY:
                 return True
             return self._assignable(target_element, source_element)
         if source == NOVA:
@@ -431,17 +619,75 @@ class _TypeChecker:
     def run(self, program_ast: Any) -> list[PowangError]:
         if not isinstance(program_ast, (list, tuple)):
             return self.errors
+        if 'Project' not in self.object_types:
+            self.object_types['Project'] = {
+                'props': {
+                    'modules': 'arr[str]',
+                    'paths': 'arr[str]',
+                    'logLevel': 'str',
+                    'allowSystem': 'bool',
+                },
+                'methods': {},
+            }
+        if getattr(get_state(), 'project_value', None) is not None and not self._has_project_declaration(program_ast):
+            self.scopes[0]['project'] = _VariableInfo(f'{OBJECT}:Project', True, False)
         for statement in program_ast:
             self._infer(statement)
         return self.errors
 
+    @staticmethod
+    def _has_project_declaration(program_ast: Any) -> bool:
+        if not isinstance(program_ast, (list, tuple)):
+            return False
+        for statement in program_ast:
+            if not isinstance(statement, dict):
+                continue
+            statement_type = statement.get('type')
+            value = statement.get('value')
+            if statement_type not in {
+                ParserTokenType.DECLARATION_TYPED_VAR,
+                ParserTokenType.DECLARATION_INTERPRET,
+            } or not isinstance(value, dict):
+                continue
+            if value.get('identifier', {}).get('value') == 'project':
+                return True
+        return False
+
     # -------------------------------------------------------------- inference
     def _infer(self, node: Any) -> str:
+        previous_position = self._position
+        position = self._node_position(node)
+        if position is not None:
+            self._position = position
         try:
             return self._infer_inner(node)
         except Exception:
             # A type checker must never crash on an unexpected AST shape.
             return ANY
+        finally:
+            self._position = previous_position
+
+    @staticmethod
+    def _node_position(node: Any) -> Optional[tuple[int, int]]:
+        if not isinstance(node, dict):
+            return None
+        line = node.get('line')
+        column = node.get('column')
+        if isinstance(line, int) and isinstance(column, int):
+            return line, column
+        value = node.get('value')
+        if isinstance(value, dict):
+            line = value.get('line')
+            column = value.get('column')
+            if isinstance(line, int) and isinstance(column, int):
+                return line, column
+            for key in ('identifier', 'callee', 'target', 'type', 'expression', 'property'):
+                child = value.get(key)
+                if isinstance(child, dict):
+                    position = _TypeChecker._node_position(child)
+                    if position is not None:
+                        return position
+        return None
 
     def _infer_inner(self, node: Any) -> str:
         if not isinstance(node, dict) or not node:
@@ -485,6 +731,8 @@ class _TypeChecker:
             return self._infer_access(value)
         if node_type == ParserTokenType.SAFE_ACCESS_EXPRESSION:
             return self._infer_access(value)
+        if node_type == ParserTokenType.INSTANTIATION:
+            return self._infer_instantiation(value)
         if node_type == ParserTokenType.ARRAY_EXPRESSION:
             return self._infer_array(value)
         if node_type == ParserTokenType.TUPLE_EXPRESSION:
@@ -571,8 +819,8 @@ class _TypeChecker:
         if node_type == ParserTokenType.EXTERN_REFERENCE:
             return self._infer_extern(value)
 
-        # USE_EXPRESSION and any unknown shape: gradual skip.
-        return ANY
+        if node_type == ParserTokenType.MODULE_DECLARATION:
+            return ANY
 
     # ------------------------------------------------------------ expressions
     def _infer_reference(self, value: Any) -> str:
@@ -596,6 +844,8 @@ class _TypeChecker:
             return BOOLEAN
         if name == 'this':
             return self.this_type if self.this_type is not None else ANY
+        if name == 'Project':
+            return f'{OBJECT}:Project'
         variable = self._lookup(name)
         if variable is not None:
             return variable.type
@@ -663,11 +913,46 @@ class _TypeChecker:
             return ANY
 
         if operator_name == ':>':
+            left_type = self._infer(left_node)
             if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.CALL_EXPRESSION:
                 call_value = dict(right_node.get('value') or {})
                 call_value['arguments'] = [left_node] + list(call_value.get('arguments', []))
                 return self._infer_call(call_value)
-            self._infer(left_node)
+            if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.METHOD_CALL:
+                method_value = dict(right_node.get('value') or {})
+                owner = method_value.get('owner')
+                owner_name = self._identifier_name(owner)
+                arguments = [left_node] + list(method_value.get('arguments', []))
+                argument_types = [self._infer(argument) for argument in arguments]
+                method_name = self._identifier_name(method_value.get('method'))
+                if owner_name in NATIVE_METHOD_TYPES and method_name is not None:
+                    if method_name not in NATIVE_METHOD_NAMES.get(owner_name, frozenset()):
+                        self._error(
+                            f"'{owner_name}' has no member named '{method_name}'",
+                            where='member access',
+                        )
+                        return ANY
+                    return self._infer_native_method(owner_name, method_name, argument_types, arguments)
+                return ANY
+            if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.ACCESS_EXPRESSION:
+                access = right_node.get('value')
+                target = access.get('target') if isinstance(access, dict) else None
+                target_name = self._identifier_name(target)
+                method_name = self._identifier_name(access.get('property')) if isinstance(access, dict) else None
+                if target_name in NATIVE_METHOD_TYPES and method_name is not None:
+                    if method_name not in NATIVE_METHOD_NAMES.get(target_name, frozenset()):
+                        self._error(
+                            f"'{target_name}' has no member named '{method_name}'",
+                            where='member access',
+                        )
+                        return ANY
+                    return self._infer_native_method(target_name, method_name, [left_type])
+                return ANY
+            if isinstance(right_node, dict) and right_node.get('type') == LexerTokenType.IDENTIFIER:
+                return self._infer_call({
+                    'callee': right_node,
+                    'arguments': [left_node],
+                })
             self._infer(right_node)
             return ANY
 
@@ -743,7 +1028,7 @@ class _TypeChecker:
             return left
         if self._assignable(right_element, left_element):
             return right
-        return _array_of(ANY)
+        return _array_of(_union_of_types([left_element, right_element]))
 
     def _infer_call(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -897,12 +1182,42 @@ class _TypeChecker:
     def _infer_method_call(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
-        owner_type = self._infer(value.get('owner'))
+        owner_node = value.get('owner')
+        owner_name = self._identifier_name(owner_node)
         method_name = self._identifier_name(value.get('method'))
         arguments = value.get('arguments')
-        if isinstance(arguments, list):
-            for argument in arguments:
-                self._infer(argument)
+        argument_nodes = arguments if isinstance(arguments, list) else []
+        argument_types = [self._infer(argument) for argument in argument_nodes]
+        if owner_name in NATIVE_METHOD_TYPES and method_name is not None:
+            if method_name not in NATIVE_METHOD_NAMES.get(owner_name, frozenset()):
+                self._error(
+                    f"'{owner_name}' has no member named '{method_name}'",
+                    [f"available members: {', '.join(sorted(NATIVE_METHOD_NAMES.get(owner_name, ())))}"],
+                    where='member access',
+                )
+                return ANY
+            return self._infer_native_method(owner_name, method_name, argument_types, argument_nodes)
+        owner_type = self._infer(owner_node)
+        if owner_name is not None and owner_name in self.object_types:
+            static_info = self.object_types[owner_name]
+            static_methods = static_info.get('static_methods', {}).get(method_name)
+            if static_methods:
+                if named_nodes:
+                    return static_methods[0].return_type
+                matches = [signature for signature in static_methods if self._signature_matches(signature, argument_types)]
+                return matches[0].return_type if matches else static_methods[0].return_type
+            self._error(
+                f"'{owner_name}' has no static method named '{method_name}'",
+                [f"available static methods: {', '.join(sorted(static_info.get('static_methods', {}).keys()))}"],
+                where='static method call',
+            )
+            return ANY
+        if method_name is not None and isinstance(owner_type, str):
+            owner_head = owner_type.lstrip('&').split('[', 1)[0]
+            if owner_head in NATIVE_METHOD_TYPES:
+                if argument_nodes:
+                    argument_types = [owner_type] + argument_types
+                return self._infer_native_method(owner_head, method_name, argument_types)
         if method_name is not None and isinstance(owner_type, str) and owner_type.startswith(f'{OBJECT}:'):
             object_name = owner_type.split(':', 1)[1]
             info = self.object_types.get(object_name)
@@ -910,6 +1225,116 @@ class _TypeChecker:
                 methods = info.get('methods', {}).get(method_name)
                 if methods:
                     return methods[0].return_type
+                self._error(
+                    f"'{object_name}' has no method named '{method_name}'",
+                    [f"available methods: {', '.join(sorted(info.get('methods', {}).keys()))}"],
+                    where='method call',
+                )
+                return ANY
+        return ANY
+
+    def _infer_native_method(
+        self,
+        receiver_type: str,
+        method_name: str,
+        argument_types: list[str],
+        argument_nodes: Optional[list[Any]] = None,
+    ) -> str:
+        receiver_argument = argument_types[0] if argument_types else ANY
+        is_reference = isinstance(receiver_argument, str) and receiver_argument.startswith('&')
+        receiver = receiver_argument[1:] if is_reference else receiver_argument
+        if receiver == ANY:
+            return ANY
+
+        def mutating_return() -> str:
+            return receiver_argument if is_reference else receiver
+
+        if receiver_type == ARRAY:
+            element = _array_element_type(receiver)
+            if method_name == 'push':
+                value_type = argument_types[1] if len(argument_types) > 1 else ANY
+                if is_reference and value_type != ANY and not self._union_branch_assignable(element, value_type):
+                    self._assign_error('native method: arr.push', element, value_type)
+                return mutating_return() if is_reference else _array_of(_union_of_types([element, value_type]))
+            if method_name == 'add':
+                addition = argument_types[1] if len(argument_types) > 1 else ANY
+                addition_element = _array_element_type(addition) if _is_array_type(addition) else _set_element_type(addition) if _is_set_type(addition) else ANY
+                if is_reference and addition_element != ANY and not self._union_branch_assignable(element, addition_element):
+                    self._assign_error('native method: arr.add', element, addition_element)
+                return mutating_return() if is_reference else _array_of(_union_of_types([element, addition_element]))
+            if method_name in {'pop', 'put', 'popval', 'reverse', 'clear', 'set'}:
+                return mutating_return()
+            if method_name in {'popget', 'get'}:
+                return element
+            if method_name == 'size':
+                return INTEGER
+        if receiver_type == MAP:
+            key_type, value_type = _map_parts(receiver)
+            if method_name == 'has' or method_name == 'popget':
+                return BOOLEAN
+            if method_name == 'get':
+                return value_type
+            if method_name in {'pop', 'merge', 'clear'}:
+                return mutating_return()
+            if method_name == 'keys':
+                return _array_of(key_type)
+            if method_name == 'values':
+                return _array_of(value_type)
+            if method_name == 'size':
+                return INTEGER
+        if receiver_type == STRING:
+            if method_name in {'add', 'sub', 'mul', 'reverse', 'get'}:
+                return mutating_return() if is_reference else STRING
+            if method_name == 'div':
+                return _array_of(STRING)
+            if method_name in {'count', 'size'}:
+                return INTEGER
+        if receiver_type == 'tup':
+            if method_name == 'get':
+                if argument_nodes and len(argument_nodes) > 1:
+                    index_node = argument_nodes[1]
+                    if isinstance(index_node, dict) and index_node.get('type') == LexerTokenType.INTEGER_LITERAL:
+                        index = index_node.get('value')
+                        elements = _type_arguments(receiver)
+                        if isinstance(index, int) and 0 <= index < len(elements):
+                            return elements[index]
+                return ANY
+            if method_name == 'size':
+                return INTEGER
+            if method_name == 'to_arr':
+                return _array_of(ANY)
+            if method_name in {'reverse', 'add'}:
+                return 'tup'
+        if receiver_type == SET:
+            element = _set_element_type(receiver)
+            if method_name in {'has', 'popget'}:
+                return BOOLEAN
+            if method_name == 'union':
+                other = argument_types[1] if len(argument_types) > 1 else ANY
+                other_element = _set_element_type(other)
+                if is_reference:
+                    if other_element != ANY and not self._union_branch_assignable(element, other_element):
+                        self._assign_error('native method: set.union', element, other_element)
+                    return mutating_return()
+                return _set_of(_union_of_types([element, other_element]))
+            if method_name in {'add', 'pop', 'intersection', 'difference', 'clear'}:
+                return mutating_return()
+            if method_name == 'size':
+                return INTEGER
+            if method_name == 'to_arr':
+                return _array_of(element)
+        if receiver_type == FILE:
+            if method_name == 'open':
+                return FILE
+            if method_name == 'read':
+                return STRING
+            if method_name in {'write', 'close'}:
+                return BOOLEAN
+        if receiver_type == TASK:
+            if method_name == 'status':
+                return STRING
+            if method_name in {'wait', 'cancel'}:
+                return ANY
         return ANY
 
     def _infer_index(self, value: Any) -> str:
@@ -946,8 +1371,375 @@ class _TypeChecker:
             object_name = target_type.split(':', 1)[1]
             info = self.object_types.get(object_name)
             if info is not None:
-                return info.get('props', {}).get(property_name, ANY)
+                props = info.get('props', {})
+                if property_name in props:
+                    return props[property_name]
+                if info.get('is_enum'):
+                    return f'{OBJECT}:{object_name}'
+                self._error(
+                    f"'{object_name}' has no member named '{property_name}'",
+                    [f"available members: {', '.join(sorted(props.keys()))}"],
+                    where='member access',
+                )
         return ANY
+
+    @staticmethod
+    def _is_auto_type_node(type_node: Any) -> bool:
+        if not isinstance(type_node, dict):
+            return False
+        inner = type_node.get('value')
+        return isinstance(inner, dict) and (bool(inner.get('auto')) or inner.get('value') == 'auto')
+
+    def _resolve_construction_name(self, name: str) -> str:
+        seen: set[str] = set()
+        while name in self.type_alias and name not in seen:
+            seen.add(name)
+            alias = self.type_alias[name]
+            if not isinstance(alias, dict):
+                break
+            if alias.get('alternatives'):
+                return name
+            name = alias.get('value', name)
+        return name
+
+    def _infer_instantiation(self, value: Any) -> str:
+        start = len(self.errors)
+        line = value.get('line') if isinstance(value, dict) else None
+        column = value.get('column') if isinstance(value, dict) else None
+        try:
+            return self._infer_instantiation_inner(value)
+        finally:
+            for error in self.errors[start:]:
+                if getattr(error, 'line', None) is None and isinstance(line, int):
+                    error.line = line + 1
+                    error.column = column if isinstance(column, int) else 0
+
+    @staticmethod
+    def _substitute_signature(signature: _Signature, replacements: dict[str, str]) -> _Signature:
+        def replace(type_name: str) -> str:
+            for parameter, actual in replacements.items():
+                type_name = type_name.replace(parameter, actual)
+            return type_name
+        return _Signature(
+            signature.name,
+            list(signature.parameter_names),
+            [replace(type_name) for type_name in signature.parameter_types],
+            list(signature.parameter_weak),
+            signature.min_argc,
+            replace(signature.return_type),
+            signature.return_weak,
+            signature.allows_error,
+        )
+
+    def _infer_instantiation_inner(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ANY
+        type_reference = value.get('type_ref')
+        if not isinstance(type_reference, dict):
+            return ANY
+        raw_name = type_reference.get('name')
+        if not isinstance(raw_name, str):
+            return ANY
+        name = self._resolve_construction_name(raw_name)
+        normalized = self._normalized_type_name(name)
+        type_parameters = [
+            parameter for parameter in type_reference.get('type_parameters', [])
+            if isinstance(parameter, dict)
+        ]
+        alias = self.type_alias.get(raw_name)
+        if isinstance(alias, dict) and not type_parameters:
+            if alias.get('value') == ARRAY and isinstance(alias.get('element_type'), dict):
+                type_parameters = [alias['element_type']]
+            elif isinstance(alias.get('generics'), list) and alias.get('generics'):
+                type_parameters = [g for g in alias['generics'] if isinstance(g, dict)]
+
+        positional_nodes: list[Any] = []
+        named_nodes: list[dict] = []
+        for argument in value.get('arguments', []):
+            if not isinstance(argument, dict):
+                continue
+            argument_name = argument.get('name')
+            if isinstance(argument_name, str):
+                named_nodes.append(argument)
+            else:
+                positional_nodes.append(argument.get('value'))
+        argument_types = [self._infer(argument) for argument in positional_nodes]
+        named = bool(value.get('named'))
+
+        if normalized == f'{OBJECT}:Project':
+            return f'{OBJECT}:Project'
+        if type_name == 'Project':
+            if named_form:
+                provided = {name for name, _ in named}
+                for name, _ in named:
+                    if name not in ("modules", "paths", "logLevel", "allowSystem"):
+                        self._error(
+                            f"Project has no field named '{name}'",
+                            [f"fields: modules, paths, logLevel, allowSystem"],
+                            where='project construction',
+                        )
+            return f'{OBJECT}:Project'
+
+        if normalized in NATIVE_TYPE_NAMES:
+            if named or named_nodes:
+                self._error(
+                    "Native construction does not accept named arguments",
+                    ["use positional arguments"],
+                    where='native construction',
+                )
+            if normalized == NOVA:
+                if argument_types:
+                    self._error(
+                        "nova construction takes no arguments",
+                        [f"but {len(argument_types)} were given"],
+                        where='native construction',
+                    )
+                return NOVA
+            if normalized in (INTEGER, NUMBER, STRING, BOOLEAN):
+                if len(argument_types) != 1:
+                    self._error(
+                        f"{normalized} construction takes exactly one argument",
+                        [f"but {len(argument_types)} were given"],
+                        where='native construction',
+                    )
+                    return normalized
+                return normalized
+            if normalized == MAP:
+                for argument_node in positional_nodes:
+                    if not isinstance(argument_node, dict) or \
+                            argument_node.get('type') != ParserTokenType.KEY_VALUE_PAIR:
+                        self._error(
+                            "map construction requires key >> value entries",
+                            ["write each entry as key >> value"],
+                            where='map construction',
+                        )
+                        break
+                return MAP
+            if normalized == SET:
+                if type_parameters:
+                    if len(type_parameters) != 1:
+                        self._error(
+                            "set construction expects exactly one element type",
+                            [f"but {len(type_parameters)} were given"],
+                            where='set construction',
+                        )
+                        return ANY
+                    if not self._is_auto_type_node(type_parameters[0]):
+                        element_type = self._annotation_type(type_parameters[0])
+                        for argument_type in argument_types:
+                            if argument_type == ANY:
+                                continue
+                            if not self._assignable(element_type, argument_type):
+                                self._assign_error('set construction', element_type, argument_type)
+                        return _set_of(element_type)
+                return _set_of(_union_of_types(argument_types))
+            if normalized == ARRAY:
+                if type_parameters:
+                    if len(type_parameters) != 1:
+                        self._error(
+                            "arr construction expects exactly one element type",
+                            [f"but {len(type_parameters)} were given"],
+                            where='array construction',
+                        )
+                        return ANY
+                    if not self._is_auto_type_node(type_parameters[0]):
+                        element_type = self._annotation_type(type_parameters[0])
+                        for argument_type in argument_types:
+                            if argument_type == ANY:
+                                continue
+                            if not self._assignable(element_type, argument_type):
+                                self._assign_error('array construction', element_type, argument_type)
+                        return _array_of(element_type)
+                return _array_of(_union_of_types(argument_types))
+            if normalized == 'tup':
+                variadic = bool(type_reference.get('variadic'))
+                if type_parameters:
+                    if variadic:
+                        if len(argument_types) < len(type_parameters):
+                            self._error(
+                                "tuple construction arity does not match its type",
+                                [
+                                    f"type declares at least {len(type_parameters)} elements",
+                                    f"but {len(argument_types)} were given",
+                                ],
+                                where='tuple construction',
+                            )
+                            return ANY
+                        element_parameters = (
+                            type_parameters[:-1]
+                            + [type_parameters[-1]] * (len(argument_types) - len(type_parameters) + 1)
+                        )
+                    else:
+                        if len(type_parameters) != len(argument_types):
+                            self._error(
+                                "tuple construction arity does not match its type",
+                                [
+                                    f"type declares {len(type_parameters)} elements",
+                                    f"but {len(argument_types)} were given",
+                                ],
+                                where='tuple construction',
+                            )
+                            return ANY
+                        element_parameters = type_parameters
+                    result: list[str] = []
+                    for parameter, argument_type in zip(element_parameters, argument_types):
+                        if self._is_auto_type_node(parameter):
+                            result.append(argument_type)
+                            continue
+                        expected = self._annotation_type(parameter)
+                        if argument_type != ANY and not self._assignable(expected, argument_type):
+                            self._assign_error('tuple construction', expected, argument_type)
+                        result.append(expected)
+                    return 'tup[' + ', '.join(result) + ']'
+                if not argument_types:
+                    return 'tup'
+                return 'tup[' + ', '.join(argument_types) + ']'
+            return ANY
+        object_name = name
+        info = self.object_types.get(object_name)
+        if info is None:
+            return f'{OBJECT}:{object_name}'
+        constructors: list[_Signature] = info.get('methods', {}).get('constructor', [])
+        declared_parameters = info.get('type_parameters') or []
+        if declared_parameters and type_parameters:
+            replacements = {
+                f'object:{parameter}': self._annotation_type(actual)
+                for parameter, actual in zip(declared_parameters, type_parameters)
+            }
+            constructors = [
+                self._substitute_signature(signature, replacements)
+                for signature in constructors
+            ]
+        if not constructors:
+            return f'{OBJECT}:{object_name}'
+
+        if named or named_nodes:
+            provided_types: dict[str, str] = {}
+            seen_named_names: set[str] = set()
+            for named_node in named_nodes:
+                raw_name = named_node.get('name')
+                parameter_name = raw_name if isinstance(raw_name, str) else self._identifier_name(raw_name)
+                if parameter_name is None:
+                    continue
+                if parameter_name in seen_named_names:
+                    self._error(
+                        f"Constructor for '{object_name}' received '{parameter_name}' more than once",
+                        ["pass each named argument once"],
+                        where='instantiation',
+                    )
+                    continue
+                seen_named_names.add(parameter_name)
+                provided_types[parameter_name] = self._infer(named_node.get('value'))
+            provided = set(provided_types)
+            candidates = [
+                candidate for candidate in constructors
+                if provided.issubset(set(candidate.parameter_names))
+                and all(
+                    candidate.parameter_names[index] in provided
+                    for index in range(min(candidate.min_argc, len(candidate.parameter_names)))
+                )
+            ]
+
+            def candidate_matches(candidate: _Signature) -> bool:
+                for index, parameter_name in enumerate(candidate.parameter_names):
+                    if parameter_name in provided_types:
+                        if not self._assignable(
+                            candidate.parameter_types[index],
+                            provided_types[parameter_name],
+                            candidate.parameter_weak[index],
+                        ):
+                            return False
+                    elif index < candidate.min_argc:
+                        return False
+                return True
+
+            matching = [candidate for candidate in candidates if candidate_matches(candidate)]
+            candidate = (
+                matching[0] if matching
+                else candidates[0] if candidates
+                else constructors[0]
+            )
+            ordered: list[Optional[str]] = [None] * len(candidate.parameter_types)
+            unknown_name_seen = False
+            for parameter_name, named_type in provided_types.items():
+                if parameter_name not in candidate.parameter_names:
+                    unknown_name_seen = True
+                    self._error(
+                        f"Constructor for '{object_name}' has no parameter named '{parameter_name}'",
+                        [f"parameters: {', '.join(candidate.parameter_names)}"],
+                        where='instantiation',
+                    )
+                    continue
+                index = candidate.parameter_names.index(parameter_name)
+                if ordered[index] is not None:
+                    self._error(
+                        f"Constructor for '{object_name}' received '{parameter_name}' more than once",
+                        ["pass each named argument once"],
+                        where='instantiation',
+                    )
+                    continue
+                ordered[index] = named_type
+            for index, argument_type in enumerate(ordered):
+                if argument_type is None:
+                    if index < candidate.min_argc and not unknown_name_seen:
+                        self._error(
+                            f"Constructor for '{object_name}' is missing required argument '{candidate.parameter_names[index]}'",
+                            [f"parameters: {', '.join(candidate.parameter_names)}"],
+                            where='instantiation',
+                        )
+                    continue
+                if not self._assignable(candidate.parameter_types[index], argument_type, candidate.parameter_weak[index]):
+                    self._assign_error(
+                        f'constructor: {object_name}',
+                        candidate.parameter_types[index],
+                        argument_type,
+                    )
+            return f'{OBJECT}:{object_name}'
+
+        matches = [
+            candidate for candidate in constructors
+            if self._signature_matches(candidate, argument_types)
+        ]
+        if matches:
+            return f'{OBJECT}:{object_name}'
+        if len(constructors) == 1:
+            candidate = constructors[0]
+            if len(argument_types) < candidate.min_argc:
+                for index in range(len(argument_types), candidate.min_argc):
+                    self._error(
+                        f"Constructor for '{object_name}' is missing required argument '{candidate.parameter_names[index]}'",
+                        [f"parameters: {', '.join(candidate.parameter_names)}"],
+                        where='instantiation',
+                    )
+            elif len(argument_types) > len(candidate.parameter_types):
+                self._error(
+                    f"Constructor for '{object_name}' received too many arguments",
+                    [f"expected at most {len(candidate.parameter_types)}"],
+                    where='instantiation',
+                )
+            else:
+                for index, argument_type in enumerate(argument_types):
+                    if self._assignable(
+                        candidate.parameter_types[index],
+                        argument_type,
+                        candidate.parameter_weak[index],
+                    ):
+                        continue
+                    self._assign_error(
+                        f'constructor: {object_name}',
+                        candidate.parameter_types[index],
+                        argument_type,
+                    )
+            return f'{OBJECT}:{object_name}'
+        self._error(
+            f"No constructor of '{object_name}' accepts the given arguments",
+            [
+                f"argument types: {', '.join(argument_types)}",
+                f"candidates: {len(constructors)}",
+            ],
+            where='instantiation',
+        )
+        return f'{OBJECT}:{object_name}'
 
     def _infer_array(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -962,18 +1754,7 @@ class _TypeChecker:
         element_types = [self._infer(element) for element in elements]
         if not element_types:
             return ARRAY
-        common = element_types[0]
-        for element_type in element_types[1:]:
-            if element_type == common or common == ANY:
-                continue
-            if self._assignable(common, element_type):
-                continue
-            if self._assignable(element_type, common):
-                common = element_type
-                continue
-            common = MIXED
-            break
-        return _array_of(common)
+        return _array_of(_union_of_types(element_types))
 
     def _infer_block(self, statements: Any) -> str:
         if not isinstance(statements, list):
@@ -1278,11 +2059,12 @@ class _TypeChecker:
             iterable_type = self._infer(iterable_node)
             iterator = value.get('iterator')
             element_type = _array_element_type(iterable_type) if _is_array_type(iterable_type) else ANY
-            is_literal = isinstance(iterable_node, dict) and \
-                iterable_node.get('type') == ParserTokenType.ARRAY_EXPRESSION
+            if _is_set_type(iterable_type):
+                element_type = _set_element_type(iterable_type)
+            literal_elements = self._literal_array_elements(iterable_node)
 
-            if is_literal and isinstance(iterator, dict):
-                self._check_for_each_elements(iterable_node, iterator)
+            if literal_elements is not None and isinstance(iterator, dict):
+                self._check_for_each_elements(literal_elements, iterator)
 
             iterator_kind = iterator.get('type') if isinstance(iterator, dict) else None
             iterator_value = iterator.get('value') if isinstance(iterator, dict) else None
@@ -1294,7 +2076,7 @@ class _TypeChecker:
                     self._bind(name or '', bind_type, False, False)
                 else:
                     declared_type = self._annotation_type(iterator_value.get('type'))
-                    if not is_literal and declared_type not in (ANY, NOVA) and element_type not in (ANY, MIXED):
+                    if literal_elements is None and declared_type not in (ANY, NOVA) and element_type not in (ANY, MIXED):
                         weak = self._annotation_weak(iterator_value.get('type'))
                         if not self._assignable(declared_type, element_type, weak):
                             self._assign_error('for each iterator', declared_type, element_type)
@@ -1310,7 +2092,30 @@ class _TypeChecker:
             self._scope_pop()
         return ANY
 
-    def _check_for_each_elements(self, array_node: dict, iterator: dict) -> None:
+    def _literal_array_elements(self, node: Any) -> Optional[list]:
+        if not isinstance(node, dict):
+            return None
+        if node.get('type') == ParserTokenType.ARRAY_EXPRESSION:
+            elements = node.get('value', {}).get('elements') if isinstance(node.get('value'), dict) else None
+            return elements if isinstance(elements, list) else None
+        if node.get('type') == ParserTokenType.INSTANTIATION:
+            value = node.get('value')
+            if not isinstance(value, dict):
+                return None
+            type_reference = value.get('type_ref')
+            if not isinstance(type_reference, dict) or type_reference.get('name') != ARRAY:
+                return None
+            arguments = value.get('arguments')
+            if not isinstance(arguments, list):
+                return None
+            return [
+                argument.get('value')
+                for argument in arguments
+                if isinstance(argument, dict) and argument.get('name') is None
+            ]
+        return None
+
+    def _check_for_each_elements(self, elements: list, iterator: dict) -> None:
         iterator_type = iterator.get('type')
         if iterator_type not in {
             ParserTokenType.DECLARATION_UNDEFINED,
@@ -1325,9 +2130,6 @@ class _TypeChecker:
         if declared_type == ANY:
             return
         weak = self._annotation_weak(type_node)
-        elements = array_node.get('elements')
-        if not isinstance(elements, list):
-            return
         for element in elements:
             element_type = self._infer(element)
             if element_type == ANY:
@@ -1343,8 +2145,16 @@ class _TypeChecker:
         name = self._identifier_name(value.get('identifier'))
         if name is None:
             return ANY
-        info = {'props': {}, 'methods': {}}
+        info = {
+            'props': {},
+            'methods': {},
+            'static_methods': {},
+            'type_parameters': list(value.get('type_parameters') or []),
+            'is_enum': bool(value.get('is_enum')),
+        }
         self.object_types[name] = info
+        previous_parameters = self.type_parameters
+        self.type_parameters = set(value.get('type_parameters') or [])
 
         self._scope_push()
         try:
@@ -1366,6 +2176,7 @@ class _TypeChecker:
                     self._infer(prop)
 
             methods = value.get('methods')
+            signatures: list[tuple[dict, _Signature, bool]] = []
             if isinstance(methods, list):
                 for entry in methods:
                     if not isinstance(entry, (list, tuple)) or len(entry) != 2:
@@ -1373,12 +2184,31 @@ class _TypeChecker:
                     _, method = entry
                     if not isinstance(method, dict):
                         continue
-                    signature = self._make_signature(method)
+                    if self._identifier_name(method.get('value', {}).get('identifier')) == 'constructor':
+                        saved_parameters = self.type_parameters
+                        self.type_parameters = set()
+                        signature = self._make_signature(method)
+                        self.type_parameters = saved_parameters
+                    else:
+                        signature = self._make_signature(method)
                     if signature is not None and signature.name:
-                        info['methods'].setdefault(signature.name, []).append(signature)
-                    self._check_function(method, this_type=f'{OBJECT}:{name}', register=False)
+                        is_instance = (
+                            signature.name == 'constructor'
+                            or bool(method.get('value', {}).get('instance_method'))
+                        )
+                        target = info['methods'] if is_instance else info['static_methods']
+                        target.setdefault(signature.name, []).append(signature)
+                        signatures.append((method, signature, is_instance))
+            if isinstance(methods, list):
+                for method, signature, is_instance in signatures:
+                    self._check_function(
+                        method,
+                        this_type=f'{OBJECT}:{name}' if is_instance and signature.name != 'constructor' else None,
+                        register=False,
+                    )
         finally:
             self._scope_pop()
+            self.type_parameters = previous_parameters
         return f'{OBJECT}:{name}'
 
     # --------------------------------------------------------------- functions

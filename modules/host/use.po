@@ -1,0 +1,3 @@
+﻿## Generic host callback bridge.
+
+export extern fun call(name: str, arguments: arr): any >> "stdlib_host.call";

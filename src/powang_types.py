@@ -30,6 +30,8 @@ class PowangTypeBase:
     any       : str  = ''
     const     : PropertyConst
     weak      : PropertyWeak
+    structure_locked: bool = False
+    elements_locked: bool = False
     sizeable  : bool = False
     indexable : bool = False
     
@@ -415,6 +417,94 @@ class PowangArray(PowangTypeBase):
             return PowangBoolean.cast(self) / right
         return None
     
+# ====== SET =========
+class PowangSet(PowangTypeBase):
+    data: dict['PowangAny', None]
+    type: Literal['set'] = 'set'
+    def __init__(self, data: Optional[list['PowangAny']] = None):
+        values = data if data is not None else []
+        super().__init__({value: None for value in values})
+        self.sizeable = True
+
+    def size(self) -> 'PowangInteger':
+        return PowangInteger(len(self.data))
+
+    def iterate(self) -> 'PowangArray':
+        return PowangArray(list(self.data.keys()))
+
+    def index(self, index: 'PowangAny') -> 'PowangAny':
+        raise powang_throw(powang_error_unsupported_operation(None, self.type, 'index'))
+
+    @staticmethod
+    def cast(right: 'PowangAny'):
+        if right.type == PowangSet.type:
+            return PowangSet(list(right.data.keys()))
+        if right.type in (PowangArray.type, PowangTuple.type):
+            return PowangSet(list(right.data))
+        return None
+
+    def __add__(self, right: 'PowangAny'):
+        if right.type == PowangSet.type:
+            values = list(self.data.keys())
+            for key in right.data.keys():
+                if key not in self.data:
+                    values.append(key)
+            return PowangSet(values)
+        return None
+
+    def __sub__(self, right: 'PowangAny'):
+        if right.type == PowangSet.type:
+            return PowangSet([key for key in self.data.keys() if key not in right.data])
+        return None
+
+    def __repr__(self) -> str:
+        return '[/' + ', '.join(repr(item) for item in self.data.keys()) + ']'
+
+
+# ====== HANDLE =========
+class PowangHandle(PowangTypeBase):
+    """Opaque reference to a Python object owned by the host runtime."""
+
+    data: int
+    type: Literal['handle'] = 'handle'
+
+    def __init__(self, handle_id: int = 0):
+        super().__init__(handle_id)
+        self.handle_id: int = handle_id
+
+    def __repr__(self) -> str:
+        return f"<handle: {self.handle_id}>"
+
+
+# ====== PROJECT =========
+class PowangProject(PowangTypeBase):
+    """Typed project configuration exposed to powang programs."""
+
+    data: dict[str, 'PowangAny']
+    type: Literal['Project'] = 'Project'
+
+    def __init__(
+        self,
+        modules: Optional[list[str]] = None,
+        paths: Optional[list[str]] = None,
+        log_level: str = "info",
+        allow_system: bool = False,
+    ):
+        public_props = {
+            'modules': PowangArray([PowangString(item) for item in (modules or [])]),
+            'paths': PowangArray([PowangString(item) for item in (paths or [])]),
+            'logLevel': PowangString(log_level),
+            'allowSystem': PowangBoolean(bool(allow_system)),
+        }
+        super().__init__(public_props)
+        self.private_props = {}
+        self.public_meths = {}
+        self.private_meths = {}
+
+    def __repr__(self) -> str:
+        return "<Project>"
+
+
 # ====== TUPLE =========
 class PowangTuple(PowangTypeBase):
     data: list['PowangAny']
@@ -462,10 +552,11 @@ class PowangMap(PowangTypeBase):
                     f"but {item.type} was encounter"
                 ])
                 
-                assert (length := len(item.data)) == 2, powang_error_format("LOGIC", "array to map", "Invalid format", [
-                    f"map items must be {PowangArray.type} pairs of [key, value]",
-                    f"but element {i + 1} is an {PowangArray.type} of {length} items"
-                ])
+                if (length := len(item.data)) != 2:
+                    raise powang_throw(powang_error_format("LOGIC", "array to map", "Invalid format", [
+                        f"map items must be {PowangArray.type} pairs of [key, value]",
+                        f"but element {i + 1} is an {PowangArray.type} of {length} items"
+                    ]))
                 
                 new_map.data[item.data[0]] = item.data[1]
             return new_map
@@ -519,16 +610,22 @@ class PowangObjectType(PowangTypeBase): # user defined types
     private_props  : dict[str, 'PowangAny']
     public_meths : dict[str, list[PowangFunction]]
     private_meths: dict[str, list[PowangFunction]]
+    public_static_meths : dict[str, list[PowangFunction]]
+    private_static_meths: dict[str, list[PowangFunction]]
     def __init__(self,
         public_props : Optional[dict[str, 'PowangAny']]          = None,
         private_props: Optional[dict[str, 'PowangAny']]          = None,
         public_meths : Optional[dict[str, list[PowangFunction]]] = None,
         private_meths: Optional[dict[str, list[PowangFunction]]] = None,
+        public_static_meths : Optional[dict[str, list[PowangFunction]]] = None,
+        private_static_meths: Optional[dict[str, list[PowangFunction]]] = None,
     ):
         super().__init__(dict(public_props) if public_props is not None else {})
         self.private_props = dict(private_props) if private_props is not None else {}
         self.public_meths = dict(public_meths) if public_meths is not None else {}
         self.private_meths = dict(private_meths) if private_meths is not None else {}
+        self.public_static_meths = dict(public_static_meths) if public_static_meths is not None else {}
+        self.private_static_meths = dict(private_static_meths) if private_static_meths is not None else {}
 
     def getConstructors(self) -> list[PowangFunction]:
         constructors = self.getMethods(CONSTRUCTOR_METHOD_NAME, False)
@@ -539,6 +636,12 @@ class PowangObjectType(PowangTypeBase): # user defined types
     def getMethods(self, method_name: str, private: bool) -> Optional[list[PowangFunction]]:
         public_methods = self.public_meths.get(method_name)
         if private and (private_methods := self.private_meths.get(method_name)) is not None:
+            return private_methods + (public_methods if public_methods is not None else [])
+        return public_methods
+
+    def getStaticMethods(self, method_name: str, private: bool) -> Optional[list[PowangFunction]]:
+        public_methods = self.public_static_meths.get(method_name)
+        if private and (private_methods := self.private_static_meths.get(method_name)) is not None:
             return private_methods + (public_methods if public_methods is not None else [])
         return public_methods
 
@@ -738,6 +841,7 @@ PowangAny = Union[
     PowangString,      # str
     PowangArray,       # list
     PowangMap,         # dict
+    PowangSet,         # set
     PowangFunction,    # FunctionType
     PowangObjectType,  # object
     PowangFileStream,  # TextIO handle
@@ -746,6 +850,8 @@ PowangAny = Union[
     PowangTask,        # running task handle
     PowangReference,   # temporary variable reference
     PowangTuple,       # fixed-size tuple
+    PowangProject,     # project configuration
+    PowangHandle,      # opaque Python object handle
 ]
 
 def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
@@ -758,6 +864,7 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangString.type     : PowangString,
         PowangArray.type      : PowangArray,
         PowangMap.type        : PowangMap,
+        PowangSet.type        : PowangSet,
         PowangFunction.type   : PowangFunction,
         PowangObjectType.type : PowangObjectType,
         PowangFileStream.type : PowangFileStream,
@@ -765,6 +872,8 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangModule.type     : PowangModule,
         PowangTask.type       : PowangTask,
         PowangTuple.type      : PowangTuple,
+        PowangProject.type    : PowangProject,
+        PowangHandle.type     : PowangHandle,
     }[type]
 
 def PowangCopyConstruct(any: PowangAny) -> PowangAny:
@@ -806,11 +915,45 @@ def PowangCopyConstruct(any: PowangAny) -> PowangAny:
             value.closure = any.closure
         if hasattr(any, 'external'):
             value.external = any.external
+    elif any.type == PowangSet.type:
+        value = PowangSet(list(any.data.keys()))
     else:
         value = PowangTypeMap(any.type)(any.data)
-    value.weak = any.weak
-    value.const = any.const
+    value.defined = any.defined
+    value.any = any.any
+    value.structure_locked = any.structure_locked
+    value.elements_locked = any.elements_locked
+    value.weak = PowangTypeBase.PropertyWeak(any.weak.it_is, any.weak.has_value)
+    value.const = PowangTypeBase.PropertyConst(any.const.it_is, any.const.can_change)
+    if hasattr(any, 'declared_spec'):
+        value.declared_spec = any.declared_spec
+    if hasattr(any, 'concrete_value'):
+        value.concrete_value = PowangCopyConstruct(any.concrete_value)
     return value
+
+
+def PowangUnwrapAny(value: PowangAny) -> PowangAny:
+    """Return the concrete payload carried by a gradual or union `any` value."""
+    if value.type != PowangAnyType.type:
+        return value
+    if value.type == PowangHandle.type:
+        return value
+    concrete_value = getattr(value, 'concrete_value', None)
+    if concrete_value is not None:
+        concrete_value.defined = value.defined
+        concrete_value.weak = PowangTypeBase.PropertyWeak(value.weak.it_is, value.weak.has_value)
+        concrete_value.const = PowangTypeBase.PropertyConst(value.const.it_is, value.const.can_change)
+        return concrete_value
+    if not value.any or value.any == PowangAnyType.type:
+        return value
+    try:
+        concrete = PowangTypeMap(value.any)(value.data)
+    except (KeyError, TypeError):
+        return value
+    concrete.defined = value.defined
+    concrete.weak = PowangTypeBase.PropertyWeak(value.weak.it_is, value.weak.has_value)
+    concrete.const = PowangTypeBase.PropertyConst(value.const.it_is, value.const.can_change)
+    return concrete
 
 def PowangCopyConstructObjectType(anyType: PowangObjectType) -> PowangObjectType:
     # Props are copied by value, not by reference: instances must never share
@@ -820,11 +963,17 @@ def PowangCopyConstructObjectType(anyType: PowangObjectType) -> PowangObjectType
         {key: PowangCopyConstruct(prop) for key, prop in anyType.private_props.items()},
         {key: list(methods) for key, methods in anyType.public_meths.items()},
         {key: list(methods) for key, methods in anyType.private_meths.items()},
+        {key: list(methods) for key, methods in anyType.public_static_meths.items()},
+        {key: list(methods) for key, methods in anyType.private_static_meths.items()},
     )
     value.type_name = anyType.type_name
     value.is_enum = getattr(anyType, 'is_enum', False)
-    value.weak = anyType.weak
-    value.const = anyType.const
+    value.defined = anyType.defined
+    value.any = anyType.any
+    value.structure_locked = anyType.structure_locked
+    value.elements_locked = anyType.elements_locked
+    value.weak = PowangTypeBase.PropertyWeak(anyType.weak.it_is, anyType.weak.has_value)
+    value.const = PowangTypeBase.PropertyConst(anyType.const.it_is, anyType.const.can_change)
     return value
 
 def PowangTypeCast(type: str, any: PowangAny) -> PowangAny | None:

@@ -13,7 +13,7 @@ class Tokenizer:
     Keywords: set[str] = {
         'if', 'else', 'for', 'fun', 'return', 'use', 'type', 'extern',
         'export', 'try', 'catch', 'finally', 'spawn', 'match', 'case', 'const',
-        'enum',
+        'enum', 'module',
     }
     
     RegexPatterns: dict[
@@ -43,6 +43,8 @@ class Tokenizer:
         
         r'\&\&' : (LexerTokenType.AND, None),
         r'\|\|' : (LexerTokenType.OR, None),
+        r'&>'   : (LexerTokenType.REFERENCE_PIPELINE, None),
+        r'\|'   : (LexerTokenType.PIPE, None),
         r'&'    : (LexerTokenType.AMPERSAND, None),
         r'::'   : (LexerTokenType.COMPARE_EQ_TYPE, None),
         r'!:'   : (LexerTokenType.COMPARE_NEQ_TYPE, None),
@@ -116,6 +118,11 @@ class Tokenizer:
         
     def actualChar(self) -> str: # char
         return self.data[self.position]
+
+    def _line_column(self) -> tuple[int, int]:
+        """Return the zero-based line and column of ``self.position``."""
+        last_newline = self.data.rfind('\n', 0, self.position)
+        return self.row, self.position - last_newline - 1
         
     def getNextToken(self) -> LexerToken:
         while self.hasMoreTokens():
@@ -124,16 +131,20 @@ class Tokenizer:
                 self.position += 1
 
             if not self.hasMoreTokens():
-                return LexerToken(LexerTokenType.END_OF_FILE, None)
+                return LexerToken(LexerTokenType.END_OF_FILE, None, self.row, 0)
 
             ## Block comments use `#! ... !#` and may span multiple lines.
             if self.data.startswith('#!', self.position):
                 comment_end = self.data.find('!#', self.position + 2)
                 if comment_end == -1:
                     lines = self.data.split('\n')
-                    raise powang_throw(powang_error_syntax(None, "unterminated block comment", [
-                        lines[self.row] if self.row < len(lines) else '',
-                    ]))
+                    raise powang_throw(powang_error_with_position(
+                        powang_error_syntax(None, "unterminated block comment", [
+                            lines[self.row] if self.row < len(lines) else '',
+                        ]),
+                        self.row + 1,
+                        self._line_column()[1],
+                    ))
                 skipped = self.data[self.position:comment_end + 2]
                 self.row += skipped.count('\n')
                 self.position = comment_end + 2
@@ -145,21 +156,32 @@ class Tokenizer:
 
                 if match_result is not None:
                     matched_string: str = match_result.group(0)
+                    token_line, token_column = self._line_column()
                     self.position += len(matched_string)
 
                     if token_type is None: # whitespace / comments
+                        ## Whitespace may contain newlines; the row counter must
+                        ## follow them or later token positions drift.
+                        self.row += matched_string.count('\n')
                         break # skip and keep scanning iteratively
 
                     if modifier is None:
-                        return LexerToken(token_type, matched_string)
+                        self.row += matched_string.count('\n')
+                        return LexerToken(token_type, matched_string, token_line, token_column)
 
-                    return LexerToken(token_type, modifier(matched_string))
+                    self.row += matched_string.count('\n')
+                    return LexerToken(token_type, modifier(matched_string), token_line, token_column)
             else:
                 lines = self.data.split('\n')
+                token_line, token_column = self._line_column()
                 for i in range(self.row):
                     self.position -= len(lines[i]) + 1
-                raise powang_throw(powang_error_syntax(None, "unexpected character", [
-                    lines[self.row],
-                    (' ' * (self.position)) + '^'
-                ]))
-        return LexerToken(LexerTokenType.END_OF_FILE, None)
+                raise powang_throw(powang_error_with_position(
+                    powang_error_syntax(None, "unexpected character", [
+                        lines[self.row],
+                        (' ' * (self.position)) + '^'
+                    ]),
+                    token_line + 1,
+                    token_column,
+                ))
+        return LexerToken(LexerTokenType.END_OF_FILE, None, self.row, 0)

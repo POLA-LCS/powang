@@ -42,9 +42,11 @@ def builtin_write(file_name: PowangAny, lines: PowangAny) -> PowangBoolean:
     assert file_name.data in file_streams, powang_error_format('VALUE', 'builtin: write', f"File is not opened: {file_name.data}")
     lines_to_write: list[str] = []
     for line in lines.data:
-        assert (casted_line := explicitCastString(line)) is not None, powang_error_invalid_cast(
-            'builtin: write', PowangString.type, line.type, True
-        )
+        casted_line = explicitCastString(line)
+        if casted_line is None:
+            raise powang_throw(powang_error_invalid_cast(
+                'builtin: write', PowangString.type, line.type, True
+            ))
         lines_to_write.append(casted_line.data)
     file_streams[file_name.data].writelines(lines_to_write)
     return PowangBoolean(True)

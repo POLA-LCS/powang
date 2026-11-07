@@ -7,9 +7,12 @@ from .builtins.tasks import check_cancellation, get_task_pool, spawn_task
 from .lexer import *
 from .typecheck import type_check
 from .module_loader import get_module_loader
+from . import typespec as _typespec
 
 import math
 import sys
+import copy
+import importlib
 from contextvars import ContextVar
 
 ## Extern allowlist. This is installation configuration, not run state, so it
@@ -26,53 +29,53 @@ _EXTERNAL_MODULES: set[str] = {
 ## allowlist entry is only added when the module object is actually available,
 ## so the extern resolver can always find it in this module's globals.
 try:
-    from . import stdlib_strings
+    from .stdlib import stdlib_strings
     _EXTERNAL_MODULES.add("stdlib_strings")
 except ImportError:
     pass
 try:
-    from . import stdlib_json
+    from .stdlib import stdlib_json
     _EXTERNAL_MODULES.add("stdlib_json")
 except ImportError:
     pass
 try:
-    from . import stdlib_url
+    from .stdlib import stdlib_url
     _EXTERNAL_MODULES.add("stdlib_url")
 except ImportError:
     pass
 try:
-    from . import stdlib_env
+    from .stdlib import stdlib_env
     _EXTERNAL_MODULES.add("stdlib_env")
 except ImportError:
     pass
 try:
-    from . import stdlib_time
+    from .stdlib import stdlib_time
     _EXTERNAL_MODULES.add("stdlib_time")
 except ImportError:
     pass
 try:
-    from . import stdlib_crypto
+    from .stdlib import stdlib_crypto
     _EXTERNAL_MODULES.add("stdlib_crypto")
 except ImportError:
     pass
 try:
-    from . import stdlib_http
+    from .stdlib import stdlib_http
     _EXTERNAL_MODULES.add("stdlib_http")
 except ImportError:
     pass
 try:
-    from . import stdlib_http_server
+    from .stdlib import stdlib_http_server
     _EXTERNAL_MODULES.add("stdlib_http_server")
 except ImportError:
     pass
 try:
-    from . import stdlib_http_router
+    from .stdlib import stdlib_http_router
     _EXTERNAL_MODULES.add("stdlib_http_router")
 except ImportError:
     pass
 
 try:
-    from . import stdlib_log
+    from .stdlib import stdlib_log
     _EXTERNAL_MODULES.add("stdlib_log")
 except ImportError:
     pass
@@ -96,10 +99,17 @@ def getPowangFromPython(python_data: Any) -> PowangAny:
         str   : PowangString,
     }.get(type(python_data))
     if powang_type is None:
-        return PowangNova()
+        try:
+            from .state import get_state
+            return PowangHandle(get_state().register_handle(python_data))
+        except Exception:
+            return PowangNova()
     return powang_type(python_data)
 
 def getPythonFromPowang(powang_data: PowangAny):
+    if powang_data.type == PowangHandle.type:
+        from .state import get_state
+        return get_state().resolve_handle(powang_data.data)
     if powang_data.type == PowangTask.type:
         ## Task handles name live threads and have no data representation.
         ## Rejecting them here keeps extern/JSON calls honest instead of
@@ -196,12 +206,18 @@ def getValidIdentifier(where: str, identifier: DictRepr) -> str:
 
 
 def getCastTypeName(where: str, node: DictRepr) -> str:
-    """Return the type name after `as`, accepting both `string` and `arr[item]`."""
+    """Return the type name after `as`, accepting a type annotation node."""
     if isinstance(node, dict):
         if node.get('type') == LexerTokenType.IDENTIFIER:
             value = node.get('value')
             if isinstance(value, str):
                 return value
+        if node.get('type') == ParserTokenType.TYPE:
+            inner = node.get('value')
+            if isinstance(inner, dict):
+                value = inner.get('value')
+                if isinstance(value, str):
+                    return value
         if node.get('type') == ParserTokenType.INDEX_EXPRESSION:
             value = node.get('value')
             if isinstance(value, dict):
@@ -237,7 +253,7 @@ def _evaluateDestructureDeclaration(where: str, expr_value: DictRepr) -> PowangA
 
     source = evaluateAstExpression(expr_value.get('expression'))
     if source.type == PowangAnyType.type:
-        source = PowangTypeMap(source.any)(source.data)
+        source = PowangUnwrapAny(source)
 
     if source.type == PowangArray.type:
         for index, entry in enumerate(entries):
@@ -284,7 +300,20 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
     type_alias = get_state().type_alias
     if type_expression['value'] in type_alias:
         type_expression = type_alias[type_expression['value']]
-    if type_expression['value'] in NATI_TYPES:
+    alternatives = type_expression.get('alternatives')
+    if isinstance(alternatives, list) and alternatives:
+        ## A union has no single runtime class. The gradual `any` holder keeps
+        ## the concrete payload while the annotation decides assignability.
+        undefined_right_value: PowangAny = PowangAnyType()
+        undefined_right_value.any = type_node_inner(alternatives[0]).get('value', PowangAnyType.type)
+        undefined_right_value.declared_spec = _typespec.from_ast_node({
+            'type': ParserTokenType.TYPE,
+            'value': type_expression,
+        })
+    elif type_expression.get('auto'):
+        undefined_right_value = PowangAnyType()
+        undefined_right_value.any = PowangAnyType.type
+    elif type_expression['value'] in NATI_TYPES:
         undefined_right_value = PowangTypeMap(type_expression['value'])()
     else:
         user_type = ScopeStack.get_ObjectType(type_expression['value'])
@@ -298,6 +327,20 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
     undefined_const = PowangTypeBase.PropertyConst(type_expression['const'], True)
     undefined_right_value.weak   = undefined_weak
     undefined_right_value.const  = undefined_const
+    undefined_right_value.structure_locked = bool(type_expression.get('const'))
+    elements_locked = False
+    element_node = type_expression.get('element_type')
+    if isinstance(element_node, dict) and bool(element_node.get('value', {}).get('const')):
+        elements_locked = True
+    generics = type_expression.get('generics')
+    if isinstance(generics, list):
+        if type_expression.get('value') == PowangMap.type and len(generics) >= 2:
+            if bool(generics[1].get('value', {}).get('const')):
+                elements_locked = True
+        elif type_expression.get('value') == PowangSet.type and generics:
+            if bool(generics[0].get('value', {}).get('const')):
+                elements_locked = True
+    undefined_right_value.elements_locked = elements_locked
     return undefined_right_value
 
 def checkObjectTypes(where: str, target_value: PowangObjectType, right_value: PowangAny) -> PowangObjectType:
@@ -306,7 +349,9 @@ def checkObjectTypes(where: str, target_value: PowangObjectType, right_value: Po
 
     user_type = ScopeStack.get_existingObjectType(target_value.type_name)
 
-    if right_value.type != PowangArray.type:
+    if right_value.type == PowangTuple.type:
+        right_value = PowangArray(list(right_value.data))
+    elif right_value.type != PowangArray.type:
         right_value = PowangArray([right_value])
 
     casted_value = castToObjectType(where, user_type, target_value, right_value)
@@ -333,6 +378,9 @@ def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> P
     if checkReturnsNova(where, target_value, right_value):
         return target_value
 
+    if right_value.type == PowangAnyType.type:
+        right_value = unwrap_any_value(right_value)
+
     if target_value.type != right_value.type and target_value.type != PowangAnyType.type:
         casted_right_value = PowangTypeCast(target_value.type, right_value)
         if casted_right_value is None:
@@ -346,7 +394,7 @@ def checkTypes(where: str, target_value: PowangAny, right_value: PowangAny) -> P
 
 def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny, force_object_assign: bool):
     if right_value.type == PowangAnyType.type:
-        right_value = PowangTypeMap(right_value.any)(right_value.data)
+        right_value = PowangUnwrapAny(right_value)
 
     if target_value.const:
         assert not target_value.defined or target_value.const.can_change, powang_error_format(
@@ -363,10 +411,24 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
             ]))
 
     if target_value.type == PowangAnyType.type:
+        declared_spec = getattr(target_value, 'declared_spec', None)
+        if declared_spec is not None and declared_spec.kind is _typespec.Kind.UNION:
+            concrete = unwrap_any_value(right_value)
+            if not _typespec.assignable(declared_spec, value_type_spec(concrete)):
+                raise powang_throw(powang_error_type_match(
+                    where,
+                    _typespec.render(declared_spec),
+                    concrete.type if concrete.type != PowangObjectType.type else concrete.type_name,
+                ))
         # PowangCopyConstruct handles types whose constructor signature is not
         # (data,) - e.g. PowangFunction(args, data, return_expr).
         target_value.data = PowangCopyConstruct(right_value).data
-        target_value.any = right_value.type
+        target_value.any = (
+            right_value.type_name
+            if right_value.type == PowangObjectType.type
+            else right_value.type
+        )
+        target_value.concrete_value = PowangCopyConstruct(right_value)
 
     elif target_value.type == PowangErrorValue.type and right_value.type == PowangErrorValue.type:
         ## Error values carry a structured payload beside `data`; copy both.
@@ -400,9 +462,9 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
 
 def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bool) -> PowangAny:
     if left.type == PowangAnyType.type:
-        left = PowangTypeMap(left.any)(left.data)
+        left = unwrap_any_value(left)
     if right.type == PowangAnyType.type:
-        right = PowangTypeMap(right.any)(right.data)
+        right = unwrap_any_value(right)
     if operator in {'+', '-', '*', '/', '%'}:
         assert left.type != PowangNova.type and left.weak.has_value, powang_error_unsupported_operation(
             'operation', f'nova weak {left.type}', operator, right.type)
@@ -461,7 +523,7 @@ def getIndexedValue(where: str, expression: DictRepr, subscript_check: bool):
         TokenToString(ParserTokenType.ASSIGNMENT),
         expression['target']['value'])
     if target_value.type == PowangAnyType.type:
-        target_value = PowangTypeMap(target_value.any)(target_value.data)
+        target_value = unwrap_any_value(target_value)
     index = evaluateAstExpression(expression['index'])
     if subscript_check:
         assert target_value.type != PowangString.type, powang_error_format("ASSIGN", where, "str type is not subscriptable for now.")
@@ -493,6 +555,35 @@ def getErrorProperty(where: str, error_value: PowangErrorValue, property_identif
     ]))
 
 
+def _score_parameter(type_node: DictRepr, param: PowangAny) -> int:
+    spec = _typespec.from_ast_node(type_node)
+    concrete = unwrap_any_value(param)
+    source = value_type_spec(concrete)
+    if spec.name == 'any' or source.name == 'any':
+        return 1
+    if spec.kind is _typespec.Kind.UNION:
+        if not spec.args:
+            return 1
+        return max(_score_parameter_spec(branch, concrete, source) for branch in spec.args)
+    return _score_parameter_spec(spec, concrete, source)
+
+
+def _score_parameter_spec(spec: _typespec.TypeSpec, concrete: PowangAny, source: _typespec.TypeSpec) -> int:
+    if spec.name == 'any' or source.name == 'any':
+        return 1
+    if spec == source:
+        return 3
+    if spec.name == concrete.type_name or spec.name == concrete.type:
+        return 3
+    if _typespec.assignable(spec, source):
+        return 2
+    try:
+        casted = explicitCast(spec, concrete)
+    except PowangError:
+        casted = None
+    return 1 if casted is not None else -1
+
+
 def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters: list[PowangAny]):
     candidates: list[int] = [0] * len(match_functions)
     max_score: int | None = None
@@ -503,20 +594,9 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
         elif len(call_parameters) == match_func.min_argc:
             candidates[func_index] += 2
         for match_arg, param in zip(match_func.args, call_parameters):
-            match_arg_type = match_arg['value']['type']['value']['value']
-            if match_arg_type == param.type_name:
-                candidates[func_index] += 3
-            elif match_arg_type == param.type:
-                candidates[func_index] += 3
-            elif match_arg_type == PowangAnyType.type:
-                candidates[func_index] += 1
-            elif match_arg_type in NATI_TYPES:
-                if PowangTypeCast(match_arg_type, param) is not None:
-                    candidates[func_index] += 1
-                else:
-                    candidates[func_index] -= 1
-            else:
-                candidates[func_index] += 1
+            candidates[func_index] += _score_parameter(
+                match_arg['value']['type'], param
+            )
             if match_arg['value']['type']['value']['weak']:
                 if param.weak:
                     candidates[func_index] += 1
@@ -530,10 +610,11 @@ def getFunctionCandidate(match_functions: list[PowangFunction], call_parameters:
         elif candidates[func_index] == max_score:
             max_indices.append(func_index)
 
-    assert len(max_indices) == 1, powang_error_format('OVERLOAD', 'function overload resolution',
-        'Ambiguous call, multiple overloads match equally well', [
-            *[f"candidate {i}: {match_functions[i]}" for i in max_indices]
-        ])
+    if len(max_indices) != 1:
+        raise powang_throw(powang_error_format('OVERLOAD', 'function overload resolution',
+            'Ambiguous call, multiple overloads match equally well', [
+                *[f"candidate {i}: {match_functions[i]}" for i in max_indices]
+            ]))
 
     return match_functions[max_indices[0]]
 
@@ -555,37 +636,44 @@ def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, c
                 continue
             parameter_name = argument_value.get('identifier', {}).get('value')
             argument = call_parameters[i]
-            assert argument.type == PowangReference.type, powang_error_format(
-                'REFERENCE', 'function call', "Expected a reference argument", [
-                    f"parameter '{parameter_name}' is declared as &{param_type.get('value')}",
-                    "pass it as &variable",
-                    f"but {argument.type} was encountered",
-                ])
+            if argument.type != PowangReference.type:
+                raise powang_throw(powang_error_format(
+                    'REFERENCE', 'function call', "Expected a reference argument", [
+                        f"parameter '{parameter_name}' is declared as &{param_type.get('value')}",
+                        "pass it as &variable",
+                        f"but {argument.type} was encountered",
+                    ]))
             expected = param_type.get('value')
-            assert argument.target_type in {expected, PowangAnyType.type}, powang_error_format(
-                'REFERENCE', 'function call', "Reference type does not match", [
-                    f"expected &{expected}",
-                    f"but &{argument.target_type} was encountered",
-                ])
+            if argument.target_type not in {expected, PowangAnyType.type}:
+                raise powang_throw(powang_error_format(
+                    'REFERENCE', 'function call', "Reference type does not match", [
+                        f"expected &{expected}",
+                        f"but &{argument.target_type} was encountered",
+                    ]))
             ScopeStack.new_variable(parameter_name, argument)
             continue
 
         call_argument = evaluateAstExpression(call_arg)
 
         if i < len(call_parameters):
-            assignWithChecks('function call', call_argument, call_parameters[i],
-               areSameObjectType(call_argument, call_parameters[i])
+            argument_value = copy_for_task(call_parameters[i])
+            assignWithChecks('function call', call_argument, argument_value,
+               areSameObjectType(call_argument, argument_value)
                 # force object assign condition
             )
 
-    assert len(call_parameters) <= len(candidate.args), powang_error_format("ARGUMENT", 'Function call', 'too many arguments')
-    assert len(call_parameters) >= candidate.min_argc, powang_error_format("ARGUMENT", 'Function call', 'not enought arguments')
+    if len(call_parameters) > len(candidate.args):
+        raise powang_throw(powang_error_format("ARGUMENT", 'Function call', 'too many arguments'))
+    if len(call_parameters) < candidate.min_argc:
+        raise powang_throw(powang_error_format("ARGUMENT", 'Function call', 'not enought arguments'))
 
     for i, call_arg in enumerate(call_parameters):
-        assert call_arg.defined, powang_error_undefined_argument(callee, i + 1, call_arg.type)
+        if not call_arg.defined:
+            raise powang_throw(powang_error_undefined_argument(callee, i + 1, call_arg.type))
     return None
 
 def callFunction(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
+    call_parameters = resolveNamedArguments(where, candidate, call_parameters, [])
     ## Error-union functions (`: type?`) may return an error VALUE in place of
     ## the declared type. Raised errors (`error(...)`) still propagate as
     ## exceptions: annotations are erasable and never change raising behavior.
@@ -654,6 +742,7 @@ def callExternalFunction(
 ) -> PowangAny:
     ## extern signatures have no body scope of their own, evaluate their
     ## argument declarations in a throwaway scope
+    call_parameters = resolveNamedArguments(where, function, call_parameters, [])
     ScopeStack.push()
     try:
         checkFunctionArguments(where, callee, function, call_parameters)
@@ -735,11 +824,21 @@ def resolveNamedArguments(
         if value is not None:
             continue
         if index < candidate.min_argc:
-            raise powang_throw(powang_error_format('ARGUMENT', where, 'not enought arguments'))
+            raise powang_throw(powang_error_format(
+                'ARGUMENT', where,
+                f"Missing required argument '{arg_names[index]}'", [
+                    f"parameters: {', '.join(arg_names)}",
+                ],
+            ))
         argument_value = candidate.args[index].get('value') if isinstance(candidate.args[index], dict) else None
         default_expression = argument_value.get('expression') if isinstance(argument_value, dict) else None
         if default_expression is None:
-            raise powang_throw(powang_error_format('ARGUMENT', where, 'not enought arguments'))
+            raise powang_throw(powang_error_format(
+                'ARGUMENT', where,
+                f"Missing required argument '{arg_names[index]}'", [
+                    f"parameters: {', '.join(arg_names)}",
+                ],
+            ))
         resolved[index] = evaluateAstExpression(default_expression)
     return [value for value in resolved if value is not None]
 
@@ -947,13 +1046,479 @@ def bindWildcardImport(where: str, module: PowangModule) -> None:
             ScopeStack.new_variable(name, member)
             ScopeStack.new_wildcard_source(name, module.name)
 
-def getValidType(type: str) -> Optional[str]:
+def get_extern_module(name: str) -> Any:
+    state = get_state()
+    if name in state.extern_module_cache:
+        return state.extern_module_cache[name]
+    import_name = name
+    if name == "stdlib_host":
+        import_name = "src.stdlib.stdlib_host"
+    elif name.startswith("stdlib_"):
+        import_name = "src.stdlib." + name
+    for path in state.module_search_paths:
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    try:
+        module = importlib.import_module(import_name)
+    except ImportError as error:
+        raise powang_throw(powang_error_format('MODULE', "extern", 'Module is not allowed in the extern enviroment', [
+            f'module: {name}',
+            str(error),
+        ]))
+    state.extern_module_cache[name] = module
+    return module
+
+
+def type_node_alternatives(type_node: Any) -> list[DictRepr]:
+    """Return every alternative of a TYPE node, or the node itself."""
+    if not isinstance(type_node, dict):
+        return []
+    inner = type_node.get('value')
+    if isinstance(inner, dict):
+        alternatives = inner.get('alternatives')
+        if isinstance(alternatives, list) and alternatives:
+            return [alternative for alternative in alternatives if isinstance(alternative, dict)]
+    return [type_node]
+
+
+def type_node_inner(type_node: Any) -> dict:
+    if not isinstance(type_node, dict):
+        return {}
+    inner = type_node.get('value')
+    return inner if isinstance(inner, dict) else {}
+
+
+def type_node_is_union(type_node: Any) -> bool:
+    inner = type_node_inner(type_node)
+    alternatives = inner.get('alternatives')
+    return isinstance(alternatives, list) and len(alternatives) > 1
+
+
+def unwrap_any_value(value: PowangAny) -> PowangAny:
+    """Return the concrete payload of a gradual or union `any` value."""
+    return PowangUnwrapAny(value)
+
+
+def value_type_spec(value: PowangAny) -> _typespec.TypeSpec:
+    concrete = unwrap_any_value(value)
+    if concrete.type == PowangObjectType.type:
+        return _typespec.TypeSpec(name=concrete.type_name or PowangObjectType.type)
+    if concrete.type == PowangArray.type:
+        element_specs = [value_type_spec(item) for item in concrete.data]
+        element = _typespec.union(element_specs) if element_specs else _typespec.TypeSpec(name='any')
+        return _typespec.TypeSpec(name=PowangArray.type, args=(element,))
+    if concrete.type == PowangTuple.type:
+        return _typespec.TypeSpec(
+            name=PowangTuple.type,
+            args=tuple(value_type_spec(item) for item in concrete.data),
+        )
+    if concrete.type == PowangMap.type:
+        key_specs = [value_type_spec(key) for key in concrete.data.keys()]
+        value_specs = [value_type_spec(item) for item in concrete.data.values()]
+        key_spec = _typespec.union(key_specs) if key_specs else _typespec.TypeSpec(name='any')
+        mapped_spec = _typespec.union(value_specs) if value_specs else _typespec.TypeSpec(name='any')
+        return _typespec.TypeSpec(name=PowangMap.type, args=(key_spec, mapped_spec))
+    if concrete.type == PowangSet.type:
+        element_specs = [value_type_spec(item) for item in concrete.data.keys()]
+        element = _typespec.union(element_specs) if element_specs else _typespec.TypeSpec(name='any')
+        return _typespec.TypeSpec(name=PowangSet.type, args=(element,))
+    if concrete.type == PowangAnyType.type:
+        return _typespec.TypeSpec(name=concrete.any or PowangAnyType.type)
+    return _typespec.TypeSpec(name=concrete.type)
+
+
+def coerce_value_to_type_node(where: str, value: PowangAny, type_node: Any) -> PowangAny:
+    """Apply the implicit construction conversion rules for one value."""
+    inner = type_node_inner(type_node)
+    if inner.get('auto') or inner.get('value') == 'auto':
+        return PowangCopyConstruct(value)
+    target = _typespec.from_ast_node(type_node)
+    concrete = unwrap_any_value(value)
+    source = value_type_spec(concrete)
+
+    if target.name == 'any':
+        return PowangCopyConstruct(concrete)
+
+    if target.kind is _typespec.Kind.UNION:
+        if not _typespec.assignable(target, source):
+            raise powang_throw(powang_error_type_match(
+                where,
+                _typespec.render(target),
+                concrete.type if concrete.type != PowangObjectType.type else concrete.type_name,
+            ))
+        return PowangCopyConstruct(concrete)
+
+    if target.name == source.name:
+        return PowangCopyConstruct(concrete)
+
+    head = _typespec.HEADS.get(target.name)
+    if head is not None and head.shape is _typespec.Shape.SCALAR:
+        casted = PowangTypeCast(target.name, concrete)
+        if casted is not None:
+            return PowangCopyConstruct(casted)
+        raise powang_throw(powang_error_type_match(
+            where,
+            _typespec.render(target),
+            concrete.type if concrete.type != PowangObjectType.type else concrete.type_name,
+        ))
+
+    if head is not None and head.shape in (_typespec.Shape.SEQUENCE, _typespec.Shape.MAPPING):
+        casted = explicitCast(target, concrete)
+        if casted is not None:
+            return PowangCopyConstruct(casted)
+
+    raise powang_throw(powang_error_type_match(
+        where,
+        _typespec.render(target),
+        concrete.type if concrete.type != PowangObjectType.type else concrete.type_name,
+    ))
+
+
+def runtime_type_matches(value: PowangAny, type_node: Any) -> bool:
+    """`::` check for a TYPE node, including union alternatives and qualifiers."""
+    concrete = unwrap_any_value(value)
+    inner = type_node_inner(type_node)
+    if inner.get('weak') and (concrete.type == PowangNova.type or not concrete.weak.has_value):
+        return True
+    outer_const = bool(inner.get('const'))
+    for alternative in type_node_alternatives(type_node):
+        alt_inner = type_node_inner(alternative)
+        name = alt_inner.get('value')
+        if not isinstance(name, str):
+            continue
+        if alt_inner.get('weak'):
+            if concrete.type == PowangNova.type or not concrete.weak.has_value:
+                return True
+        if name == 'auto':
+            return True
+        if concrete.type == PowangObjectType.type:
+            matched = concrete.type_name == name
+        elif concrete.type == PowangAnyType.type:
+            matched = concrete.any == name
+        else:
+            matched = concrete.type == name
+        if matched and (outer_const or alt_inner.get('const')) and not concrete.const.it_is:
+            matched = False
+        if matched:
+            return True
+    return False
+
+
+def cast_to_union_type(where: str, spec: _typespec.TypeSpec, value: PowangAny) -> PowangAny:
+    """Try each union branch in order, including user type constructors."""
+    for branch in spec.args:
+        head = _typespec.HEADS.get(branch.name)
+        if head is None and not branch.nominal:
+            if value.type == PowangObjectType.type and value.type_name == branch.name:
+                return PowangCopyConstruct(value)
+            user_type = ScopeStack.get_ObjectType(branch.name)
+            if user_type is not None:
+                try:
+                    return PowangCopyConstruct(checkObjectTypes(where, user_type, value))
+                except PowangError:
+                    continue
+        try:
+            casted = explicitCast(branch, value)
+        except PowangError:
+            casted = None
+        if casted is not None:
+            return PowangCopyConstruct(casted)
+    raise powang_throw(powang_error_invalid_cast(
+        where,
+        _typespec.render(spec),
+        value.type,
+        True,
+    ))
+
+
+def _evaluate_instantiation_arguments(value: DictRepr) -> tuple[list[PowangAny], list[tuple[str, PowangAny]], bool]:
+    positional: list[PowangAny] = []
+    named: list[tuple[str, PowangAny]] = []
+    for argument in value.get('arguments', []):
+        if not isinstance(argument, dict):
+            continue
+        name = argument.get('name')
+        argument_value = argument.get('value')
+        if isinstance(name, str):
+            named.append((name, evaluateAstExpression(argument_value)))
+        elif isinstance(argument_value, dict) and argument_value.get('type') == ParserTokenType.KEY_VALUE_PAIR:
+            positional.append(argument_value)
+        else:
+            positional.append(evaluateAstExpression(argument_value))
+    return positional, named, bool(value.get('named'))
+
+
+def _ordered_named_constructor(
+    where: str,
+    constructors: list[PowangFunction],
+    named: list[tuple[str, PowangAny]],
+) -> tuple[PowangFunction, list[PowangAny]]:
+    if not constructors:
+        raise powang_throw(powang_error_format(
+            'ARGUMENT', where, "Type has no constructor",
+        ))
+    provided = {name for name, _ in named}
+
+    def parameter_names(candidate: PowangFunction) -> list[str]:
+        return [
+            argument['value']['identifier']['value']
+            for argument in candidate.args
+            if isinstance(argument, dict) and isinstance(argument.get('value'), dict)
+        ]
+
+    compatible: list[PowangFunction] = []
+    for candidate in constructors:
+        names = parameter_names(candidate)
+        if not provided.issubset(names):
+            continue
+        if any(names[index] not in provided for index in range(candidate.min_argc)):
+            continue
+        compatible.append(candidate)
+
+    if not compatible:
+        ## Reuse the shared resolver for the closest signature so the user gets
+        ## a precise unknown, duplicate or missing diagnostic.
+        closest = max(constructors, key=lambda candidate: len(
+            provided.intersection(parameter_names(candidate))
+        ))
+        resolveNamedArguments(where, closest, [], named)
+        raise powang_throw(powang_error_format('ARGUMENT', where, 'Invalid named constructor call'))
+
+    resolved_by_candidate: list[list[PowangAny]] = []
+    for candidate in compatible:
+        try:
+            resolved_by_candidate.append(resolveNamedArguments(where, candidate, [], named))
+        except PowangError:
+            continue
+    if not resolved_by_candidate:
+        raise powang_throw(powang_error_format(
+            'ARGUMENT', where, 'Invalid named constructor call',
+        ))
+    candidate = compatible[0]
+    resolved = resolved_by_candidate[0]
+    if len(compatible) > 1:
+        candidate = getFunctionCandidate(compatible, resolved)
+        resolved = resolveNamedArguments(where, candidate, [], named)
+    return candidate, resolved
+
+
+
+def _construct_project(where: str, positional: list[PowangAny], named: list[tuple[str, PowangAny]], named_form: bool) -> PowangAny:
+    fields = ["modules", "paths", "logLevel", "allowSystem"]
+    values: dict[str, PowangAny | None] = {field: None for field in fields}
+    if named_form:
+        for name, value in named:
+            if name not in values:
+                raise powang_throw(powang_error_format(
+                    'ARGUMENT', where, f"Project has no field named '{name}'",
+                    [f"fields: {', '.join(fields)}"],
+                ))
+            if values[name] is not None:
+                raise powang_throw(powang_error_format(
+                    'ARGUMENT', where, f"Duplicate field '{name}'",
+                ))
+            values[name] = value
+    else:
+        if len(positional) > len(fields):
+            raise powang_throw(powang_error_format(
+                'ARGUMENT', where, "Too many Project fields",
+                [f"expected at most {len(fields)}"],
+            ))
+        for index, value in enumerate(positional):
+            values[fields[index]] = value
+
+    modules_value = values["modules"]
+    paths_value = values["paths"]
+    log_level_value = values["logLevel"]
+    allow_system_value = values["allowSystem"]
+
+    modules: list[str] = []
+    if modules_value is not None:
+        concrete = unwrap_any_value(modules_value)
+        if concrete.type != PowangArray.type:
+            raise powang_throw(powang_error_type_match(where, 'arr[str]', concrete.type))
+        for item in concrete.data:
+            item = unwrap_any_value(item)
+            if item.type != PowangString.type:
+                raise powang_throw(powang_error_type_match(where, 'str', item.type))
+            modules.append(item.data)
+
+    paths_list: list[str] = []
+    if paths_value is not None:
+        concrete = unwrap_any_value(paths_value)
+        if concrete.type != PowangArray.type:
+            raise powang_throw(powang_error_type_match(where, 'arr[str]', concrete.type))
+        for item in concrete.data:
+            item = unwrap_any_value(item)
+            if item.type != PowangString.type:
+                raise powang_throw(powang_error_type_match(where, 'str', item.type))
+            paths_list.append(item.data)
+
+    log_level = "info"
+    if log_level_value is not None:
+        concrete = unwrap_any_value(log_level_value)
+        if concrete.type != PowangString.type:
+            raise powang_throw(powang_error_type_match(where, 'str', concrete.type))
+        log_level = concrete.data
+
+    allow_system = False
+    if allow_system_value is not None:
+        concrete = unwrap_any_value(allow_system_value)
+        if concrete.type != PowangBoolean.type:
+            raise powang_throw(powang_error_type_match(where, 'bool', concrete.type))
+        allow_system = concrete.data
+
+    return PowangProject(modules, paths_list, log_level, allow_system)
+
+
+def evaluate_instantiation(where: str, value: DictRepr) -> PowangAny:
+    type_reference = value.get('type_ref')
+    if not isinstance(type_reference, dict):
+        raise powang_throw(powang_error_syntax(where, "Invalid instantiation node"))
+    type_name = type_reference.get('name')
+    if not isinstance(type_name, str):
+        raise powang_throw(powang_error_syntax(where, "Instantiation requires a type name"))
+    type_parameters = [
+        parameter for parameter in type_reference.get('type_parameters', [])
+        if isinstance(parameter, dict)
+    ]
+    variadic = bool(type_reference.get('variadic'))
+
+    positional, named, named_form = _evaluate_instantiation_arguments(value)
+
     type_alias = get_state().type_alias
-    if type in type_alias:
-        type = type_alias[type]['value']
-    if type in NATI_TYPES:
-        return type
-    return None
+    if type_name in type_alias:
+        alias = type_alias[type_name]
+        if isinstance(alias, dict) and alias.get('alternatives'):
+            raise powang_throw(powang_error_format(
+                'TYPE', where, f"Cannot construct union alias '{type_name}'",
+            ))
+        if isinstance(alias, dict):
+            alias_element = alias.get('element_type')
+            alias_generics = alias.get('generics') or []
+            if not type_parameters and alias.get('value') == PowangArray.type and alias_element is not None:
+                type_parameters = [alias_element]
+            elif not type_parameters and alias_generics:
+                type_parameters = list(alias_generics)
+                variadic = bool(alias.get('variadic'))
+            type_name = alias.get('value', type_name)
+        else:
+            type_name = alias
+
+    if type_name == 'Project':
+        return _construct_project(where, positional, named, named_form)
+
+    if type_name in NATI_TYPES:
+        if named_form:
+            raise powang_throw(powang_error_format(
+                'ARGUMENT', where, "Named arguments are only supported for user type constructors",
+            ))
+        if type_name == PowangMap.type:
+            result = PowangMap()
+            for argument in positional:
+                if not isinstance(argument, dict) or argument.get('type') != ParserTokenType.KEY_VALUE_PAIR:
+                    raise powang_throw(powang_error_format(
+                        'TYPE', where, "map construction requires key >> value entries",
+                    ))
+                pair = argument['value']
+                key_value = evaluateAstExpression(pair['key'])
+                entry_value = evaluateAstExpression(pair['value'])
+                result.data[key_value] = entry_value
+            return result
+
+        if type_name in {PowangArray.type, PowangTuple.type, PowangSet.type}:
+            if type_name == PowangSet.type:
+                if type_parameters:
+                    if len(type_parameters) != 1:
+                        raise powang_throw(powang_error_format(
+                            'TYPE', where, "set construction expects exactly one element type",
+                        ))
+                    positional = [
+                        coerce_value_to_type_node(where, item, type_parameters[0])
+                        for item in positional
+                    ]
+                return PowangSet(positional)
+            if type_parameters:
+                if type_name == PowangArray.type:
+                    if len(type_parameters) != 1:
+                        raise powang_throw(powang_error_format(
+                            'TYPE', where, "arr construction expects exactly one element type",
+                        ))
+                    element_specs = [type_parameters[0]] * len(positional)
+                else:
+                    if variadic:
+                        if len(positional) < len(type_parameters):
+                            raise powang_throw(powang_error_format(
+                                'TYPE', where, "tuple construction arity does not match its type",
+                                [
+                                    f"type declares at least {len(type_parameters)} elements",
+                                    f"but {len(positional)} were given",
+                                ],
+                            ))
+                        if type_parameters:
+                            element_specs = (
+                                type_parameters[:-1]
+                                + [type_parameters[-1]] * (len(positional) - len(type_parameters) + 1)
+                            )
+                        else:
+                            element_specs = [None] * len(positional)
+                    else:
+                        if len(type_parameters) != len(positional):
+                            raise powang_throw(powang_error_format(
+                                'TYPE', where, "tuple construction arity does not match its type",
+                                [
+                                    f"type declares {len(type_parameters)} elements",
+                                    f"but {len(positional)} were given",
+                                ],
+                            ))
+                        element_specs = type_parameters
+                positional = [
+                    coerce_value_to_type_node(where, item, spec) if spec is not None else PowangCopyConstruct(item)
+                    for item, spec in zip(positional, element_specs)
+                ]
+            if type_name == PowangArray.type:
+                return PowangArray(positional)
+            return PowangTuple(positional)
+
+        if type_name == PowangNova.type:
+            if positional:
+                raise powang_throw(powang_error_format(
+                    'TYPE', where, "nova construction takes no arguments",
+                ))
+            return PowangNova()
+
+        if len(positional) != 1:
+            raise powang_throw(powang_error_format(
+                'TYPE', where, f"{type_name} construction takes exactly one argument",
+                [f"but {len(positional)} were given"],
+            ))
+        casted = explicitCast(type_name, positional[0])
+        if casted is None:
+            raise powang_throw(powang_error_invalid_cast(
+                where, type_name, positional[0].type, True,
+            ))
+        return casted
+
+    user_type = ScopeStack.get_ObjectType(type_name)
+    if user_type is None:
+        raise powang_throw(powang_error_identifier_type(where, type_name))
+    instance_type = ScopeStack.get_existingObjectType(type_name)
+    constructors = instance_type.getConstructors()
+    if named_form:
+        if positional:
+            raise powang_throw(powang_error_format(
+                'ARGUMENT', where, "Named and positional arguments cannot be mixed",
+            ))
+        candidate, arguments = _ordered_named_constructor(where, constructors, named)
+    else:
+        if not constructors:
+            raise powang_throw(powang_error_format(
+                'ARGUMENT', where, f"Type '{type_name}' has no constructor",
+            ))
+        candidate = getFunctionCandidate(constructors, positional)
+        arguments = positional
+    return callMethod(where, instance_type, CONSTRUCTOR_METHOD_NAME, candidate, arguments)
+
 
 ## Evaluation depth guard. Recursive Powang calls would otherwise surface as a
 ## raw Python RecursionError. The counter is per execution context (thread) and
@@ -1093,17 +1658,16 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             binary_left = evaluateAstExpression(expr_value['left'])
             if binary_operator in {'::', '!:'}:
                 type_condition: bool = True
-                if expr_value['right']['type'] == LexerTokenType.IDENTIFIER:
-                    type_condition = expr_value['right']['value'] == (
+                right_node = expr_value['right']
+                right_node_type = right_node.get('type') if isinstance(right_node, dict) else None
+                if right_node_type == ParserTokenType.TYPE:
+                    type_condition = runtime_type_matches(binary_left, right_node)
+                elif right_node_type == LexerTokenType.IDENTIFIER:
+                    type_condition = right_node['value'] == (
                         binary_left.type_name if binary_left.type != PowangAnyType.type else binary_left.any
                     )
-
-                    # if expr_value['right']['value']['weak']:
-                    #     type_condition = type_condition and binary_left.weak.it_is
-                    # if expr_value['right']['value']['const']:
-                    #     type_condition = type_condition and binary_left.const.it_is
                 else:
-                    binary_right = evaluateAstExpression(expr_value['right'])
+                    binary_right = evaluateAstExpression(right_node)
                     if binary_right.weak:
                         type_condition = type_condition and binary_left.weak.it_is
                     if binary_right.const:
@@ -1118,7 +1682,11 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 target_spec = _ts.from_ast_expr(expr_value['right'])
                 binary_right = getCastTypeName(where, expr_value['right'])
                 if binary_left.type == PowangAnyType.type:
-                    binary_left = PowangTypeMap(binary_left.any)(binary_left.data)
+                    binary_left = PowangUnwrapAny(binary_left)
+
+                if target_spec.kind is _ts.Kind.UNION:
+                    union_casted = cast_to_union_type(where, target_spec, binary_left)
+                    return PowangCopyConstruct(union_casted)
 
                 if binary_right in get_state().type_alias:
                     binary_right = get_state().type_alias[binary_right]['value']
@@ -1152,6 +1720,20 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     return _executeCallNode(where, call_value['callee'], pipeline_parameters)
                 if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.METHOD_CALL:
                     method_value = right_node['value']
+                    owner_node = method_value.get('owner')
+                    if isinstance(owner_node, dict) and \
+                            owner_node.get('type') == LexerTokenType.IDENTIFIER and \
+                            owner_node.get('value') in NATIVE_METHOD_TYPES:
+                        pipeline_parameters = [binary_left] + [
+                            evaluateAstExpression(argument)
+                            for argument in method_value.get('arguments', [])
+                        ]
+                        return call_native_method(
+                            where,
+                            owner_node['value'],
+                            method_value['method']['value'],
+                            pipeline_parameters,
+                        )
                     owner_value = evaluateAstExpression(method_value['owner'])
                     pipeline_parameters = [binary_left] + [
                         evaluateAstExpression(argument)
@@ -1177,6 +1759,21 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                         method_candidate,
                         pipeline_parameters,
                     )
+                if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.ACCESS_EXPRESSION:
+                    access_value = right_node.get('value')
+                    access_target = access_value.get('target') if isinstance(access_value, dict) else None
+                    if isinstance(access_target, dict) and \
+                            access_target.get('type') == LexerTokenType.IDENTIFIER and \
+                            access_target.get('value') in NATIVE_METHOD_TYPES:
+                        member = access_value.get('property')
+                        method_name = member.get('value') if isinstance(member, dict) else None
+                        if isinstance(method_name, str):
+                            return call_native_method(
+                                where,
+                                access_target['value'],
+                                method_name,
+                                [binary_left],
+                            )
                 pipeline_callable = evaluateAstExpression(right_node)
                 return callFunctionValue(where, '<pipeline>', pipeline_callable, [binary_left])
 
@@ -1263,6 +1860,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
             if assign_target['type'] == ParserTokenType.ACCESS_EXPRESSION:
                 access_owner = evaluateAstExpression(assign_target['value']['target'])
+                access_owner = unwrap_any_value(access_owner)
                 if access_owner.type == PowangModule.type:
                     member_name = getValidIdentifier(where, assign_target['value']['property'])
                     raise powang_throw(powang_error_format(
@@ -1270,9 +1868,45 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                             f"cannot assign to '{access_owner.name}.{member_name}'",
                         ]
                     ))
+                if getattr(access_owner, 'structure_locked', False):
+                    raise powang_throw(powang_error_format(
+                        'CONST', where, "object fields are locked",
+                        ["the type annotation ends with '!'"],
+                    ))
                 assign_target_value = evaluateAstExpression(assign_target)
             elif assign_target['type'] == ParserTokenType.INDEX_EXPRESSION:
-                assign_target_value = getIndexedValue(where, assign_target['value'], True)
+                index_expression = assign_target['value']
+                container = unwrap_any_value(evaluateAstExpression(index_expression['target']))
+                index = evaluateAstExpression(index_expression['index'])
+                if container.type == PowangMap.type:
+                    assign_value = evaluateAstExpression(expr_value['expression'])
+                    if index in container.data:
+                        if getattr(container, 'elements_locked', False):
+                            raise powang_throw(powang_error_format(
+                                'CONST', where, "map values are locked",
+                                ["the value type ends with '!'"],
+                            ))
+                    elif getattr(container, 'structure_locked', False):
+                        raise powang_throw(powang_error_format(
+                            'CONST', where, "map structure is locked",
+                            ["the map type ends with '!'"],
+                        ))
+                    container.data[index] = copy_for_task(assign_value)
+                    return assign_value
+                if container.type == PowangArray.type:
+                    if getattr(container, 'elements_locked', False):
+                        raise powang_throw(powang_error_format(
+                            'CONST', where, "array elements are locked",
+                            ["the element type ends with '!'"],
+                        ))
+                    assign_target_value = container.index(index)
+                    assign_value = evaluateAstExpression(expr_value['expression'])
+                    return assignWithChecks(where, assign_target_value, assign_value, False)
+                if container.type == PowangTuple.type:
+                    raise powang_throw(powang_error_format(
+                        'CONST', where, "tuples are immutable",
+                    ))
+                assign_target_value = getIndexedValue(where, index_expression, True)
             else:
                 assign_target = getValidIdentifier(where, assign_target)
                 assign_target_value = ScopeStack.get_variable(assign_target)
@@ -1291,6 +1925,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 assign_target_value.set(assigned)
                 return assigned
             return assignWithChecks(where, assign_target_value, assign_value, False)
+
+        case ParserTokenType.INSTANTIATION:
+            return evaluate_instantiation(where, expr_value)
 
         case ParserTokenType.ARRAY_EXPRESSION:
             array_expr_elements = expr_value['elements']
@@ -1327,7 +1964,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             )
             unwrap_value = evaluateAstExpression(expr_value['expression'])
             if unwrap_value.type == PowangAnyType.type:
-                unwrap_value = PowangTypeMap(unwrap_value.any)(unwrap_value.data)
+                unwrap_value = PowangUnwrapAny(unwrap_value)
             if unwrap_value.type == PowangErrorValue.type:
                 ScopeStack.return_value = PowangCopyConstruct(unwrap_value)
                 return ScopeStack.return_value
@@ -1374,7 +2011,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 raise
 
         case ParserTokenType.MATCH_STATEMENT:
-            match_subject = evaluateAstExpression(expr_value['subject'])
+            match_subject = unwrap_any_value(evaluateAstExpression(expr_value['subject']))
             for match_case in expr_value.get('cases', []):
                 if not isinstance(match_case, dict):
                     continue
@@ -1408,7 +2045,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     ScopeStack.pop()
 
         case ParserTokenType.MATCH_EXPRESSION:
-            match_subject = evaluateAstExpression(expr_value['subject'])
+            match_subject = unwrap_any_value(evaluateAstExpression(expr_value['subject']))
             match_result: PowangAny = PowangNova()
             for match_case in expr_value.get('cases', []):
                 if not isinstance(match_case, dict):
@@ -1596,8 +2233,8 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
             ScopeStack.push()
             try:
-                for_each_iterable = evaluateAstExpression(for_each_iterable_expression)
-                assert for_each_iterable.type in {PowangArray.type, PowangString.type, PowangMap.type}, powang_error_format("VALUE", where, "Expression is not an iterable value", [
+                for_each_iterable = unwrap_any_value(evaluateAstExpression(for_each_iterable_expression))
+                assert for_each_iterable.type in {PowangArray.type, PowangString.type, PowangMap.type, PowangSet.type}, powang_error_format("VALUE", where, "Expression is not an iterable value", [
                     f"Expression is of type {for_each_iterable.type}"
                 ])
 
@@ -1683,8 +2320,11 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
             return_expr_value = evaluateAstExpression(expr_value)
             if return_expr_value.type == PowangAnyType.type:
-                return_expr_value = PowangTypeMap(return_expr_value.any)(return_expr_value.data)
+                return_expr_value = PowangUnwrapAny(return_expr_value)
             ScopeStack.return_value = PowangCopyConstruct(return_expr_value)
+
+        case ParserTokenType.MODULE_DECLARATION:
+            return PowangNova()
 
         case ParserTokenType.TYPE_DECLARATION:
             identifier = getValidIdentifier(where, expr_value['identifier'])
@@ -1723,13 +2363,15 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 return enum_value
             
             get_state().user_types.add(identifier)
+            type_parameters = set(expr_value.get('type_parameters') or [])
             ScopeStack.push()
             try:
                 public_props: dict[str, PowangAny] = {}
                 private_props: dict[str, PowangAny] = {}
                 for public, prop in expr_value['properties']:
                     prop_identifier: str = prop['value']['identifier']['value']
-                    evaluateAstExpression(prop)
+                    concrete_prop = _replace_type_parameters(prop, type_parameters)
+                    evaluateAstExpression(concrete_prop)
                     if public:
                         public_props[prop_identifier] = ScopeStack.variables[-1][prop_identifier]
                     else:
@@ -1737,13 +2379,22 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
                 public_meths: dict[str, list[PowangFunction]] = {}
                 private_meths: dict[str, list[PowangFunction]] = {}
+                public_static_meths: dict[str, list[PowangFunction]] = {}
+                private_static_meths: dict[str, list[PowangFunction]] = {}
                 for public, method in expr_value['methods']:
                     method_identifier: str = method['value']['identifier']['value']
-                    evaluateAstExpression(method)
-                    if public:
-                        public_meths.setdefault(method_identifier, []).append(ScopeStack.functions[-1][method_identifier][-1])
+                    concrete_method = _replace_type_parameters(method, type_parameters)
+                    evaluateAstExpression(concrete_method)
+                    loaded = ScopeStack.functions[-1][method_identifier][-1]
+                    is_instance = (
+                        method_identifier == CONSTRUCTOR_METHOD_NAME
+                        or bool(method['value'].get('instance_method'))
+                    )
+                    if is_instance:
+                        target = public_meths if public else private_meths
                     else:
-                        private_meths.setdefault(method_identifier, []).append(ScopeStack.functions[-1][method_identifier][-1])
+                        target = public_static_meths if public else private_static_meths
+                    target.setdefault(method_identifier, []).append(loaded)
             finally:
                 # Unwind even on error so the REPL does not leak scope frames.
                 ScopeStack.pop()
@@ -1751,12 +2402,14 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             new_user_type = PowangObjectType(
                 public_props, private_props,
                 public_meths, private_meths,
+                public_static_meths, private_static_meths,
             )
             new_user_type.type_name = identifier
             return ScopeStack.new_ObjectType(identifier, new_user_type)
 
         case ParserTokenType.SAFE_ACCESS_EXPRESSION:
             safe_target = evaluateAstExpression(expr_value['target'])
+            safe_target = unwrap_any_value(safe_target)
             if safe_target.type == PowangNova.type or not safe_target.weak.has_value:
                 return PowangNova()
             if safe_target.type == PowangErrorValue.type:
@@ -1779,6 +2432,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.ACCESS_EXPRESSION:
             target = evaluateAstExpression(expr_value['target'])
+            target = unwrap_any_value(target)
             if target.type == PowangErrorValue.type:
                 property_identifier = getValidIdentifier(where, expr_value['property'])
                 return getErrorProperty(where, target, property_identifier)
@@ -1810,8 +2464,50 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             return property_value
 
         case ParserTokenType.METHOD_CALL:
+            owner_node = expr_value['owner']
+            if isinstance(owner_node, dict) and \
+                    owner_node.get('type') == LexerTokenType.IDENTIFIER and \
+                    owner_node.get('value') in NATIVE_METHOD_TYPES:
+                native_arguments = [
+                    evaluateAstExpression(call_arg)
+                    for call_arg in expr_value['arguments']
+                ]
+                return call_native_method(
+                    where,
+                    owner_node['value'],
+                    expr_value['method']['value'],
+                    native_arguments,
+                )
+            if isinstance(owner_node, dict) and owner_node.get('type') == LexerTokenType.IDENTIFIER:
+                user_type = ScopeStack.get_ObjectType(owner_node.get('value'))
+                if user_type is not None:
+                    static_methods = user_type.getStaticMethods(expr_value['method']['value'], False)
+                    if static_methods is None:
+                        raise powang_throw(powang_error_identifier_not_found(
+                            where, f"method: {expr_value['method']['value']}", [
+                                "perhaps is a private static method?"
+                            ]))
+                    static_arguments = [
+                        evaluateAstExpression(call_arg)
+                        for call_arg in expr_value['arguments']
+                    ]
+                    candidate = getFunctionCandidate(static_methods, static_arguments)
+                    return callFunction(
+                        where,
+                        f"{owner_node['value']}.{expr_value['method']['value']}",
+                        candidate,
+                        static_arguments,
+                    )
             owner_value = evaluateAstExpression(expr_value['owner'])
+            owner_value = unwrap_any_value(owner_value)
             call_parameters = [evaluateAstExpression(call_arg) for call_arg in expr_value['arguments']]
+            if owner_value.type in NATIVE_METHOD_TYPES:
+                return call_native_method(
+                    where,
+                    owner_value.type,
+                    expr_value['method']['value'],
+                    [owner_value] + call_parameters,
+                )
             if owner_value.type == PowangModule.type:
                 return callModuleMember(
                     where,
@@ -1875,19 +2571,16 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
             attributes = python.split('.')
 
-            def getExtern(owner, attributes: list):
-                extern = owner.__getattribute__(attributes[0])
-                if len(attributes) > 1:
-                    return getExtern(extern, attributes[1:])
-                return extern
+            module_name = attributes[0]
+            if module_name not in get_state().allowed_extern_modules:
+                raise powang_throw(powang_error_format('MODULE', "extern", 'Module is not allowed in the extern enviroment', [
+                    f'module: {module_name}'
+                ]))
 
-            assert attributes[0] in EXTERNAL_MODULES, powang_error_format('MODULE', "extern" , 'Module is not allowed in the extern enviroment', [
-                f'module: {attributes[0]}'
-            ])
-
-            extern = globals()[attributes[0]]
-            if len(attributes) > 1:
-                extern = getExtern(extern, attributes[1:])
+            extern_module = get_extern_module(module_name)
+            extern = extern_module
+            for attribute in attributes[1:]:
+                extern = getattr(extern, attribute)
 
             extern_signature = evaluateAstExpression(powang)
 
@@ -1904,6 +2597,32 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                         f"python type: {python}"
                     ]))
     return PowangNova()
+
+def _replace_type_parameters(node: Any, parameters: set[str]) -> Any:
+    if isinstance(node, list):
+        return [_replace_type_parameters(item, parameters) for item in node]
+    if not isinstance(node, dict):
+        return node
+    if node.get('type') == ParserTokenType.TYPE:
+        inner = node.get('value')
+        if isinstance(inner, dict) and inner.get('value') in parameters:
+            return doToken(ParserTokenType.TYPE, {
+                'value': PowangAnyType.type,
+                'weak': False,
+                'const': bool(inner.get('const')),
+                'error_union': bool(inner.get('error_union')),
+                'reference': False,
+                'element_type': None,
+                'generics': [],
+                'variadic': False,
+                'alternatives': [],
+                'auto': False,
+            }).toDict()
+    return {
+        key: _replace_type_parameters(value, parameters)
+        for key, value in node.items()
+    }
+
 
 def get_file_content(path: str) -> str:
     with open(path, 'r', encoding='utf-8') as file:
@@ -2048,6 +2767,24 @@ def evaluate_module_ast(
         ScopeStack.pop()
         ScopeStack.restore_scopes(saved_scopes)
 
+def _has_project_declaration(program_ast: Any) -> bool:
+    if not isinstance(program_ast, (list, tuple)):
+        return False
+    for statement in program_ast:
+        if not isinstance(statement, dict):
+            continue
+        statement_type = statement.get('type')
+        value = statement.get('value')
+        if statement_type not in {
+            ParserTokenType.DECLARATION_TYPED_VAR,
+            ParserTokenType.DECLARATION_INTERPRET,
+        } or not isinstance(value, dict):
+            continue
+        if value.get('identifier', {}).get('value') == 'project':
+            return True
+    return False
+
+
 import json
 
 _interpret_depth: ContextVar[int] = ContextVar("powang_interpret_depth", default=0)
@@ -2098,6 +2835,8 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
                 ## the end-of-file line out of the rendered message.
                 setattr(type_errors[0], '_from_type_check', True)
                 raise type_errors[0]
+        if getattr(get_state(), 'project_value', None) is not None and not _has_project_declaration(program_raw_ast):
+            ScopeStack.new_variable('project', get_state().project_value)
         result = PowangNova()
         if ast_output:
             def make_json_serializable(raw_ast):
@@ -2138,4 +2877,5 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
         if state_token is not None:
             ## Restore whatever state (usually none) was active before this
             ## run. Scopes never leak past the outermost interpret_program.
+            active_state.emit_warnings()
             reset_state(state_token)

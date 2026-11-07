@@ -90,6 +90,136 @@ typed_names: arr[str] = ["ada" "grace"];
 
 Element types are checked on declarations, function arguments, return values, indexing and casts. Typed annotations also work in casts, for example `values as arr[int]`. The runtime representation is still one `arr` type, so typed arrays add no runtime cost.
 
+Union annotations accept a value from any branch. Qualifiers apply to the whole annotation.
+
+```po
+score: int | num = 2;
+score = 2.5;                    ## accepted
+name: int | str = "Ada";        ## accepted
+mixed: arr[int | num] = [1, 2.5];
+bad: int | str = 3.14;          ## rejected
+```
+
+`typeof` stays shallow. It reports `arr`, `tup` or the user type name. `typedeep` reports the structural type, including element and position types.
+
+```po
+print(typeof(tup.[2, 3.14]));   ## tup
+print(typedeep(tup.[2, 3.14])); ## tup[int, num]
+print(typedeep([1, 2.5]));      ## arr[int | num]
+```
+
+### Construction
+
+`Type.[args]` is the canonical instantiation form. Native values use the same dot-bracket form.
+
+```po
+integer_value := int.[42];
+number_value := num.[2];
+string_value := str.[25];
+boolean_value := bool.[0];
+
+numbers := arr.[2, 3, 4];             ## arr[int]
+mixed := arr[int | num].[2, 3.14];    ## typed construction
+pair := tup.[2, 3.14, ""];            ## tup[int, num, str]
+typed_pair := tup[int, str].[2, "hi"];
+settings := map.["debug" >> true];    ## map construction
+```
+
+Array, map and tuple literals are parser sugar for the same construction. `[1, 2, 3]` builds `arr[int].[1, 2, 3]`, `["a" >> 2]` builds `map.["a" >> 2]`, and `.[1, 2]` builds a tuple. Mixed arrays infer a union, never `any`.
+
+Empty literals:
+
+```po
+[]      ## arr[any]
+.[]     ## tup
+[>>]    ## map[any, any]
+[/]     ## set[any]
+[/1, 2, 3]  ## set[int].[1, 2, 3]
+```
+
+`[>>]` is only the empty map literal. Non-empty maps use `["key" >> value]`. `[>> "a" >> 1]` is invalid.
+
+### Native methods
+
+Native type names are namespaces. Each method has a value form and, where mutation makes sense, a reference form.
+
+```po
+values := [1, 2];
+copy := values :> arr.push(3);     ## values unchanged
+values &> arr.push(3);             ## values becomes [1, 2, 3]
+
+values &> arr.add([4, 5]);         ## values becomes [1, 2, 3, 4, 5]
+```
+
+`push` adds one value. `add` flattens a container into the receiver. The value form returns a new value. The reference form mutates the caller and returns `&source`.
+
+```po
+arr.push(source, value) -> arr
+arr.push(&source, value) -> &arr
+arr.pop(&source, index = -1) -> &arr
+arr.popget(&source, index = -1) -> element
+arr.put(&source, index, value) -> &arr
+arr.popval(&source, value, max = -1) -> &arr
+```
+
+The same pattern exists for `str`, `map`, `tup` and `set`:
+
+```po
+text &> str.add("!");
+settings := [>>];
+settings["debug"] = true;          ## inserts or replaces
+map.has(settings, "debug");
+map.pop(&settings, "debug");
+map.popget(&settings, "debug");
+
+unique := [/1, 2, 2, 3];
+set.has(unique, 2);
+set.union(unique, [/3, 4]);
+```
+
+`&>` is sugar for a reference pipeline. `x &> f(y)` is `&x :> f(y)`. Parentheses are optional for pipeline targets, so a function with one required parameter and default parameters can be called as `value :> strings.split`.
+
+### Copy semantics and locks
+
+Plain parameters receive a deep copy. Mutation inside the function changes only the copy. `&` parameters receive a reference and mutate the caller.
+
+```po
+fun local_edit(values: arr[int]) {
+    values[0] = 9;                 ## caller unchanged
+}
+
+fun caller_edit(values: &arr[int]) {
+    values[0] = 9;                 ## caller changed, call with &values
+}
+```
+
+Container qualifiers are independent locks. Outer `!` locks structure. Inner `!` locks elements or values.
+
+```po
+arr[int]       ## mutable structure, mutable elements
+arr[int]!      ## locked structure, mutable elements
+arr[int!]      ## mutable structure, locked elements
+arr[int]!!     ## both locked, same as arr[int!]!
+
+map[str, int]!       ## no insert, pop or merge, values mutable
+map[str, int!]       ## insert and pop allowed, values immutable
+map[str, int]!!      ## both locked
+```
+
+Tuple types are immutable by default. Any `!` on a tuple or directly on a tuple element is rejected.
+
+### Generic user types
+
+```po
+type Box[+][T] {
+    | value: T;
+}
+
+box := Box[int].[5];
+```
+
+Both `type Box[T][+]` and `type Box[+][T]` are accepted. Type parameters flow through constructor members, properties, method parameters and method returns.
+
 ### Control flow
 
 ```po
@@ -188,11 +318,11 @@ type Point {
         this.x = px;
     }
 
-    + fun sum(other: Point): int {
+    + fun this.sum(other: Point): int {
         return this.x + other.x;
     }
 
-    + fun describe(): str {
+    + fun this.describe(): str {
         return "Point(" + (this.x as str) + ", " + (this.y as str) + ")";
     }
 }
@@ -220,6 +350,68 @@ print(" ");
 print(copy.x);
 print("\n");
 ```
+
+Access defaults remove repeated specifiers. `type T[+]` makes every member public by default, and `type T[-]` makes every member private by default. A plain `type T` still requires an explicit `+` or `-` on every member. Repeating the default is allowed but produces a warning.
+
+Instance methods must declare their receiver with `this.` or the shorter `.` marker. A method without the marker is static and is called from the type name.
+
+```po
+type Point[+] {
+    | x: int;
+
+    fun origin(): Point {          ## static
+        return Point.[0];
+    }
+
+    fun this.get(): int {          ## instance
+        return this.x;
+    }
+
+    fun .plus(value: int): int {   ## same as this.plus
+        return this.x + value;
+    }
+}
+
+origin := Point.origin();
+origin.get();
+origin.plus(2);
+```
+
+```po
+type Person[+] {
+    id: int!;          ## public write-once member, not a parameter
+    | name: str;       ## public constructor parameter
+    | address: str;    ## public constructor parameter
+    age: num;          ## public member, not a parameter
+    - cache: int;      ## private member
+}
+```
+
+`|` marks constructor members. The compiler generates a public constructor whose parameters follow declaration order. The generated body assigns every parameter to `this` and returns `this`.
+
+```po
+first := Person.["Ada", "London"];
+second := Person.[name >> "Ada", address >> "London"];
+third := .["Ada", "London"] as Person;   ## legacy form, still valid
+```
+
+Named and positional arguments cannot be mixed. Duplicate names, unknown names and missing required names are errors.
+
+A zero-parameter explicit constructor becomes a body hook. The generated assignments run first, then the author body, then `this` is returned.
+
+```po
+type Account[+] {
+    | owner: str;
+
+    fun constructor {
+        if owner == "" {
+            error("owner is required");
+        }
+    }
+}
+```
+
+If an explicit constructor declares parameters, it replaces generation. Constructor members are then ignored and produce a warning. A `|` member declared `name: type!` is allowed and performs its single write from the constructor. The `const` keyword cannot be combined with `|`.
 
 ### Modules
 
@@ -540,6 +732,7 @@ Flags:
 - `--ast output.json` dumps the AST to a JSON file.
 - `--check` parses and type-checks only, does not execute.
 - `--no-check` skips static type checking before execution.
+- `--no-warnings` suppresses non-fatal warnings on stderr.
 - `--debug` prints a full traceback for internal errors.
 - `--allow-system` allows `system()` while an HTTP server is running.
 

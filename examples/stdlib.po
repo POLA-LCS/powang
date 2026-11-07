@@ -1,9 +1,9 @@
-## Standard library: strings, json, url and crypto.
+## Standard library: crypto, json, strings, url
 
-use strings;
-use json;
-use url;
 use crypto;
+use json;
+use strings;
+use url;
 
 print(strings.trim("  spaced  "));
 print("\n");

@@ -15,7 +15,7 @@ passed to the interpreter after the input file; ``argv_get`` and
 import os
 from typing import Any, Optional
 
-from .state import get_state
+from ..state import get_state
 
 
 def _require_text(value: Any, argument: str) -> str:

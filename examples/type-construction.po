@@ -1,0 +1,51 @@
+## Type construction: access defaults, constructor members and unions.
+
+type Person[+] {
+    | name: str;
+    | address: str;
+
+    fun constructor {
+        if name == "" {
+            error("name cannot be empty");
+        }
+    }
+
+    fun this.describe(): str {
+        return this.name + " (" + this.address + ")";
+    }
+}
+
+first := Person.["Ada", "London"];
+second := Person.[name >> "Grace", address >> "Arlington"];
+third := .["Linus", "Helsinki"] as Person;
+
+println(first.describe());
+println(second.describe());
+println(third.describe());
+
+## Native construction follows the same dot-bracket form.
+integer_value := int.[42];
+number_value := num.[2];
+string_value := str.[25];
+boolean_value := bool.[0];
+println(integer_value);
+println(number_value);
+println(string_value);
+println(boolean_value);
+
+## Literal sugar desugars to canonical construction.
+numbers := [2, 3, 4];
+mixed := [1, 2.5];
+pair := tup.[2, 3.14, ""];
+settings := map.["debug" >> true, "retries" >> 3];
+
+println(typedeep(numbers));
+println(typedeep(mixed));
+println(typedeep(pair));
+println(settings["retries"]);
+
+## Union annotations accept a value from any branch.
+score: int | num = 2;
+score = 2.5;
+println(score);
+println(typedeep(settings));

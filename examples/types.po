@@ -8,11 +8,11 @@ type Point {
         this.x = px;
     }
 
-    + fun sum(other: Point): int {
+    + fun this.sum(other: Point): int {
         return this.x + other.x;
     }
 
-    + fun describe(): str {
+    + fun this.describe(): str {
         return "Point(" + (this.x as str) + ", " + (this.y as str) + ")";
     }
 }

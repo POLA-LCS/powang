@@ -10,7 +10,7 @@ export extern fun contains(text: str, sub: str): bool >> "stdlib_strings.contain
 export extern fun starts_with(text: str, prefix: str): bool >> "stdlib_strings.starts_with";
 export extern fun ends_with(text: str, suffix: str): bool >> "stdlib_strings.ends_with";
 export extern fun slice(text: str, start: int, end: int): str >> "stdlib_strings.slice";
-export extern fun split(text: str, sep: str): arr >> "stdlib_strings.split";
+export extern fun split(text: str, sep: str = " "): arr >> "stdlib_strings.split";
 export extern fun join(items: arr, sep: str): str >> "stdlib_strings.join";
 export extern fun repeat(text: str, count: int): str >> "stdlib_strings.repeat";
 export extern fun pad_left(text: str, width: int, fill: str = " "): str >> "stdlib_strings.pad_left";

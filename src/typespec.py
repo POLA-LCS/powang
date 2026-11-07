@@ -24,12 +24,14 @@ class Kind(str, Enum):
     NAMED = "named"
     FUNCTION = "function"
     PARAM = "param"
+    UNION = "union"
 
 
 class Shape(str, Enum):
     SCALAR = "scalar"
     SEQUENCE = "sequence"
     MAPPING = "mapping"
+    SET = "set"
     NOMINAL = "nominal"
     FUNCTION = "function"
     OPAQUE = "opaque"
@@ -79,8 +81,10 @@ HEADS: dict[str, TypeHead] = {
     "arr": TypeHead("arr", Shape.SEQUENCE, arity=(1, 1), variance=("cov",), constructible=True),
     "tup": TypeHead("tup", Shape.SEQUENCE, arity=(0, None), variadic=True, constructible=True),
     "map": TypeHead("map", Shape.MAPPING, arity=(2, 2), variance=("inv", "cov"), constructible=True),
+    "set": TypeHead("set", Shape.SET, arity=(1, 1), variance=("cov",), constructible=True),
     "function": TypeHead("function", Shape.FUNCTION),
     "object": TypeHead("object", Shape.NOMINAL, arity=(0, None)),
+    "Project": TypeHead("Project", Shape.NOMINAL, arity=(0, None)),
     "error": TypeHead("error", Shape.OPAQUE),
     "module": TypeHead("module", Shape.OPAQUE),
     "task": TypeHead("task", Shape.OPAQUE, constructible=True),
@@ -105,6 +109,19 @@ def func(params: Iterable[TypeSpec], returns: Optional[TypeSpec] = None, **flags
     return intern(TypeSpec(kind=Kind.FUNCTION, name="function", params=tuple(params), returns=returns, **flags))
 
 
+def union(specs: Iterable[TypeSpec]) -> TypeSpec:
+    """Flatten and deduplicate union alternatives, preserving first order."""
+    flattened: list[TypeSpec] = []
+    for spec in specs:
+        alternatives = spec.args if spec.kind is Kind.UNION else (spec,)
+        for alternative in alternatives:
+            if alternative not in flattened:
+                flattened.append(alternative)
+    if len(flattened) == 1:
+        return flattened[0]
+    return intern(TypeSpec(kind=Kind.UNION, name="union", args=tuple(flattened)))
+
+
 _INTERN: dict[TypeSpec, TypeSpec] = {}
 
 
@@ -115,7 +132,9 @@ def intern(spec: TypeSpec) -> TypeSpec:
 def render(spec: TypeSpec) -> str:
     if spec.kind is Kind.PARAM:
         return spec.name
-    if spec.kind is Kind.FUNCTION:
+    if spec.kind is Kind.UNION:
+        result = " | ".join(render(a) for a in spec.args)
+    elif spec.kind is Kind.FUNCTION:
         params = ", ".join(render(p) for p in spec.params)
         result = f"fun({params})"
         if spec.returns is not None:
@@ -142,7 +161,7 @@ def render(spec: TypeSpec) -> str:
 
 # ---------------------------------------------------------------- tokenizing
 
-_PUNCT = set("[](),:&@!?")
+_PUNCT = set("[](),:&@!?|")
 _IDENT_START = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
 _IDENT_BODY = _IDENT_START | set("0123456789")
 
@@ -472,6 +491,14 @@ def _build_values(tokens: list[TypeToken], start: int) -> tuple[TypeSpec, int]:
         i += 1
     if reference or weak or const or error_union:
         core = replace(core, reference=reference, weak=weak, const=const, error_union=error_union)
+
+    if i < len(tokens) and tokens[i].kind == "|":
+        alternatives: list[TypeSpec] = [core]
+        while i < len(tokens) and tokens[i].kind == "|":
+            i += 1
+            alternative, i = _build_values(tokens, i)
+            alternatives.append(alternative)
+        core = union(alternatives)
     return core, i
 
 
@@ -506,6 +533,18 @@ def from_ast_node(node: dict) -> TypeSpec:
             embedded = inner.get("node")
             if isinstance(embedded, dict):
                 return _from_dict(embedded)
+            if inner.get("auto"):
+                return _ANY
+            alternatives = inner.get("alternatives")
+            if isinstance(alternatives, list) and alternatives:
+                result = union(from_ast_node(alternative) for alternative in alternatives)
+                return replace(
+                    result,
+                    weak=bool(inner.get("weak")),
+                    const=bool(inner.get("const")),
+                    reference=bool(inner.get("reference")),
+                    error_union=bool(inner.get("error_union")),
+                )
             name = inner.get("value")
             if isinstance(name, str):
                 generics = inner.get("generics") or []
@@ -633,12 +672,16 @@ def from_ast_expr(node: dict) -> TypeSpec:
 def assignable(target: TypeSpec, source: TypeSpec) -> bool:
     if target.name == "any" or source.name == "any":
         return True
-    if target.error_union and source.name == "error":
-        return True
     if source.name == "nova":
-        return target.weak
+        return target.weak or target.name == "nova"
     if target.name == "nova":
         return source.name == "nova"
+    if source.kind is Kind.UNION:
+        return all(assignable(target, branch) for branch in source.args)
+    if target.kind is Kind.UNION:
+        return any(_union_branch_assignable(branch, source) for branch in target.args)
+    if target.error_union and source.name == "error":
+        return True
     if target.reference != source.reference:
         return False
     if target.reference:
@@ -654,9 +697,32 @@ def assignable(target: TypeSpec, source: TypeSpec) -> bool:
     shape = HEADS[target.name].shape if target.name in HEADS else Shape.OPAQUE
     if shape is Shape.SEQUENCE:
         return _assignable_sequence(target, source)
+    if shape is Shape.SET:
+        return _assignable_set(target, source)
     if shape is Shape.MAPPING:
         return _assignable_mapping(target, source)
     return True
+
+
+def _union_branch_assignable(target: TypeSpec, source: TypeSpec) -> bool:
+    """Match a union branch without unrelated numeric coercion."""
+    if target.name == "any" or source.name == "any":
+        return True
+    if target == source:
+        return True
+    if source.name == "nova":
+        return target.weak or target.name == "nova"
+    if target.name == "nova":
+        return False
+    if target.reference != source.reference:
+        return False
+    if target.reference:
+        return _union_branch_assignable(target.unref(), source.unref())
+    if target.nominal or source.nominal:
+        return target.nominal == source.nominal
+    if target.name == source.name:
+        return assignable(target, source)
+    return False
 
 
 def _invariant(left: tuple[TypeSpec, ...], right: tuple[TypeSpec, ...]) -> bool:
@@ -691,13 +757,28 @@ def _assignable_sequence(target: TypeSpec, source: TypeSpec) -> bool:
     return all(assignable(a, b) for a, b in zip(target.args, source.args))
 
 
+def _assignable_set(target: TypeSpec, source: TypeSpec) -> bool:
+    source_head = HEADS.get(source.name)
+    if source_head is None or source_head.shape is not Shape.SET:
+        return False
+    if not target.args or not source.args:
+        return True
+    return assignable(target.args[0], source.args[0])
+
+
 def _assignable_mapping(target: TypeSpec, source: TypeSpec) -> bool:
     source_head = HEADS.get(source.name)
     if source_head is None or source_head.shape is not Shape.MAPPING:
         return False
     if len(target.args) < 2 or len(source.args) < 2:
         return True
-    return _invariant((target.args[0],), (source.args[0],)) and assignable(target.args[1], source.args[1])
+    target_key, source_key = target.args[0], source.args[0]
+    key_matches = (
+        target_key.name == "any"
+        or source_key.name == "any"
+        or _invariant((target_key,), (source_key,))
+    )
+    return key_matches and assignable(target.args[1], source.args[1])
 
 
 def _assignable_function(target: TypeSpec, source: TypeSpec) -> bool:
@@ -757,6 +838,8 @@ def join(left: TypeSpec, right: TypeSpec) -> TypeSpec:
         shape = HEADS[left.name].shape
         if shape is Shape.SEQUENCE and len(left.args) == len(right.args):
             return left.with_args(join(a, b) for a, b in zip(left.args, right.args))
+        if shape is Shape.SET and len(left.args) == len(right.args):
+            return left.with_args(join(a, b) for a, b in zip(left.args, right.args))
         if shape is Shape.MAPPING and len(left.args) == 2 and len(right.args) == 2:
             return left.with_args((join(left.args[0], right.args[0]), join(left.args[1], right.args[1])))
     return _MIXED
@@ -771,6 +854,8 @@ def normalize(spec: TypeSpec, aliases: Optional[dict[str, TypeSpec]] = None, typ
     params = set(type_params)
     if spec.kind is Kind.PARAM or spec.name in params:
         return spec
+    if spec.kind is Kind.UNION:
+        return union(normalize(branch, aliases, params, depth + 1) for branch in spec.args)
     if spec.kind is Kind.FUNCTION:
         return func(
             (normalize(p, aliases, params, depth + 1) for p in spec.params),

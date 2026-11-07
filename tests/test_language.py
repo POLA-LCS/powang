@@ -222,7 +222,7 @@ class UserTypeTests(LanguageTestCase):
             "    + x: int;\n"
             "    - y: int = 7;\n"
             "    + fun constructor(px: int): Point { this.x = px; }\n"
-            "    + fun sum(other: Point): int { return this.x + other.x; }\n"
+            "    + fun this.sum(other: Point): int { return this.x + other.x; }\n"
             "}\n"
             "p := [5] as Point;\n"
             "q: Point = 9;\n"
@@ -239,7 +239,7 @@ class UserTypeTests(LanguageTestCase):
         source = (
             "type Counter {\n"
             "    + count: int = 0;\n"
-            "    + fun bump(): int { this.count += 1; return this.count; }\n"
+            "    + fun this.bump(): int { this.count += 1; return this.count; }\n"
             "}\n"
             "a := [] as Counter;\n"
             'print(a.count); print(" ");\n'
@@ -312,7 +312,7 @@ class ArrayTypingTests(LanguageTestCase):
         result = run_source('numbers: arr[int] = [1 "two"];\n')
         self.assertEqual(result.returncode, 1)
         self.assertIn("expected arr[int]", result.combined)
-        self.assertIn("arr[mixed]", result.combined)
+        self.assertIn("arr[int | str]", result.combined)
         assert_no_traceback(self, result)
 
     def test_typed_array_function_parameter(self) -> None:
