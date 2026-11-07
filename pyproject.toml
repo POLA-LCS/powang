@@ -45,4 +45,5 @@ namespaces = true
 "modules.crypto" = ["*.po"]
 "modules.http" = ["*.po"]
 "modules.http_router" = ["*.po"]
+"modules.host" = ["*.po"]
 "modules.log" = ["*.po"]
