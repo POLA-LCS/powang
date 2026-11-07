@@ -470,6 +470,29 @@ class ModernSyntaxTests(LanguageTestCase):
         self.assert_program_output(source, "16\n")
 
 
+class EqualityTests(LanguageTestCase):
+    def test_user_types_compare_by_type(self) -> None:
+        source = (
+            "type A[+] { | value: int; }\n"
+            "type B[+] { | value: int; }\n"
+            "a := A.[1];\n"
+            "b := B.[1];\n"
+            'print(a == b); print(" "); print(a == a); print("\\n");\n'
+        )
+        self.assert_program_output(source, "false true\n")
+
+    def test_map_ordering_is_language_error(self) -> None:
+        source = (
+            'm1 := ["a" >> 1];\n'
+            'm2 := ["b" >> 2];\n'
+            'print(m1 < m2); print("\\n");\n'
+        )
+        result = run_source(source)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("comparisson", result.combined)
+        assert_no_traceback(self, result)
+
+
 class VariableTests(LanguageTestCase):
     def test_typed_inferred_weak_and_const(self) -> None:
         source = (

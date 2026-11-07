@@ -492,19 +492,24 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
                 casted = PowangTypeCast(left.type, right)
                 require(casted is not None, lambda: powang_error_unsupported_operation('comparisson', left.type, operator, right.type))
                 return performOperation(operator, left, casted, False)
-            match operator:
-                case '==':
-                    result.data = left == right
-                case '!=':
-                    result.data = left != right
-                case '<=':
-                    result.data = left < right or left == right
-                case '>=':
-                    result.data = left > right or left == right
-                case '<':
-                    result.data = left < right
-                case '>':
-                    result.data = left > right
+            try:
+                match operator:
+                    case '==':
+                        result.data = left == right
+                    case '!=':
+                        result.data = left != right
+                    case '<=':
+                        result.data = left < right or left == right
+                    case '>=':
+                        result.data = left > right or left == right
+                    case '<':
+                        result.data = left < right
+                    case '>':
+                        result.data = left > right
+            except TypeError:
+                raise powang_throw(powang_error_unsupported_operation(
+                    'comparisson', left.type, operator, right.type
+                ))
             return result
     if result is None:
         if typed:

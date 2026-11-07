@@ -90,6 +90,13 @@ class PowangTypeBase:
         return None
 
     def __eq__(self, value: 'PowangAny') -> bool: # type: ignore
+        if not isinstance(value, PowangTypeBase):
+            return False
+        if self.type != value.type:
+            return False
+        if self.type == PowangObjectType.type and \
+                getattr(self, 'type_name', None) != getattr(value, 'type_name', None):
+            return False
         return self.data == value.data
 
     def __lt__(self, value: 'PowangAny') -> bool:
