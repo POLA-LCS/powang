@@ -64,7 +64,7 @@ println(classify(-3));
 
 powang is gradually typed. Annotated declarations, assignments, operators, calls and returns are checked. Unannotated code stays dynamic and degrades to `any`.
 
-Built-in types: `int`, `num`, `str`, `bool`, `arr`, `map`, `tup`, `any`, `nova`, `file`, `task`, `function`, `error`, `module`, `object`, `reference`.
+Built-in annotation types: `int`, `num`, `str`, `bool`, `arr`, `map`, `set`, `tup`, `any`, `nova`, `obj`, `task`, `file`, `handle`, `error`. Reference parameters use `&T`.
 
 ```po
 undefined_variable: int;
@@ -78,6 +78,15 @@ string_variable: str = 25 as str;
 weak_variable: @str = nova;          ## weak type holds str or nova
 weak_variable = "Holaaa";
 weak_variable = nova;
+```
+
+`obj` is the top type for user-defined type instances. `task`, `file`, `handle` and `error` annotate their runtime values. Member access on `obj` requires a cast.
+
+```po
+user_value: obj = Point.[1];
+task_handle: task = spawn work();
+file_handle: file = file.open("data.txt", "read");
+error_value: error = fail("KIND", "boom");
 ```
 
 Typed arrays accept an element type. A bare `arr` is sugar for `arr[any]`.
@@ -256,6 +265,39 @@ Strings and maps are iterable. Ranges use two or three `>>` parts after the iter
 ```po
 for i >> 0 >> 3 { print(i); }          ## 0, 1, 2
 for i >> 0 >> 2 >> 10 { print(i); }    ## 0, 2, 4, 6, 8
+```
+
+`loop` repeats a block. `loop if` checks the condition before each iteration and accepts the same declarations as `if`.
+
+```po
+loop {
+    if done {
+        break;
+    }
+}
+
+loop if index < 10 {
+    index += 1;
+}
+
+loop if line := input("") {
+    if line == "quit" {
+        break;
+    }
+    print(line);
+}
+```
+
+Loops can be labeled. `break` and `continue` accept the label to target an outer loop.
+
+```po
+for |rows| row >> matrix {
+    for cell >> row {
+        if cell == target {
+            break rows;
+        }
+    }
+}
 ```
 
 try, catch and finally:
@@ -457,6 +499,20 @@ print(size(pairs));
 print("\n");
 ```
 
+Slicing uses `from >> to`. Both sides are optional. Negative indices count from the end and bounds are clamped.
+
+```po
+text := "abcdef";
+print(text[>>]);      ## abcdef
+print(text[2 >>]);    ## cdef
+print(text[>> 3]);    ## abc
+print(text[-3 >>]);   ## def
+print(text[>> -1]);   ## abcde
+print(text[-1]);      ## f
+```
+
+The same syntax works for arrays and tuples.
+
 Array arithmetic:
 
 ```po
@@ -510,7 +566,7 @@ print(rejected.message);
 print("\n");
 ```
 
-try, catch and finally handle raised errors. Native error values expose kind, message, details, where, line, column, frames and cause.
+try, catch and finally handle raised errors. Native error values expose kind, message, details, where, line, column, frames and cause. `frames` records the call stack, innermost first, formatted as `at function (file:line:column)`.
 
 ```po
 try {
@@ -536,7 +592,7 @@ try {
 
 ### Tasks
 
-Spawn a function call on a worker thread and wait for the result.
+Spawn a function call on a worker thread and wait for the result. Method and static method calls are also supported, for example `spawn worker.run()` and `spawn Math.double(4)`.
 
 ```po
 fun sum_squares(limit: int): int {

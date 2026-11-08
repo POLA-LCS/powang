@@ -2,6 +2,26 @@
 
 All notable changes to powang are documented here.
 
+## Unreleased
+
+### Added
+
+- `loop` and `loop if` loops, with declarations allowed in the condition.
+- `break` and `continue`, including labeled forms.
+- Optional labels on `for`, `loop` and `loop if`.
+- Slicing with `from >> to`, negative indices and negative ordinary indexing.
+- Annotations for `obj`, `task`, `file`, `handle` and `error`.
+- Error frames on caught error values.
+- `spawn` on method and static method calls.
+- Literal boolean dead-branch simplification with `PW210` to `PW214` warnings.
+
+### Changed
+
+- `if false` branches are removed from the AST before checking and execution.
+- `loop` without a targeting `break` emits `PW210`.
+- `loop if true` recommends `loop`, and `loop if false` is removed.
+- `spawn` rejects named arguments with a clear task error.
+
 ## 0.8.0
 
 ### Added

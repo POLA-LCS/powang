@@ -398,3 +398,30 @@ Dependency order: A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10. A5 through A8 can
 - Caught errors expose non-empty `frames`.
 - `spawn` method calls run with isolated task state.
 - The LSP highlights the new syntax, completes active labels, and publishes the new warnings.
+
+## 8. Implementation outcome
+
+Phase 2A is implemented:
+
+- `loop` and `loop if`, including declaration conditions.
+- `break` and `continue`, including labels.
+- Labels on `for`, `loop` and `loop if`.
+- Literal boolean simplification with `PW210` to `PW214`.
+- Slicing and negative indexing for strings, arrays and tuples.
+- `obj`, `task`, `file`, `handle` and `error` annotations.
+- Error frames with function names, files and call positions.
+- `spawn` on method and static method calls.
+- LSP highlighting, label completion and loop diagnostics.
+
+Deviations:
+
+- `spawn` rejects named arguments with a task error.
+- Module namespaces remain shared with tasks. Global functions and their closures are isolated.
+- Error frames use the best available call position. Some indirect call paths have no position.
+
+Verification:
+
+- powang: 262 tests pass in normal mode.
+- powang: 262 tests pass under `python -O`.
+- powang-lsp: 17 Python tests and 3 Node protocol tests pass.
+- LSP smoke, version, vendored source drift and VSIX inspection pass.
