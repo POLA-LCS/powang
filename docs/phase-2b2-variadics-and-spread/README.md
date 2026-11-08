@@ -13,7 +13,7 @@ In scope:
 - Zero variadic arguments infer `undef`.
 - Overload selection rules for concrete and template functions.
 - Variadic signatures in function types and `typedeep`.
-- LSP signature help, hover and `undef[type]` display.
+- LSP signature help, hover and `undef type` display.
 
 Out of scope:
 
@@ -217,21 +217,21 @@ The variadic parameter is bound as `arr[T]` in the function body. Indexing, iter
 
 Calls through function-typed values check the fixed arguments and the variadic tail.
 
-### 5.5 LSP `undef[type]` display
+### 5.5 LSP `undef type` display
 
 This is a display convention, not a language type.
 
 The LSP marks a typed declaration with no initializer as uninitialized:
 
 ```po
-x: int;                  ## LSP hover shows x: undef[int]
-handler: fun[int, int];  ## LSP hover shows handler: undef[fun[int, int]]
+x: int;                  ## LSP hover shows x: undef int
+handler: fun[int, int];  ## LSP hover shows handler: undef fun[int, int]
 x: int = 5;              ## LSP hover shows x: int
 ```
 
 Rules:
 
-- Only the LSP uses `undef[type]`.
+- Only the LSP uses `undef type`.
 - The checker still treats `x: int` as `int`.
 - The runtime still creates an undefined `int` value.
 - The display appears in hover and inlay hints.
@@ -272,10 +272,10 @@ Explicit type arguments are erased at runtime.
 ## 7. LSP changes
 
 - Signature help shows `values: T...`.
-- Hover shows the variadic signature and the `undef[type]` display for uninitialized variables.
+- Hover shows the variadic signature and the `undef type` display for uninitialized variables.
 - Completion adds a variadic function snippet.
 - Diagnostics explain wrong variadic argument types and non-last variadic parameters.
-- Inlay hints show `undef[type]` for uninitialized typed declarations.
+- Inlay hints show `undef type` for uninitialized typed declarations.
 
 ## 8. Tests
 
@@ -312,9 +312,9 @@ Explicit type arguments are erased at runtime.
 ### 8.4 LSP
 
 - Signature help shows the variadic parameter.
-- Hover shows `x: undef[int]` for `x: int;`.
+- Hover shows `x: undef int` for `x: int;`.
 - Hover shows `x: int` for `x: int = 5;`.
-- Inlay hints show `undef[type]`.
+- Inlay hints show `undef type`.
 - Variadic function completion snippet.
 
 ## 9. Commit sequence
@@ -328,7 +328,7 @@ Explicit type arguments are erased at runtime.
 | V5 | Parse explicit type arguments and spread. |
 | V6 | Checker variadic calls and overload rules. |
 | V7 | Runtime spread and variadic metadata. |
-| V8 | LSP signature help, hover and `undef[type]` display. |
+| V8 | LSP signature help, hover and `undef type` display. |
 | V9 | Examples, docs, version bump and release checks. |
 
 ## 10. Verification
@@ -363,7 +363,7 @@ python scripts/check_vsix.py powang-lsp-*.vsix
 | Spread conflicts with array literals | Parse spread only in argument position |
 | Variadic runtime binding breaks named arguments | Keep named arguments out of variadic parameters in this phase |
 | Function type rendering changes break existing `fun[...]` types | Round-trip tests for fixed and variadic function types |
-| LSP `undef[type]` leaks into the checker | Keep the display in the LSP index only |
+| LSP `undef type` leaks into the checker | Keep the display in the LSP index only |
 
 ## 12. Acceptance criteria
 
@@ -374,5 +374,5 @@ python scripts/check_vsix.py powang-lsp-*.vsix
 - Variadic parameters behave as arrays inside the function body.
 - Fixed and variadic arguments can be mixed.
 - `typedeep` reports variadic signatures.
-- The LSP shows `undef[type]` for uninitialized typed variables and normal types for initialized variables.
+- The LSP shows `undef type` for uninitialized typed variables and normal types for initialized variables.
 - All existing tests pass in normal and `-O` modes.

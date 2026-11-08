@@ -9,7 +9,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [ ] Phase 2B2: variadics and spread.
   - Plan: `docs/phase-2b2-variadics-and-spread/README.md`
   - Includes explicit type arguments, prefix `...` spread, zero-argument `undef` inference and overload rules.
-  - Companion LSP change: uninitialized typed variables display as `undef[type]`.
+  - Companion LSP change: uninitialized typed variables display as `undef type`.
   - Target versions: powang `0.11.0`, powang-lsp `0.17.0`.
 
 ## Language features in order
@@ -36,7 +36,17 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - Trait-qualified methods for signature conflicts.
    - LSP completion after `Trait.`.
    - Decision: a single structural method with a compatible signature satisfies every trait that requires that method. No `Trait.method` is needed when the signatures are identical.
-   - `Trait.method` is only needed when two traits require the same method name with different signatures, or when the same signature needs trait-specific behavior.
+   - `Trait.method` stays because two traits can require the same method name with different return types or different semantics. Return-type-only distinctions cannot be resolved by structural matching alone.
+   - Diagnostics to implement:
+     - `type X cannot satisfy TraitA and TraitB: method draw has incompatible signatures (TraitA.draw() -> str, TraitB.draw() -> bytes). Add fun TraitA.draw and fun TraitB.draw.`
+     - `generic parameter T is constrained by TraitA and TraitB, which require incompatible signatures for draw. Use a single trait constraint or a trait-qualified call.`
+     - `call to draw is ambiguous between TraitA.draw and TraitB.draw. Cast the value to one trait or use Trait.method.`
+   - Default trait method bodies:
+     - A default body is checked against the trait contract, not the concrete type.
+     - The trait contract exposes only the members declared in the trait.
+     - A default body cannot access undeclared members. The checker reports `trait method draw uses member color which is not declared in the trait. Declare color in the trait or remove the usage.`
+     - Do not infer the trait shape from members used in a default body. That would make the contract implicit and fragile. If inferred constraints are wanted later, they should be a separate opt-in feature.
+     - At runtime, `this` is the concrete object. Declared trait methods dispatch to the concrete implementations. The checker-only contract is not a runtime type.
 
 4. [ ] Range patterns.
    - Ranges are currently sugar for C-style `for`. This item is about pattern ranges such as `case 0 >> 10 >> ...`, not loop ranges.
@@ -74,7 +84,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [ ] Standalone linter as `powang lint`.
 - [ ] `project.format.po` configuration.
 - [ ] LSP calls the standalone formatter and linter.
-- [ ] LSP-only `undef[type]` display for uninitialized typed variables.
+- [ ] LSP-only `undef type` display for uninitialized typed variables.
 - [ ] LSP trait completion that inserts the full trait method signature.
 - [ ] Debugger and debug adapter.
 - [ ] Package registry client.
@@ -83,9 +93,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 - `undef` is the internal type for an empty variadic argument list.
 - It is not a user-annotatable type.
-- The LSP displays an uninitialized typed variable as `undef[type]`.
-  - `x: int` displays as `x: undef[int]`.
-  - `handler: fun[int, int]` displays as `handler: undef[fun[int, int]]`.
+- The LSP displays an uninitialized typed variable as `undef type`.
+  - `x: int` displays as `x: undef int`.
+  - `handler: fun[int, int]` displays as `handler: undef fun[int, int]`.
 - The runtime display of an undefined value should use `undef`, for example `<int: undef>` instead of `<int: undefined>`.
 - This display convention is separate from the language type system.
 
