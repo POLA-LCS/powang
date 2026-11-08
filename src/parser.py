@@ -1390,11 +1390,15 @@ class Parser:
         if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'spawn':
             self.advance('spawn expression')
             spawned = self.UnaryExpression()
-            require(spawned['type'] == ParserTokenType.CALL_EXPRESSION, lambda: powang_error_syntax(
+            require(spawned['type'] in {
+                ParserTokenType.CALL_EXPRESSION,
+                ParserTokenType.METHOD_CALL,
+            }, lambda: powang_error_syntax(
                 'spawn expression',
-                "spawn expects a function call",
+                "spawn expects a function or method call",
                 [
                     "write it as: spawn function_name(args)",
+                    "or: spawn receiver.method(args)",
                     f"but {TokenToString(spawned['type'])} was encountered",
                 ],
             ))

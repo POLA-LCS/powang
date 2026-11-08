@@ -1041,6 +1041,76 @@ def _prepareTaskCall(where: str, callee_node: DictRepr, call_parameters: list[Po
     the arguments the parent evaluated. The returned callable runs in the
     worker with the cloned state installed.
     """
+    if callee_node.get('type') == ParserTokenType.METHOD_CALL:
+        method_value = callee_node.get('value')
+        if not isinstance(method_value, dict):
+            raise powang_throw(powang_error_format(
+                'TASK', 'spawn', 'Invalid method call',
+            ))
+        owner_node = method_value.get('owner')
+        method_name = getValidIdentifier(where, method_value.get('method'))
+
+        ## Static method: the owner is a type name, not a runtime value.
+        if isinstance(owner_node, dict) and owner_node.get('type') == LexerTokenType.IDENTIFIER:
+            user_type = ScopeStack.get_ObjectType(owner_node.get('value'))
+            if user_type is not None:
+                static_methods = user_type.getStaticMethods(
+                    method_name, _private_access_allowed(user_type)
+                )
+                if static_methods is None:
+                    raise powang_throw(powang_error_identifier_not_found(
+                        where, f"method: {method_name}", [
+                            "perhaps is a private static method?"
+                        ],
+                    ))
+                candidate = getFunctionCandidate(static_methods, call_parameters)
+
+                def static_task_call():
+                    ScopeStack.static_method_stack.append(user_type.type_name)
+                    try:
+                        return callFunction(
+                            where,
+                            f"{user_type.type_name}.{method_name}",
+                            candidate,
+                            call_parameters,
+                            position=_node_position(method_value.get('method')),
+                            frame_name=f"{user_type.type_name}.{method_name}",
+                        )
+                    finally:
+                        ScopeStack.static_method_stack.pop()
+
+                return static_task_call
+
+        owner_value = unwrap_any_value(evaluateAstExpression(owner_node))
+        if owner_value.type == PowangModule.type:
+            return lambda: callModuleMember(
+                where, owner_value, method_name, call_parameters
+            )
+        if owner_value.type == PowangObjectType.type:
+            methods = owner_value.getMethods(
+                method_name, _private_access_allowed(owner_value)
+            )
+            if methods is None:
+                raise powang_throw(powang_error_identifier_not_found(
+                    where, f"method: {method_name}", [
+                        "perhaps is a private method?"
+                    ],
+                ))
+            candidate = getFunctionCandidate(methods, call_parameters)
+            return lambda: callMethod(
+                where,
+                owner_value,
+                method_name,
+                candidate,
+                call_parameters,
+                position=_node_position(method_value.get('method')),
+            )
+        raise powang_throw(powang_error_format(
+            'TASK', 'spawn', 'Expression is not a callable method', [
+                f"receiver type: {owner_value.type}",
+            ],
+        ))
+
     if callee_node.get('type') != LexerTokenType.IDENTIFIER:
         if callee_node.get('type') == ParserTokenType.ACCESS_EXPRESSION:
             access_value = callee_node['value']
@@ -2153,10 +2223,27 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ## the task cannot share mutable storage with the parent. The
             ## callable is resolved here as well; only its execution moves to
             ## the worker.
-            spawn_call = expr_value['call']['value']
+            spawn_node = expr_value['call']
+            spawn_call = spawn_node['value']
+            spawn_arguments = spawn_call.get('arguments', [])
+            if any(
+                isinstance(spawn_arg, dict)
+                and spawn_arg.get('type') == ParserTokenType.NAMED_ARGUMENT
+                for spawn_arg in spawn_arguments
+            ):
+                raise powang_throw(powang_error_format(
+                    'TASK', 'spawn',
+                    'Named arguments are not supported in spawn',
+                    ['evaluate the arguments and pass them positionally'],
+                ))
+            spawn_callee = (
+                spawn_node
+                if spawn_node.get('type') == ParserTokenType.METHOD_CALL
+                else spawn_call.get('callee')
+            )
             parent_parameters = [
                 evaluateAstExpression(spawn_arg)
-                for spawn_arg in spawn_call['arguments']
+                for spawn_arg in spawn_arguments
             ]
             task_parameters = [copy_for_task(parameter) for parameter in parent_parameters]
 
@@ -2170,7 +2257,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             saved_state = get_state()
             set_state(task_state)
             try:
-                task_work = _prepareTaskCall(where, spawn_call['callee'], task_parameters)
+                task_work = _prepareTaskCall(where, spawn_callee, task_parameters)
             finally:
                 set_state(saved_state)
             try:
