@@ -88,6 +88,31 @@ class ErrorDiagnosticTests(unittest.TestCase):
                 self.assertRegex(result.combined, DIAGNOSTIC_RE)
                 self.assertEqual(result.stderr, "")
 
+    def test_error_frames_record_the_call_chain(self) -> None:
+        result = run_source(
+            "fun inner(): int { error(\"boom\"); }\n"
+            "fun outer(): int { return inner(); }\n"
+            "try { outer(); } catch problem {\n"
+            '    for frame >> problem.frames { print(frame); print("\\n"); }\n'
+            "}\n"
+        )
+        self.assertEqual(result.returncode, 0, result.combined)
+        self.assertIn("at inner (", result.stdout)
+        self.assertIn("at outer (", result.stdout)
+
+    def test_error_frames_name_methods(self) -> None:
+        result = run_source(
+            "type Worker[+] {\n"
+            '    fun this.run(): int { error("boom"); }\n'
+            "}\n"
+            "w := Worker.[];\n"
+            "try { w.run(); } catch problem {\n"
+            '    for frame >> problem.frames { print(frame); print("\\n"); }\n'
+            "}\n"
+        )
+        self.assertEqual(result.returncode, 0, result.combined)
+        self.assertIn("at Worker.run (", result.stdout)
+
     def test_check_renders_line(self) -> None:
         result = run_source(
             "type Person[+] {\n"

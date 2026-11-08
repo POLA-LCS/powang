@@ -28,6 +28,24 @@ from .scopestack import ScopeType
 
 
 @dataclass(frozen=True)
+class Frame:
+    """One entry in the interpreter call stack."""
+
+    name: str
+    file: Optional[str] = None
+    line: Optional[int] = None
+    column: Optional[int] = None
+
+    def render(self) -> str:
+        location = self.file or '<unknown>'
+        if self.line is not None:
+            location += f":{self.line}"
+            if self.column is not None:
+                location += f":{self.column}"
+        return f"at {self.name} ({location})"
+
+
+@dataclass(frozen=True)
 class WarningRecord:
     """A non-fatal diagnostic produced by the parser, checker or runtime."""
 
@@ -346,6 +364,7 @@ class InterpreterState:
         ## still publish them.
         self.warnings: list[WarningRecord] = []
         self.warnings_enabled: bool = True
+        self.call_frames: list[Frame] = []
 
     def register_handle(self, obj: Any) -> int:
         handle_id = self.next_handle_id
@@ -453,6 +472,7 @@ class InterpreterState:
         clone_scope.return_value = None
         clone_scope.method_call_stack = []
         clone_scope.static_method_stack = []
+        clone.call_frames = []
 
         clone.file_streams = {}
         clone.module_loader = None

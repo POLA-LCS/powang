@@ -2,7 +2,7 @@ from .parser import *
 from .error import *
 from .builtins import *
 from .scopestack import ScopeType, ScopeStack
-from .state import fresh_state, get_state, set_state, reset_state, copy_for_task
+from .state import fresh_state, get_state, set_state, reset_state, copy_for_task, Frame
 from .builtins.tasks import check_cancellation, get_task_pool, spawn_task
 from .lexer import *
 from .typecheck import type_check
@@ -717,7 +717,29 @@ def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, c
             raise powang_throw(powang_error_undefined_argument(callee, i + 1, call_arg.type))
     return None
 
-def callFunction(where: str, callee: str, candidate: PowangFunction, call_parameters: list[PowangAny]):
+def _node_position(node: Any) -> tuple[int, int] | None:
+    if not isinstance(node, dict):
+        return None
+    line = node.get('line')
+    column = node.get('column')
+    if isinstance(line, int):
+        return (line, column if isinstance(column, int) else 0)
+    return None
+
+
+def _attach_frames(error: PowangError) -> None:
+    if error.frames:
+        return
+    state = get_state()
+    if not state.call_frames:
+        return
+    error.frames = [frame.render() for frame in reversed(state.call_frames)]
+
+
+def callFunction(where: str, callee: str, candidate: PowangFunction,
+                 call_parameters: list[PowangAny],
+                 position: tuple[int, int] | None = None,
+                 frame_name: str | None = None):
     call_parameters = resolveNamedArguments(where, candidate, call_parameters, [])
     ## Error-union functions (`: type?`) may return an error VALUE in place of
     ## the declared type. Raised errors (`error(...)`) still propagate as
@@ -740,6 +762,14 @@ def callFunction(where: str, callee: str, candidate: PowangFunction, call_parame
             closure['functions'],
             closure['ObjectTypes'],
         )
+    state = get_state()
+    frame_file = state.paths.get('RELATIVE') if state.paths else None
+    state.call_frames.append(Frame(
+        frame_name or callee,
+        str(frame_file) if frame_file is not None else None,
+        position[0] if position is not None else None,
+        position[1] if position is not None else None,
+    ))
     ScopeStack.push(ScopeType.FUNCTION)
     return_value: PowangAny = PowangNova()
     try:
@@ -767,7 +797,11 @@ def callFunction(where: str, callee: str, candidate: PowangFunction, call_parame
         )
 
         return return_expression_value
+    except PowangError as error:
+        _attach_frames(error)
+        raise
     finally:
+        state.call_frames.pop()
         if saved_scopes is not None:
             ScopeStack.restore_scopes(saved_scopes)
 
@@ -782,10 +816,18 @@ def _private_access_allowed(target: PowangObjectType) -> bool:
     return False
 
 
-def callMethod(where: str, owner: PowangObjectType, method_name: str, method: PowangFunction, arguments: list[PowangAny]):
+def callMethod(where: str, owner: PowangObjectType, method_name: str, method: PowangFunction,
+               arguments: list[PowangAny], position: tuple[int, int] | None = None):
     ScopeStack.method_call_stack.append(owner)
     try:
-        return callFunction(where, method_name, method, arguments)
+        return callFunction(
+            where,
+            method_name,
+            method,
+            arguments,
+            position=position,
+            frame_name=f"{owner.type_name}.{method_name}",
+        )
     finally:
         ScopeStack.method_call_stack.pop()
 
@@ -955,7 +997,13 @@ def _executeCallNode(where: str, callee_node: DictRepr, call_parameters: list[Po
                     'ARGUMENT', where, 'Named arguments are not supported for external functions',
                 ))
             return callExternalFunction(where, call_callee, candidate, external, call_parameters)
-        return callFunction(where, call_callee, candidate, call_parameters)
+        return callFunction(
+            where,
+            call_callee,
+            candidate,
+            call_parameters,
+            position=_node_position(callee_node),
+        )
 
     if call_callee in get_state().external_functions:
         if named_arguments:
@@ -975,7 +1023,13 @@ def _executeCallNode(where: str, callee_node: DictRepr, call_parameters: list[Po
     # First-class function values: a variable may hold a PowangFunction.
     if (call_variable := ScopeStack.get_variable(call_callee)) is not None \
             and call_variable.type == PowangFunction.type:
-        return callFunction(where, call_callee, call_variable, call_parameters)
+        return callFunction(
+            where,
+            call_callee,
+            call_variable,
+            call_parameters,
+            position=_node_position(callee_node),
+        )
     raise powang_throw(powang_error_identifier_not_found(where, call_callee))
 
 
@@ -1855,6 +1909,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                         method_value['method']['value'],
                         method_candidate,
                         pipeline_parameters,
+                        position=_node_position(method_value['method']),
                     )
                 if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.ACCESS_EXPRESSION:
                     access_value = right_node.get('value')
@@ -2698,6 +2753,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                             f"{owner_node['value']}.{expr_value['method']['value']}",
                             candidate,
                             static_arguments,
+                            position=_node_position(expr_value['method']),
                         )
                     finally:
                         ScopeStack.static_method_stack.pop()
@@ -2738,6 +2794,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 expr_value['method']['value'],
                 method_candidate,
                 call_parameters,
+                position=_node_position(expr_value['method']),
             )
 
         case ParserTokenType.USE_EXPRESSION:
