@@ -22,3 +22,26 @@ fun run() {
 }
 
 run();
+
+## Typed task handles and spawned method calls.
+type Worker[+] {
+    | value: int;
+
+    fun this.double(): int >> this.value * 2;
+    fun triple(value: int): int >> value * 3;
+}
+
+fun run_methods() {
+    worker := Worker.[7];
+    method_task: task = spawn worker.double();
+    static_task: task = spawn Worker.triple(5);
+
+    print(typeof(method_task));
+    print(" ");
+    print(wait(method_task));
+    print(" ");
+    print(wait(static_task));
+    print("\n");
+}
+
+run_methods();

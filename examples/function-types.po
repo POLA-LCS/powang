@@ -1,0 +1,34 @@
+## Function types use fun[arg_types..., return_type].
+
+## A function-typed variable can hold a declared function.
+fun double(value: int): int >> value * 2;
+
+operation: fun[int, int] = double;
+print(operation(6));
+print("\n");
+
+## A function-typed parameter.
+fun apply(function: fun[int, int], value: int): int {
+    return function(value);
+}
+print(apply(double, 7));
+print("\n");
+
+## A function-typed return.
+fun make_increment(amount: int): fun[int, int] {
+    return fun(value: int): int >> value + amount;
+}
+increment := make_increment(3);
+print(increment(9));
+print("\n");
+
+## Arrays of functions.
+operations: arr[fun[int, int]] = [double, increment];
+print(operations[0](5));
+print(" ");
+print(operations[1](5));
+print("\n");
+
+## typedeep reports the function type.
+print(typedeep(double));
+print("\n");

@@ -216,7 +216,43 @@ def copy_for_task(value: PowangAny, _memo: Optional[dict[int, PowangAny]] = None
                 "pass a value or a copy instead",
             ],
         ))
-    return PowangCopyConstruct(value, _memo)
+    copied = PowangCopyConstruct(value, _memo)
+    if copied.type == PowangFunction.type:
+        captured = getattr(copied, 'captured_scopes', None)
+        if captured is not None:
+            if getattr(copied, 'mutable_capture', False):
+                raise powang_throw(powang_error_format(
+                    'TASK', 'spawn',
+                    'Mutable-capture lambdas cannot be sent to a task',
+                    ['capture by value or remove the & marker'],
+                ))
+            copied.captured_scopes = (
+                list(captured[0]),
+                [
+                    {
+                        name: PowangCopyConstruct(item, _memo)
+                        for name, item in scope.items()
+                    }
+                    for scope in captured[1]
+                ],
+                [dict(scope) for scope in captured[2]],
+                [dict(scope) for scope in captured[3]],
+                [dict(scope) for scope in captured[4]],
+            )
+            lambda_name = getattr(copied, 'lambda_name', None)
+            if isinstance(lambda_name, str) and copied.captured_scopes[2]:
+                top = dict(copied.captured_scopes[2][-1])
+                top[lambda_name] = [copied]
+                functions = list(copied.captured_scopes[2])
+                functions[-1] = top
+                copied.captured_scopes = (
+                    copied.captured_scopes[0],
+                    copied.captured_scopes[1],
+                    functions,
+                    copied.captured_scopes[3],
+                    copied.captured_scopes[4],
+                )
+    return copied
 
 
 def _copy_function_for_task(

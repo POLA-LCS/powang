@@ -1286,6 +1286,87 @@ class Parser:
             "instance_method": instance_method,
         }).toDict()
 
+    def helper_LambdaExpression(self):
+        self.consume(LexerTokenType.KEYWORD, 'lambda expression')
+        mutable = False
+        if self.next.type == LexerTokenType.AMPERSAND:
+            self.advance('mutable lambda capture')
+            mutable = True
+        name = None
+        if self.next.type == LexerTokenType.IDENTIFIER:
+            name = self.next.value
+            self.advance('lambda name')
+        self.consume(LexerTokenType.LEFT_PARENTHESIS, 'lambda parameters')
+        args: list[DictRepr] = []
+        has_defaults = False
+        min_argc = 0
+        i = 1
+        while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+            statement = self.Statement()
+            if not has_defaults:
+                require(statement['type'] in {
+                    ParserTokenType.DECLARATION_UNDEFINED,
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                }, lambda: powang_error_syntax(
+                    'lambda parameters', "Invalid argument expression", [
+                        "Expected a variable declaration",
+                        f"but {TokenToString(statement['type'])} was encountered",
+                    ],
+                ))
+                if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
+                    has_defaults = True
+                else:
+                    min_argc += 1
+            elif statement['type'] == ParserTokenType.DECLARATION_UNDEFINED:
+                raise powang_throw(powang_error_format(
+                    'LOGIC', 'lambda parameters', "Missing default value", [
+                        f"expected argument {i} to have a default value",
+                    ],
+                ))
+            else:
+                require(statement['type'] in {
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                }, lambda: powang_error_syntax(
+                    'lambda parameters', "Invalid argument expression", [
+                        "Expected a variable declaration with default value",
+                        f"but {TokenToString(statement['type'])} was encountered",
+                    ],
+                ))
+            args.append(statement)
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+            i += 1
+        self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+        return_expr = None
+        if self.next.type == LexerTokenType.COLON:
+            self.advance()
+            return_expr = self.Type()
+        if self.next.type == LexerTokenType.LEFT_BRACE:
+            block = self.BlockStatement()
+        elif self.next.type == LexerTokenType.RIGHT_ARROW:
+            require(return_expr is not None, lambda: powang_error_syntax(
+                'lambda body',
+                'Expression-bodied lambdas require a return type',
+                ['add a return type after the closing parenthesis'],
+            ))
+            self.advance('lambda body')
+            expression = self.Expression()
+            block = doToken(ParserTokenType.BLOCK_STATEMENT, [
+                doToken(ParserTokenType.RETURN_EXPRESSION, expression).toDict()
+            ]).toDict()
+        else:
+            raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                'lambda expression', "Expected a block or '>>' body",
+            )))
+        return doToken(ParserTokenType.FUN_EXPRESSION, {
+            "name": name,
+            "mutable_capture": mutable,
+            "args": args,
+            "min_argc": min_argc,
+            "return": return_expr,
+            "block": block,
+        }).toDict()
+
     def Expression(self):
         return self.Level_Coalesce()
 
@@ -1777,6 +1858,8 @@ class Parser:
                 if identifier['value'] in self._consts:
                     return copy.deepcopy(self._consts[identifier['value']])
                 return identifier
+            case LexerTokenType.KEYWORD if self.next.value == 'fun':
+                return self.helper_LambdaExpression()
         return self.Literal('primary expression')
 
     def helper_TupleExpression(self):
@@ -1929,6 +2012,47 @@ class Parser:
         if self.next.type == LexerTokenType.ARROBA:
             self.advance('weak type')
             weak = True
+
+        if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'fun':
+            fun_token = self.next
+            self.advance('function type')
+            self.consume(LexerTokenType.LEFT_BRACKET, 'function type')
+            types: list[DictRepr] = []
+            while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                types.append(self.Type())
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'function type', "Expected ',' or ']' in function type",
+                    )))
+            self.consume(LexerTokenType.RIGHT_BRACKET, 'function type')
+            if not types:
+                raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                    'function type', "Function types need a return type",
+                )))
+            const = False
+            error_union = False
+            if self.next.type == LexerTokenType.EXCLAMATION:
+                self.advance('type postfix')
+                const = True
+            if self.next.type == LexerTokenType.QUESTION_MARK:
+                self.advance('type error union')
+                error_union = True
+            return doToken(ParserTokenType.TYPE, {
+                "value": "fun",
+                "parameters": types[:-1],
+                "return_type": types[-1],
+                "weak": weak,
+                "const": const,
+                "error_union": error_union,
+                "reference": reference,
+                "element_type": None,
+                "generics": [],
+                "variadic": False,
+                "line": fun_token.line if fun_token is not None else None,
+                "column": fun_token.column if fun_token is not None else None,
+            }).toDict()
 
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
             self.advance('parenthesized type')

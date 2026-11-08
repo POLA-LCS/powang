@@ -1,0 +1,66 @@
+## Loop forms: loop, loop if, labels, break and continue.
+
+## loop repeats until a break.
+count := 0;
+loop {
+    count += 1;
+    if count >= 3 {
+        break;
+    }
+}
+print(count);
+print("\n");
+
+## loop if checks its condition before each iteration.
+index := 0;
+loop if index < 3 {
+    index += 1;
+}
+print(index);
+print("\n");
+
+## loop if accepts declarations, scoped to the loop body.
+cursor := 0;
+loop if active := cursor < 3 {
+    print(active);
+    print(" ");
+    cursor += 1;
+}
+print("\n");
+
+## continue runs the update expression in a C-style for.
+for value := 0; value < 4; value += 1 {
+    if value == 2 {
+        continue;
+    }
+    print(value);
+    print(" ");
+}
+print("\n");
+
+## Labels target an outer loop.
+found := false;
+for |rows| row >> 0 >> 3 {
+    for column >> 0 >> 3 {
+        if row == 1 && column == 1 {
+            found = true;
+            break rows;
+        }
+    }
+}
+print(found);
+print("\n");
+
+## Labeled continue skips to the next outer iteration.
+for |outer| row >> 0 >> 2 {
+    for column >> 0 >> 2 {
+        if column == 1 {
+            continue outer;
+        }
+        print(row);
+        print(":");
+        print(column);
+        print(" ");
+    }
+}
+print("\n");

@@ -1,0 +1,24 @@
+## Error values expose the call stack through frames.
+
+fun divide(a: int, b: int): int {
+    if b == 0 {
+        error("division by zero");
+    }
+    return a / b;
+}
+
+fun calculate(): int {
+    return divide(10, 0);
+}
+
+try {
+    calculate();
+} catch problem {
+    print("frames: ");
+    print(size(problem.frames));
+    print("\n");
+    for frame >> problem.frames {
+        print(frame);
+        print("\n");
+    }
+}

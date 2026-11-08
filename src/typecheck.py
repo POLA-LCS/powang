@@ -245,6 +245,7 @@ class _Signature:
         'return_type',
         'return_weak',
         'allows_error',
+        'function_type',
     )
 
     def __init__(
@@ -257,6 +258,7 @@ class _Signature:
         return_type: str,
         return_weak: bool,
         allows_error: bool,
+        function_type: str | None = None,
     ):
         self.name = name
         self.parameter_names = parameter_names
@@ -266,6 +268,7 @@ class _Signature:
         self.return_type = return_type
         self.return_weak = return_weak
         self.allows_error = allows_error
+        self.function_type = function_type
 
 
 class _TypeChecker:
@@ -364,6 +367,8 @@ class _TypeChecker:
                         for alternative in alternatives
                         if isinstance(alternative, dict)
                     ])
+                if inner.get('value') == 'fun':
+                    return self._annotation_type(node)
                 name = inner.get('value')
                 if isinstance(name, str):
                     generics = inner.get('generics')
@@ -453,6 +458,18 @@ class _TypeChecker:
                 ])
             if inner.get('auto'):
                 return ANY
+            if inner.get('value') == 'fun':
+                parameters = [
+                    self._annotation_type(parameter, ANY)
+                    for parameter in inner.get('parameters', [])
+                    if isinstance(parameter, dict)
+                ]
+                return_node = inner.get('return_type')
+                returns = self._annotation_type(return_node, ANY) if isinstance(return_node, dict) else ANY
+                parts = parameters + [returns]
+                rendered = 'fun[' + ', '.join(parts) + ']'
+                referenced = bool(inner.get('reference', False)) or bool(type_node.get('reference', False))
+                return f'&{rendered}' if referenced else rendered
         reference = False
         if isinstance(inner, str):
             name = inner
@@ -587,6 +604,12 @@ class _TypeChecker:
             if target_element == ANY or source_element == ANY:
                 return True
             return self._assignable(target_element, source_element)
+        if target.startswith('fun[') or source.startswith('fun['):
+            try:
+                from . import typespec as _ts
+                return _ts.assignable(_ts.type_of_str(target), _ts.type_of_str(source))
+            except Exception:
+                return False
         if source == NOVA:
             # Only weak declarations accept nova.
             return target_weak
@@ -743,6 +766,8 @@ class _TypeChecker:
             return self._infer_call(value)
         if node_type == ParserTokenType.METHOD_CALL:
             return self._infer_method_call(value)
+        if node_type == ParserTokenType.FUN_EXPRESSION:
+            return self._infer_lambda(value)
         if node_type == ParserTokenType.INDEX_EXPRESSION:
             return self._infer_index(value)
         if node_type == ParserTokenType.SLICE_EXPRESSION:
@@ -878,6 +903,15 @@ class _TypeChecker:
         if variable is not None:
             return variable.type
         if name in self.functions:
+            signatures = self.functions[name]
+            function_types = [
+                signature.function_type
+                for signature in signatures
+                if signature.function_type
+            ]
+            unique = list(dict.fromkeys(function_types))
+            if len(unique) == 1:
+                return unique[0]
             return FUNCTION
         if name in self.object_types:
             return f'{OBJECT}:{name}'
@@ -1182,8 +1216,40 @@ class _TypeChecker:
             )
             return candidates[0].return_type if candidates else ANY
 
-        # A function value stored in a variable has no statically known
-        # signature. Unknown callees are skipped, never rejected.
+        variable = self._lookup(callee_name)
+        if variable is not None and isinstance(variable.type, str) and variable.type.startswith('fun['):
+            signature = self._signature_from_function_type(variable.type, callee_name)
+            if signature is None:
+                return ANY
+            if named_nodes:
+                self._error(
+                    f"Function value '{callee_name}' does not accept named arguments",
+                    ['pass the arguments positionally'],
+                    where=f'function call: {callee_name}',
+                )
+                return signature.return_type
+            if len(argument_types) > len(signature.parameter_types):
+                self._error(
+                    f"Function value '{callee_name}' received too many arguments",
+                    [f"expected {len(signature.parameter_types)}"],
+                    where=f'function call: {callee_name}',
+                )
+            elif len(argument_types) < len(signature.parameter_types):
+                self._error(
+                    f"Function value '{callee_name}' received too few arguments",
+                    [f"expected {len(signature.parameter_types)}"],
+                    where=f'function call: {callee_name}',
+                )
+            for expected, actual in zip(signature.parameter_types, argument_types):
+                if not self._assignable(expected, actual):
+                    self._assign_error(
+                        f'function call: {callee_name}',
+                        expected,
+                        actual,
+                    )
+            return signature.return_type
+
+        # Unknown callees are skipped, never rejected.
         return ANY
 
     def _infer_spawn(self, value: Any) -> str:
@@ -1206,6 +1272,127 @@ class _TypeChecker:
             if not self._assignable(parameter_type, argument_type, parameter_weak):
                 return False
         return True
+
+    def _signature_from_function_type(self, type_text: str, name: str) -> Optional[_Signature]:
+        from . import typespec as _ts
+        try:
+            spec = _ts.type_of_str(type_text)
+        except Exception:
+            return None
+        if spec.kind is not _ts.Kind.FUNCTION:
+            return None
+        parameter_types = [_ts.render(parameter) for parameter in spec.params]
+        return_type = _ts.render(spec.returns) if spec.returns is not None else ANY
+        return _Signature(
+            name,
+            [f'arg{index}' for index in range(len(parameter_types))],
+            parameter_types,
+            [False] * len(parameter_types),
+            len(parameter_types),
+            return_type,
+            False,
+            False,
+            type_text,
+        )
+
+    def _collect_return_types(self, node: Any, result: Optional[list[str]] = None) -> list[str]:
+        if result is None:
+            result = []
+        if isinstance(node, list):
+            for item in node:
+                self._collect_return_types(item, result)
+            return result
+        if not isinstance(node, dict):
+            return result
+        if node.get('type') == ParserTokenType.FUN_EXPRESSION:
+            return result
+        if node.get('type') == ParserTokenType.RETURN_EXPRESSION:
+            result.append(self._infer(node.get('value')))
+            return result
+        value = node.get('value')
+        if isinstance(value, dict):
+            self._collect_return_types(value, result)
+        elif isinstance(value, list):
+            self._collect_return_types(value, result)
+        return result
+
+    def _infer_lambda(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ANY
+        arguments = value.get('args')
+        if not isinstance(arguments, list):
+            arguments = []
+        parameter_names: list[str] = []
+        parameter_types: list[str] = []
+        parameter_weak: list[bool] = []
+        for index, argument in enumerate(arguments):
+            argument_value = argument.get('value') if isinstance(argument, dict) else None
+            type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
+            parameter_names.append(
+                self._identifier_name(argument_value.get('identifier'))
+                if isinstance(argument_value, dict) else None
+            )
+            if not parameter_names[-1]:
+                parameter_names[-1] = f'arg{index}'
+            parameter_types.append(self._annotation_type(type_node))
+            parameter_weak.append(self._annotation_weak(type_node))
+        name = value.get('name') if isinstance(value.get('name'), str) else None
+        return_node = value.get('return')
+        if isinstance(return_node, dict):
+            return_type = self._annotation_type(return_node, NOVA)
+            return_weak = self._annotation_weak(return_node)
+            allows_error = self._annotation_error_union(return_node)
+        else:
+            return_type = ANY
+            return_weak = False
+            allows_error = False
+        signature = _Signature(
+            name or '<lambda>',
+            parameter_names,
+            parameter_types,
+            parameter_weak,
+            len(parameter_types),
+            return_type,
+            return_weak,
+            allows_error,
+            'fun[' + ', '.join(parameter_types + [return_type]) + ']',
+        )
+        previous = (
+            self.return_type,
+            self.return_weak,
+            self.return_allows_error,
+            self.in_function,
+            self.this_type,
+        )
+        self.return_type = return_type
+        self.return_weak = return_weak
+        self.return_allows_error = allows_error
+        self.in_function = True
+        self._scope_push()
+        try:
+            for index, parameter_name in enumerate(parameter_names):
+                self._bind(parameter_name, parameter_types[index], True, parameter_weak[index])
+            if name is not None:
+                self._bind(name, signature.function_type or ANY, True, False)
+            block = value.get('block')
+            if isinstance(block, dict):
+                self._infer(block)
+            if return_node is None:
+                collected = self._collect_return_types(block)
+                if collected:
+                    return_type = _union_of_types(collected)
+                    signature.return_type = return_type
+                    signature.function_type = 'fun[' + ', '.join(parameter_types + [return_type]) + ']'
+        finally:
+            self._scope_pop()
+            (
+                self.return_type,
+                self.return_weak,
+                self.return_allows_error,
+                self.in_function,
+                self.this_type,
+            ) = previous
+        return signature.function_type or FUNCTION
 
     def _infer_method_call(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -2385,6 +2572,7 @@ class _TypeChecker:
             return_weak = self._annotation_weak(return_node)
             allows_error = self._annotation_error_union(return_node)
 
+        function_type = 'fun[' + ', '.join(parameter_types + [return_type]) + ']'
         return _Signature(
             name,
             parameter_names,
@@ -2394,6 +2582,7 @@ class _TypeChecker:
             return_type,
             return_weak,
             allows_error,
+            function_type,
         )
 
     def _check_function(self, function_node: Any, this_type: Optional[str] = None, register: bool = True) -> Optional[_Signature]:

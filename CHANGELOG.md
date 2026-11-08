@@ -2,6 +2,22 @@
 
 All notable changes to powang are documented here.
 
+## 0.10.0
+
+### Added
+
+- Function type annotations with `fun[arg_types..., ret_type]`.
+- Lambda expressions with block and `>>` bodies.
+- Named lambdas for recursion and `fun &` mutable capture.
+- Function values passed as arguments, returned from functions and stored in arrays.
+- Function signatures in `typedeep`.
+- Examples for loops, slicing, annotations, error frames, spawned methods, lambdas and function types.
+
+### Changed
+
+- Function declarations record their signature for `typedeep` and casts.
+- The LSP presents hover text as plain text without markdown bold or code spans.
+
 ## 0.9.0
 
 ### Added

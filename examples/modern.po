@@ -1,5 +1,6 @@
 ## Modern syntax tour: comments, interpolation, destructuring, ranges, match,
-## null safety, named arguments, pipelines and const macros.
+## null safety, named arguments, pipelines, const macros, loops, slicing,
+## lambdas and function types.
 
 use strings;
 
@@ -62,3 +63,20 @@ fun greet(name: str = LABEL, punctuation: str = "!"): str >> $"Hello, {name}{pun
 println(greet());
 println(greet(name >> "Ada"));
 println("  trim me  " :> strings.trim :> strings.upper);
+
+## Loop forms and labels.
+index := 0;
+loop if index < 3 {
+    index += 1;
+}
+println($"loop index: {index}");
+
+## Slicing and negative indexing.
+println("abcdef"[1 >> 4]);
+println("abcdef"[-1]);
+
+## Lambdas and function types.
+double := fun(value: int): int >> value * 2;
+apply: fun[fun[int, int], int, int] =
+    fun(function: fun[int, int], value: int): int >> function(value);
+println(apply(double, 5));

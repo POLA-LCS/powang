@@ -59,3 +59,24 @@ print("\n");
 large := load(1000);
 print(large.kind);
 print("\n");
+
+## Caught errors expose the call stack in frames.
+fun inner(): int {
+    error("inner failure");
+}
+
+fun outer(): int {
+    return inner();
+}
+
+try {
+    outer();
+} catch problem {
+    print("frames: ");
+    print(size(problem.frames));
+    print("\n");
+    for frame >> problem.frames {
+        print(frame);
+        print("\n");
+    }
+}

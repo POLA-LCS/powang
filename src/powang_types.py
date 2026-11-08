@@ -611,6 +611,12 @@ class PowangFunction(PowangTypeBase):
         self.args = args
         self.return_expr = return_expr
         self.min_argc = len(self.args)
+        self.function_type: Optional[str] = None
+        self.captured_scopes = None
+        self.captured_this = None
+        self.lambda_name: Optional[str] = None
+        self.is_lambda: bool = False
+        self.mutable_capture: bool = False
         
     def __repr__(self) -> str:
         return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg}" for arg in self.args)}): {self.return_expr['value']}"
@@ -987,6 +993,18 @@ def PowangCopyConstruct(any: PowangAny, _memo: Optional[dict[int, PowangAny]] = 
             value.closure = any.closure
         if hasattr(any, 'external'):
             value.external = any.external
+        if hasattr(any, 'function_type'):
+            value.function_type = any.function_type
+        if hasattr(any, 'captured_scopes'):
+            value.captured_scopes = any.captured_scopes
+        if hasattr(any, 'captured_this'):
+            value.captured_this = any.captured_this
+        if hasattr(any, 'lambda_name'):
+            value.lambda_name = any.lambda_name
+        if hasattr(any, 'is_lambda'):
+            value.is_lambda = any.is_lambda
+        if hasattr(any, 'mutable_capture'):
+            value.mutable_capture = any.mutable_capture
         return _copy_common(any, value)
 
     value = PowangTypeMap(any.type)(any.data)

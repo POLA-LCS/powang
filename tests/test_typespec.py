@@ -16,9 +16,9 @@ class TypeSpecParsingTests(unittest.TestCase):
         self.assertTrue(spec.rest)
 
     def test_function_type(self) -> None:
-        spec = ts.type_of_str("fun(int, &str): bool")
+        spec = ts.type_of_str("fun[int, &str, bool]")
         self.assertIs(spec.kind, ts.Kind.FUNCTION)
-        self.assertEqual(ts.render(spec), "fun(int, &str): bool")
+        self.assertEqual(ts.render(spec), "fun[int, &str, bool]")
 
     def test_qualifiers(self) -> None:
         spec = ts.type_of_str("&arr[any]!")

@@ -471,3 +471,27 @@ python scripts/check_vsix.py powang-lsp-*.vsix
 - Mutable-capture lambdas are rejected at task boundaries.
 - LSP highlights function types and lambdas and shows their types.
 - All existing tests pass in normal and `-O` modes.
+
+## 13. Implementation outcome
+
+Function types and lambdas are implemented:
+
+- Function type annotations use `fun[arg_types..., ret_type]`.
+- Lambdas support block bodies, `>>` bodies, named recursion and `fun &` mutable capture.
+- Function values can be passed, returned and stored in arrays.
+- Methods and static methods can be spawned as tasks.
+- By-value capture snapshots the lexical scope. By-reference capture shares it.
+- Lambdas capture `this` inside methods.
+- Mutable-capture lambdas are rejected at task boundaries. By-value lambda captures are cloned for tasks.
+- `typedeep` reports function signatures such as `fun[int, int]`.
+- The LSP highlights function types and lambda parameters.
+- Hover and completion documentation is plain text with no markdown bold or code spans.
+- Examples cover loops, slicing, annotations, error frames, spawned methods, lambdas and function types.
+
+Verification:
+
+- powang: 291 tests pass in normal mode.
+- powang: 291 tests pass under `python -O`.
+- powang-lsp: 22 Python tests and 3 Node protocol tests pass.
+- All examples run cleanly.
+- LSP smoke, version, vendored source drift and VSIX inspection pass.

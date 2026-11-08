@@ -116,6 +116,37 @@ class ArithmeticsExampleTests(unittest.TestCase):
         assert_no_traceback(self, self.result)
 
 
+class NewFeatureExampleTests(unittest.TestCase):
+    def check(self, name: str, *fragments: str) -> None:
+        result = run_file(ROOT / "examples" / name)
+        self.assertEqual(result.returncode, 0, result.combined)
+        self.assertNotIn("[ERROR]", result.stdout)
+        assert_no_traceback(self, result)
+        for fragment in fragments:
+            self.assertIn(fragment, result.stdout, (name, result.stdout))
+
+    def test_loops_example(self) -> None:
+        self.check("loops.po", "3", "true", "0:0 1:0")
+
+    def test_slicing_example(self) -> None:
+        self.check("slicing.po", "abcdef cdef abc bcd", "def abcde f", "[2, 3]")
+
+    def test_annotations_example(self) -> None:
+        self.check("annotations.po", "3", "task 36", "file", "error DEMO")
+
+    def test_error_frames_example(self) -> None:
+        self.check("error-frames.po", "frames: 2", "at divide", "at calculate")
+
+    def test_spawn_methods_example(self) -> None:
+        self.check("spawn-methods.po", "14 15")
+
+    def test_lambdas_example(self) -> None:
+        self.check("lambdas.po", "8", "120", "11", "7", "15", "12")
+
+    def test_function_types_example(self) -> None:
+        self.check("function-types.po", "12", "14", "10 8", "fun[int, int]")
+
+
 class AllExamplesTests(unittest.TestCase):
     """Every example is a runnable showcase, not just the three original ones."""
 

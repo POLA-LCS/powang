@@ -1,0 +1,36 @@
+## Built-in annotations: obj, task, file, handle and error.
+
+type Point[+] {
+    | x: int;
+}
+
+## obj is the top type for user-defined instances. Cast before using members.
+point_value: obj = Point.[3];
+point: Point = point_value as Point;
+print(point.x);
+print("\n");
+
+## task carries a task handle.
+fun square(value: int): int >> value * value;
+
+task_handle: task = spawn square(6);
+print(typeof(task_handle));
+print(" ");
+print(wait(task_handle));
+print("\n");
+
+## file carries a file handle. README.md is opened read-only.
+file_handle: file = file.open("README.md", "read");
+print(typeof(file_handle));
+print("\n");
+file.close(file_handle);
+
+## error carries an error value.
+error_value: error = fail("DEMO", "example error");
+print(typeof(error_value));
+print(" ");
+print(error_value.kind);
+print("\n");
+
+## handle is reserved for opaque FFI values. It can be declared before use.
+unused_handle: handle;

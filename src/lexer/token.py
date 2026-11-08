@@ -95,6 +95,7 @@ class ParserTokenType(TokenTypeBase):
     DECLARATION_INTERPRET   = auto()
     DECLARATION_UNDEFINED   = auto()
     DECLARATION_FUN         = auto()
+    FUN_EXPRESSION          = auto()
     ASSIGNMENT              = auto()
     ACCESS_EXPRESSION       = auto()
     METHOD_CALL             = auto()

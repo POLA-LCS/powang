@@ -29,8 +29,8 @@ def _deep_type_name(arg: PowangAny, depth: int = 0) -> str:
         if not element_types:
             return f'{PowangArray.type}[{PowangAnyType.type}]'
         return f'{PowangArray.type}[{" | ".join(element_types)}]'
-    if arg.type == PowangHandle.type:
-        return 'handle'
+    if arg.type == PowangFunction.type:
+        return getattr(arg, 'function_type', None) or PowangFunction.type
     if arg.type == PowangHandle.type:
         return 'handle'
     if arg.type == PowangProject.type:

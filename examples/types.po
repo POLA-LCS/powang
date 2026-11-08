@@ -39,3 +39,9 @@ print(first.x);
 print(" ");
 print(copy.x);
 print("\n");
+
+## obj is the top type for user-defined instances. Cast before using members.
+boxed: obj = first;
+same: Point = boxed as Point;
+print(same.x);
+print("\n");

@@ -135,10 +135,9 @@ def render(spec: TypeSpec) -> str:
     if spec.kind is Kind.UNION:
         result = " | ".join(render(a) for a in spec.args)
     elif spec.kind is Kind.FUNCTION:
-        params = ", ".join(render(p) for p in spec.params)
-        result = f"fun({params})"
-        if spec.returns is not None:
-            result += f": {render(spec.returns)}"
+        parts = [render(p) for p in spec.params]
+        parts.append(render(spec.returns) if spec.returns is not None else "nova")
+        result = "fun[" + ", ".join(parts) + "]"
     else:
         result = spec.nominal or spec.name
         if spec.args:
@@ -432,26 +431,44 @@ def _build_values(tokens: list[TypeToken], start: int) -> tuple[TypeSpec, int]:
         i += 1
     if i < len(tokens) and tokens[i].kind == "fun":
         i += 1
-        if i >= len(tokens) or tokens[i].kind != "(":
-            raise TypeSyntaxError("expected '(' after fun")
-        i += 1
-        params: list[TypeSpec] = []
-        if i < len(tokens) and tokens[i].kind != ")":
-            while True:
-                param, i = _build_values(tokens, i)
-                params.append(param)
+        if i < len(tokens) and tokens[i].kind == "[":
+            i += 1
+            types: list[TypeSpec] = []
+            while i < len(tokens) and tokens[i].kind != "]":
+                item, i = _build_values(tokens, i)
+                types.append(item)
                 if i < len(tokens) and tokens[i].kind == ",":
                     i += 1
                     continue
                 break
-        if i >= len(tokens) or tokens[i].kind != ")":
-            raise TypeSyntaxError("expected ')' in function type")
-        i += 1
-        returns = None
-        if i < len(tokens) and tokens[i].kind == ":":
+            if i >= len(tokens) or tokens[i].kind != "]":
+                raise TypeSyntaxError("expected ']' in function type")
             i += 1
-            returns, i = _build_values(tokens, i)
-        core = func(params, returns)
+            if not types:
+                raise TypeSyntaxError("function type needs a return type")
+            core = func(types[:-1], types[-1])
+        else:
+            ## Legacy `fun(args): return` form, accepted for compatibility.
+            if i >= len(tokens) or tokens[i].kind != "(":
+                raise TypeSyntaxError("expected '[' or '(' after fun")
+            i += 1
+            params: list[TypeSpec] = []
+            if i < len(tokens) and tokens[i].kind != ")":
+                while True:
+                    param, i = _build_values(tokens, i)
+                    params.append(param)
+                    if i < len(tokens) and tokens[i].kind == ",":
+                        i += 1
+                        continue
+                    break
+            if i >= len(tokens) or tokens[i].kind != ")":
+                raise TypeSyntaxError("expected ')' in function type")
+            i += 1
+            returns = None
+            if i < len(tokens) and tokens[i].kind == ":":
+                i += 1
+                returns, i = _build_values(tokens, i)
+            core = func(params, returns)
     elif i < len(tokens) and tokens[i].kind == "(":
         i += 1
         core, i = _build_values(tokens, i)
@@ -547,6 +564,21 @@ def from_ast_node(node: dict) -> TypeSpec:
                 )
             name = inner.get("value")
             if isinstance(name, str):
+                if name == "fun":
+                    parameters = [
+                        from_ast_node(parameter)
+                        for parameter in inner.get("parameters", [])
+                        if isinstance(parameter, dict)
+                    ]
+                    return_node = inner.get("return_type")
+                    returns = from_ast_node(return_node) if isinstance(return_node, dict) else None
+                    return replace(
+                        func(parameters, returns),
+                        weak=bool(inner.get("weak")),
+                        const=bool(inner.get("const")),
+                        reference=bool(inner.get("reference")),
+                        error_union=bool(inner.get("error_union")),
+                    )
                 generics = inner.get("generics") or []
                 args = [from_ast_node(g) for g in generics]
                 if name == "arr":

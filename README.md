@@ -347,6 +347,54 @@ fun add(left: int, right: num): num {
 }
 ```
 
+### Function types and lambdas
+
+A function type is `fun[arg_types..., ret_type]`. The last type is the return.
+
+```po
+handler: fun[int, int];
+apply: fun[fun[int, int], int, int];
+```
+
+Lambdas use `fun` in expression position. They support block and `>>` bodies.
+
+```po
+double := fun(value: int): int >> value * 2;
+add := fun(left: int, right: int): int {
+    return left + right;
+};
+```
+
+A named lambda can recurse:
+
+```po
+factorial := fun fact(value: int): int {
+    if value <= 1 { return 1; }
+    return fact(value - 1) * value;
+};
+```
+
+Capture is by value by default. Add `&` to capture by reference.
+
+```po
+base := 10;
+add_base := fun(value: int): int >> value + base;
+
+counter := 0;
+bump := fun &(value: int) { counter += value; };
+```
+
+Functions are values. They can be passed, returned and stored in arrays.
+
+```po
+fun apply(function: fun[int, int], value: int): int {
+    return function(value);
+}
+
+print(apply(double, 7));
+print(typedeep(double));  ## fun[int, int]
+```
+
 ### Types and OOP
 
 User-defined types support public and private members, constructors and methods. Instances copy by value.

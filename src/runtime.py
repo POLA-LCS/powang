@@ -330,6 +330,17 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
     elif type_expression.get('auto'):
         undefined_right_value = PowangAnyType()
         undefined_right_value.any = PowangAnyType.type
+    elif type_expression['value'] == 'fun':
+        undefined_right_value = PowangFunction([], [], None)
+        try:
+            undefined_right_value.function_type = _typespec.render(
+                _typespec.from_ast_node({
+                    'type': ParserTokenType.TYPE,
+                    'value': type_expression,
+                })
+            )
+        except Exception:
+            undefined_right_value.function_type = None
     elif type_expression['value'] in NATI_TYPES:
         undefined_right_value = PowangTypeMap(type_expression['value'])()
         if type_expression['value'] == 'obj':
@@ -492,6 +503,8 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
             check_result = checkObjectTypes(where, target_value, right_value)
         target_value.data = PowangCopyConstructObjectType(check_result).data if check_result.type == PowangObjectType.type else check_result.data
         target_value.private_props = check_result.private_props
+    elif target_value.type == PowangFunction.type and right_value.type == PowangFunction.type:
+        target_value.__dict__.update(vars(right_value))
     else:
         check_result = checkTypes(where, target_value, right_value)
         target_value.data = check_result.data # type: ignore
@@ -727,6 +740,64 @@ def _node_position(node: Any) -> tuple[int, int] | None:
     return None
 
 
+def _snapshot_scopes(scopes):
+    important, variables, functions, object_types, wildcard_sources = scopes
+    return (
+        list(important),
+        [
+            {name: PowangCopyConstruct(value) for name, value in scope.items()}
+            for scope in variables
+        ],
+        [dict(scope) for scope in functions],
+        [dict(scope) for scope in object_types],
+        [dict(scope) for scope in wildcard_sources],
+    )
+
+
+def _capture_scopes(scopes, by_reference: bool):
+    if by_reference:
+        return (
+            list(scopes[0]),
+            list(scopes[1]),
+            list(scopes[2]),
+            list(scopes[3]),
+            list(scopes[4]),
+        )
+    return _snapshot_scopes(scopes)
+
+
+def _bind_lambda_name(captured, name: str, function: PowangFunction):
+    functions = list(captured[2])
+    if functions:
+        functions[-1] = dict(functions[-1])
+        functions[-1].setdefault(name, []).append(function)
+    else:
+        functions = [{name: [function]}]
+    return (captured[0], captured[1], functions, captured[3], captured[4])
+
+
+def _lambda_function_type(args, return_node):
+    parameter_types = []
+    for argument in args:
+        argument_value = argument.get('value') if isinstance(argument, dict) else None
+        type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
+        if isinstance(type_node, dict):
+            try:
+                parameter_types.append(_typespec.render(_typespec.from_ast_node(type_node)))
+            except Exception:
+                parameter_types.append(PowangAnyType.type)
+        else:
+            parameter_types.append(PowangAnyType.type)
+    if isinstance(return_node, dict):
+        try:
+            return_type = _typespec.render(_typespec.from_ast_node(return_node))
+        except Exception:
+            return_type = PowangAnyType.type
+    else:
+        return_type = PowangAnyType.type
+    return 'fun[' + ', '.join(parameter_types + [return_type]) + ']'
+
+
 def _attach_frames(error: PowangError) -> None:
     if error.frames:
         return
@@ -749,9 +820,14 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
         and candidate.return_expr.get('error_union')
     )
 
+    captured_scopes = getattr(candidate, 'captured_scopes', None)
+    captured_this = getattr(candidate, 'captured_this', None)
     closure = getattr(candidate, 'closure', None)
     saved_scopes = None
-    if closure is not None:
+    if captured_scopes is not None:
+        saved_scopes = ScopeStack.save_scopes()
+        ScopeStack.restore_scopes(captured_scopes)
+    elif closure is not None:
         ## Module functions keep lexical access to their defining module
         ## scope even after that scope has been popped from the live stack.
         ## The caller's scopes are hidden so the call is lexically isolated.
@@ -762,6 +838,8 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
             closure['functions'],
             closure['ObjectTypes'],
         )
+    if captured_this is not None:
+        ScopeStack.method_call_stack.append(captured_this)
     state = get_state()
     frame_file = state.paths.get('RELATIVE') if state.paths else None
     state.call_frames.append(Frame(
@@ -791,6 +869,9 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
         if allows_error_union and return_value.type == PowangErrorValue.type:
             return PowangCopyConstruct(return_value)
 
+        if candidate.return_expr is None:
+            return PowangCopyConstruct(return_value)
+
         return_expression_value = getUndefinedVariable(where, candidate.return_expr)
         assignWithChecks(f'function return: {callee}', return_expression_value, return_value,
             areSameObjectType(return_expression_value, return_value)
@@ -801,6 +882,8 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
         _attach_frames(error)
         raise
     finally:
+        if captured_this is not None:
+            ScopeStack.method_call_stack.pop()
         state.call_frames.pop()
         if saved_scopes is not None:
             ScopeStack.restore_scopes(saved_scopes)
@@ -1031,6 +1114,82 @@ def _executeCallNode(where: str, callee_node: DictRepr, call_parameters: list[Po
             position=_node_position(callee_node),
         )
     raise powang_throw(powang_error_identifier_not_found(where, call_callee))
+
+
+def _prepareTaskMethodCall(
+    where: str,
+    callee_node: DictRepr,
+    call_parameters: list[PowangAny],
+) -> Callable[[], PowangAny]:
+    method_value = callee_node.get('value')
+    if not isinstance(method_value, dict):
+        raise powang_throw(powang_error_format(
+            'TASK', 'spawn', 'Invalid method call',
+        ))
+    owner_node = method_value.get('owner')
+    method_name = getValidIdentifier(where, method_value.get('method'))
+    position = _node_position(method_value.get('method'))
+
+    if isinstance(owner_node, dict) and owner_node.get('type') == LexerTokenType.IDENTIFIER:
+        user_type = ScopeStack.get_ObjectType(owner_node.get('value'))
+        if user_type is not None:
+            static_methods = user_type.getStaticMethods(
+                method_name, _private_access_allowed(user_type)
+            )
+            if static_methods is None:
+                raise powang_throw(powang_error_identifier_not_found(
+                    where, f"method: {method_name}", [
+                        "perhaps is a private static method?"
+                    ],
+                ))
+            candidate = getFunctionCandidate(static_methods, call_parameters)
+
+            def static_task_call():
+                ScopeStack.static_method_stack.append(user_type.type_name)
+                try:
+                    return callFunction(
+                        where,
+                        f"{user_type.type_name}.{method_name}",
+                        candidate,
+                        call_parameters,
+                        position=position,
+                        frame_name=f"{user_type.type_name}.{method_name}",
+                    )
+                finally:
+                    ScopeStack.static_method_stack.pop()
+
+            return static_task_call
+
+    owner_value = unwrap_any_value(evaluateAstExpression(owner_node))
+    task_owner = copy_for_task(owner_value)
+    if task_owner.type == PowangModule.type:
+        return lambda: callModuleMember(
+            where, task_owner, method_name, call_parameters
+        )
+    if task_owner.type == PowangObjectType.type:
+        methods = owner_value.getMethods(
+            method_name, _private_access_allowed(owner_value)
+        )
+        if methods is None:
+            raise powang_throw(powang_error_identifier_not_found(
+                where, f"method: {method_name}", [
+                    "perhaps is a private method?"
+                ],
+            ))
+        candidate = getFunctionCandidate(methods, call_parameters)
+        return lambda: callMethod(
+            where,
+            task_owner,
+            method_name,
+            candidate,
+            call_parameters,
+            position=position,
+        )
+    raise powang_throw(powang_error_format(
+        'TASK', 'spawn', 'Expression is not a callable method', [
+            f"receiver type: {owner_value.type}",
+        ],
+    ))
 
 
 def _prepareTaskCall(where: str, callee_node: DictRepr, call_parameters: list[PowangAny]) -> Callable[[], PowangAny]:
@@ -2252,14 +2411,21 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ## outer run can join tasks spawned from inside tasks.
             pool = get_task_pool(parent_state)
             task_state = parent_state.clone_for_task()
-            ## Resolve the callee inside the cloned state so a spawned local or
-            ## module function uses the clone's closure, not the parent's.
-            saved_state = get_state()
-            set_state(task_state)
-            try:
-                task_work = _prepareTaskCall(where, spawn_callee, task_parameters)
-            finally:
-                set_state(saved_state)
+            if spawn_node.get('type') == ParserTokenType.METHOD_CALL:
+                ## Method receivers may be locals. Resolve and snapshot the
+                ## receiver in the parent, then call the method in the clone.
+                task_work = _prepareTaskMethodCall(
+                    where, spawn_node, task_parameters
+                )
+            else:
+                ## Resolve the callee inside the cloned state so a spawned
+                ## local or module function uses the clone's closure.
+                saved_state = get_state()
+                set_state(task_state)
+                try:
+                    task_work = _prepareTaskCall(where, spawn_callee, task_parameters)
+                finally:
+                    set_state(saved_state)
             try:
                 return spawn_task(task_state, task_work, pool)
             except BaseException:
@@ -2580,6 +2746,41 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             finally:
                 ScopeStack.pop()
 
+        case ParserTokenType.FUN_EXPRESSION:
+            lambda_args = expr_value.get('args', [])
+            lambda_block = expr_value.get('block')
+            lambda_return_node = expr_value.get('return')
+            lambda_return = (
+                lambda_return_node.get('value')
+                if isinstance(lambda_return_node, dict)
+                and lambda_return_node.get('type') == ParserTokenType.TYPE
+                else lambda_return_node
+            )
+            function = PowangFunction(
+                args=list(lambda_args),
+                data=list(lambda_block.get('value') or [])
+                if isinstance(lambda_block, dict) else [],
+                return_expr=lambda_return,
+            )
+            function.min_argc = expr_value.get('min_argc', 0)
+            function.is_lambda = True
+            function.mutable_capture = bool(expr_value.get('mutable_capture'))
+            function.function_type = _lambda_function_type(lambda_args, lambda_return_node)
+            function.captured_this = (
+                ScopeStack.method_call_stack[-1]
+                if ScopeStack.method_call_stack else None
+            )
+            captured = _capture_scopes(
+                ScopeStack.save_scopes(),
+                function.mutable_capture,
+            )
+            lambda_name = expr_value.get('name')
+            if isinstance(lambda_name, str) and lambda_name:
+                function.lambda_name = lambda_name
+                captured = _bind_lambda_name(captured, lambda_name, function)
+            function.captured_scopes = captured
+            return function
+
         case ParserTokenType.DECLARATION_FUN:
             fun_identifier = getValidIdentifier(where, expr_value['identifier'])
             require(fun_identifier not in NATI_TYPES, lambda: powang_error_identifier_names_type(where, fun_identifier))
@@ -2620,6 +2821,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 return_type['value']
             )
             new_function.min_argc = expr_value['min_argc']
+            new_function.function_type = _lambda_function_type(
+                expr_value['args'], return_type
+            )
             return ScopeStack.new_function(fun_identifier, new_function)
 
         case ParserTokenType.BREAK_STATEMENT:

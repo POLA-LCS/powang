@@ -1,0 +1,52 @@
+## Lambdas: expression bodies, block bodies, named recursion and capture.
+
+double := fun(value: int): int >> value * 2;
+print(double(4));
+print("\n");
+
+add := fun(left: int, right: int): int {
+    return left + right;
+};
+print(add(3, 5));
+print("\n");
+
+## Named lambda recursion.
+factorial := fun fact(value: int): int {
+    if value <= 1 {
+        return 1;
+    }
+    return fact(value - 1) * value;
+};
+print(factorial(5));
+print("\n");
+
+## Default capture is by value.
+base := 10;
+add_base := fun(value: int): int >> value + base;
+base = 20;
+print(add_base(1));
+print("\n");
+
+## & captures by reference.
+counter := 0;
+bump := fun &(value: int) {
+    counter += value;
+};
+bump(3);
+bump(4);
+print(counter);
+print("\n");
+
+## Lambdas can be passed and returned.
+fun apply(function: fun[int, int], value: int): int {
+    return function(value);
+}
+print(apply(fun(value: int): int >> value * 3, 5));
+print("\n");
+
+fun make_adder(amount: int): fun[int, int] {
+    return fun(value: int): int >> value + amount;
+}
+add_seven := make_adder(7);
+print(add_seven(5));
+print("\n");
