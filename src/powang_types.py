@@ -524,6 +524,22 @@ class PowangProject(PowangTypeBase):
     def __repr__(self) -> str:
         return "<Project>"
 
+    def getProperty(self, property_name: str, private: bool = False) -> Optional['PowangAny']:
+        return self.data.get(property_name)
+
+
+## Built-in object types expose a checker contract and an LSP completion
+## contract. They are constructed by the interpreter, not by user type
+## declarations.
+BUILTIN_OBJECT_TYPES: dict[str, dict[str, str]] = {
+    PowangProject.type: {
+        "modules": "arr[str]",
+        "paths": "arr[str]",
+        "logLevel": "str",
+        "allowSystem": "bool",
+    },
+}
+
 
 # ====== TUPLE =========
 class PowangTuple(PowangTypeBase):

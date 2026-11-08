@@ -11,7 +11,7 @@ from .error import powang_error_format, powang_throw
 from .lexer.token import LexerTokenType, ParserTokenType
 from .error import powang_error_format, powang_throw
 from .parser import Parser, ParserTokenType
-from .powang_types import PowangProject
+from .powang_types import PowangProject, BUILTIN_OBJECT_TYPES
 
 try:
     import tomllib
@@ -136,7 +136,7 @@ def _extract_project_config(program_ast: Any) -> dict[str, Any]:
 
     type_ref = expr_value.get('type_ref')
     type_name = type_ref.get('name') if isinstance(type_ref, dict) else None
-    fields = ["modules", "paths", "logLevel", "allowSystem"]
+    fields = list(BUILTIN_OBJECT_TYPES[PowangProject.type])
     values: dict[str, Any] = {field: None for field in fields}
 
     arguments = expr_value.get('arguments', [])
@@ -282,7 +282,6 @@ def load_project_config(state: Any, base_path: Path | str | None = None) -> bool
 
     content = project_path.read_text(encoding="utf-8")
     from .parser import Parser, ParserTokenType
-    from .powang_types import PowangProject
     program_ast = Parser(content, source_path=project_path).parse()
 
     if not program_ast or not isinstance(program_ast[0], dict):

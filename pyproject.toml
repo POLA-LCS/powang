@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "powang"
-version = "0.13.0"
+version = "0.13.1"
 description = "A small hand-written, multi-purpose programming language interpreter."
 readme = "README.md"
 requires-python = ">=3.12"

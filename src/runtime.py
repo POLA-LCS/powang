@@ -3,6 +3,7 @@ from .error import *
 from .builtins import *
 from .scopestack import ScopeType, ScopeStack
 from .state import fresh_state, get_state, set_state, reset_state, copy_for_task, Frame, TraitRuntimeInfo
+from .powang_types import BUILTIN_OBJECT_TYPES
 from .builtins.tasks import check_cancellation, get_task_pool, spawn_task
 from .lexer import *
 from .typecheck import type_check
@@ -1933,7 +1934,7 @@ def _ordered_named_constructor(
 
 
 def _construct_project(where: str, positional: list[PowangAny], named: list[tuple[str, PowangAny]], named_form: bool) -> PowangAny:
-    fields = ["modules", "paths", "logLevel", "allowSystem"]
+    fields = list(BUILTIN_OBJECT_TYPES[PowangProject.type])
     values: dict[str, PowangAny | None] = {field: None for field in fields}
     if named_form:
         for name, value in named:
@@ -3243,6 +3244,13 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if safe_target.type == PowangModule.type:
                 property_identifier = getValidIdentifier(where, expr_value['property'])
                 return moduleMemberValue(where, safe_target, property_identifier)
+            if safe_target.type == PowangProject.type:
+                property_identifier = getValidIdentifier(where, expr_value['property'])
+                property_value = safe_target.getProperty(property_identifier)
+                require(property_value is not None, lambda: powang_error_identifier_not_found(where, property_identifier, [
+                    f"fields: {', '.join(BUILTIN_OBJECT_TYPES[PowangProject.type])}"
+                ]))
+                return property_value
             require(safe_target.type == PowangObjectType.type, lambda: powang_error_syntax(where, "Invalid safe access", [
                 f"{safe_target.type} cannot be accessed in any way or has no properties"
             ]))
@@ -3272,6 +3280,14 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 raise powang_throw(powang_error_identifier_not_found(where, property_identifier, [
                     "perhaps it is a private variant?"
                 ]))
+            if target.type == PowangProject.type:
+                property_identifier = getValidIdentifier(where, expr_value['property'])
+                require(target.defined, lambda: powang_error_undefined_reference(where, expr_value['target']['value']))
+                property_value = target.getProperty(property_identifier)
+                require(property_value is not None, lambda: powang_error_identifier_not_found(where, property_identifier, [
+                    f"fields: {', '.join(BUILTIN_OBJECT_TYPES[PowangProject.type])}"
+                ]))
+                return property_value
             require(target.type == PowangObjectType.type, lambda: powang_error_syntax(where, "Invalid access", [
                 f"{target.type} cannot be accessed in any way or has no properties"
             ]))

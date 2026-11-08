@@ -945,6 +945,39 @@ Everything after the input file belongs to the script and is exposed through the
 
 The REPL owns one state for the whole session, so variables declared on one line stay visible on the next. Type `exit` or press Ctrl-D to quit.
 
+## Project configuration
+
+A project can place a `project.po` file in its root. `powang run` requires it. Running a file directly or using the REPL also loads it when present. The file must start with `module project;` and export a `project: Project` value.
+
+```po
+module project;
+
+export project: Project = Project.[
+    modules >> ["pygame_host"],
+    paths >> ["."],
+    logLevel >> "info",
+    allowSystem >> false,
+];
+```
+
+`Project` is a built-in object type. Its fields are:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `modules` | `arr[str]` | allowed extern modules |
+| `paths` | `arr[str]` | additional module search paths |
+| `logLevel` | `str` | log level |
+| `allowSystem` | `bool` | allow system access |
+
+Member access is checked and works at runtime:
+
+```po
+print(project.logLevel);
+print(project.modules[0]);
+```
+
+The `Project` type is available as a type annotation. It cannot be redeclared.
+
 ## Project layout
 
 ```

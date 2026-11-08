@@ -39,6 +39,7 @@ from .powang_types import (
     PowangAnyType,
     PowangString,
     PowangTask,
+    BUILTIN_OBJECT_TYPES,
 )
 from .error import (
     PowangError,
@@ -898,7 +899,8 @@ class _TypeChecker:
         if target == NOVA:
             return False
         if target == OBJ:
-            return source == OBJ or source.startswith(f'{OBJECT}:')
+            return source == OBJ or source.startswith(f'{OBJECT}:') or \
+                source in BUILTIN_OBJECT_TYPES
         if source == OBJ:
             return False
         if target.startswith(f'{OBJECT}:'):
@@ -940,16 +942,16 @@ class _TypeChecker:
             return self.errors
         if 'Project' not in self.object_types:
             self.object_types['Project'] = {
-                'props': {
-                    'modules': 'arr[str]',
-                    'paths': 'arr[str]',
-                    'logLevel': 'str',
-                    'allowSystem': 'bool',
-                },
+                'props': dict(BUILTIN_OBJECT_TYPES[PROJECT]),
                 'methods': {},
+                'static_methods': {},
+                'trait_methods': {},
+                'type_parameters': [],
+                'is_enum': False,
+                'variants': [],
             }
         if getattr(get_state(), 'project_value', None) is not None and not self._has_project_declaration(program_ast):
-            self.scopes[0]['project'] = _VariableInfo(f'{OBJECT}:Project', True, False)
+            self.scopes[0]['project'] = _VariableInfo(PROJECT, True, False)
         for statement in program_ast:
             self._infer(statement)
         return self.errors
@@ -1153,7 +1155,7 @@ class _TypeChecker:
         if name == 'this':
             return self.this_type if self.this_type is not None else ANY
         if name == 'Project':
-            return f'{OBJECT}:Project'
+            return PROJECT
         variable = self._lookup(name)
         if variable is not None:
             return variable.type
@@ -2530,6 +2532,16 @@ class _TypeChecker:
                 where='member access',
             )
             return ANY
+        if target_type == PROJECT:
+            props = BUILTIN_OBJECT_TYPES[PROJECT]
+            if property_name in props:
+                return props[property_name]
+            self._error(
+                f"Project has no property named '{property_name}'",
+                [f"fields: {', '.join(props)}"],
+                where='member access',
+            )
+            return ANY
         if target_type == ERROR:
             return {
                 'kind': STRING,
@@ -2659,18 +2671,37 @@ class _TypeChecker:
         argument_types = [self._infer(argument) for argument in positional_nodes]
         named = bool(value.get('named'))
 
-        if normalized == f'{OBJECT}:Project':
+        if normalized == PROJECT:
+            fields = list(BUILTIN_OBJECT_TYPES[PROJECT])
+            if len(argument_types) > len(fields):
+                self._error(
+                    "Project received too many positional fields",
+                    [f"expected at most {len(fields)}", f"fields: {', '.join(fields)}"],
+                    where='project construction',
+                )
+            else:
+                for index, argument_type in enumerate(argument_types):
+                    expected = BUILTIN_OBJECT_TYPES[PROJECT][fields[index]]
+                    if argument_type != ANY and not self._assignable(expected, argument_type):
+                        self._assign_error('project construction', expected, argument_type)
             for named_node in named_nodes:
                 field_name = named_node.get('name')
-                if isinstance(field_name, str) and field_name not in {
-                    "modules", "paths", "logLevel", "allowSystem"
-                }:
+                if not isinstance(field_name, str):
+                    continue
+                if field_name not in fields:
                     self._error(
                         f"Project has no field named '{field_name}'",
-                        ["fields: modules, paths, logLevel, allowSystem"],
+                        [f"fields: {', '.join(fields)}"],
                         where='project construction',
                     )
-            return f'{OBJECT}:Project'
+                    continue
+                value_node = named_node.get('value')
+                if value_node is not None:
+                    value_type = self._infer(value_node)
+                    expected = BUILTIN_OBJECT_TYPES[PROJECT][field_name]
+                    if value_type != ANY and not self._assignable(expected, value_type):
+                        self._assign_error('project construction', expected, value_type)
+            return PROJECT
 
         if normalized in NATIVE_TYPE_NAMES:
             if named or named_nodes:

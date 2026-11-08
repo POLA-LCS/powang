@@ -2,6 +2,21 @@
 
 All notable changes to powang are documented here.
 
+## 0.13.1
+
+### Added
+
+- `Project` is a fully integrated built-in object type with field checking.
+- Member access on `project` values works in the checker and at runtime.
+- Named and positional `Project` construction validates field names and types.
+- A shared `BUILTIN_OBJECT_TYPES` registry drives the checker, runtime and LSP.
+
+### Fixed
+
+- `project.po` files can be type-checked and run directly.
+- `project.modules`, `project.paths`, `project.logLevel` and `project.allowSystem` are readable.
+- The LSP `undef` inlay hint inserts only the virtual `undef` marker before the existing type.
+
 ## 0.13.0
 
 ### Added
