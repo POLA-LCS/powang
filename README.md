@@ -349,7 +349,7 @@ fun add(left: int, right: num): num {
 
 ### Function types and lambdas
 
-A function type is `fun[arg_types..., ret_type]`. The last type is the return.
+A function type is `fun[arg_types..., ret_type]`. The last type is the return. The bare name `function` is not a type annotation.
 
 ```po
 handler: fun[int, int];

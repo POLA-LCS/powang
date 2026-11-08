@@ -26,6 +26,8 @@ NATI_TYPES: set[str] = {
     'obj',
 }
 
+RESERVED_TYPE_NAMES: set[str] = set(NATI_TYPES) | {PowangFunction.type}
+
 
 class _PathsProxy(MutableMapping):
     """Compatibility view over the active state's ``paths`` dict.
@@ -276,7 +278,7 @@ class Parser:
         }).toDict()
 
     def helper_TypeObjectDeclaration(self, identifier: DictRepr, is_signature: bool = False):
-        require(identifier['value'] not in NATI_TYPES, lambda: powang_error_redefined(
+        require(identifier['value'] not in RESERVED_TYPE_NAMES, lambda: powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
                 "a powang native type"
@@ -585,7 +587,7 @@ class Parser:
 
 
     def helper_EnumDeclaration(self, identifier: DictRepr):
-        require(identifier['value'] not in NATI_TYPES, lambda: powang_error_redefined(
+        require(identifier['value'] not in RESERVED_TYPE_NAMES, lambda: powang_error_redefined(
             TokenToString(ParserTokenType.TYPE_DECLARATION),
             identifier['value'], [
                 "a powang native type"

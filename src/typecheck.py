@@ -546,6 +546,13 @@ class _TypeChecker:
             return default
         if not isinstance(name, str) or not name:
             return default
+        if name == FUNCTION:
+            self._error(
+                "'function' is not a type annotation",
+                ["use fun[arg_types..., return_type] for function types"],
+                where='type annotation',
+            )
+            return ANY
         resolved = self._normalized_type_name(name)
         element_node = type_node.get('element_type')
         if element_node is None and isinstance(inner, dict):

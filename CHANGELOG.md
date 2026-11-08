@@ -2,6 +2,17 @@
 
 All notable changes to powang are documented here.
 
+## 0.13.3
+
+### Changed
+
+- `function` is no longer a valid type annotation. Write function types as `fun[arg_types..., return_type]`.
+- `function` is reserved and cannot be declared as a user type.
+
+### Fixed
+
+- The LSP keeps nested function types such as `fun[fun[int, int], int]` intact.
+
 ## 0.13.2
 
 ### Added

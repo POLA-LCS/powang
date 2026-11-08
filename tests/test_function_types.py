@@ -40,6 +40,20 @@ class FunctionTypeAnnotationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Function types need a return type", result.combined)
 
+    def test_function_keyword_is_not_a_type_annotation(self) -> None:
+        result = run_source("handler: function;\n", args=("--check",))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("'function' is not a type annotation", result.combined)
+        self.assertIn("fun[arg_types..., return_type]", result.combined)
+
+    def test_function_keyword_cannot_be_redeclared(self) -> None:
+        result = run_source(
+            "type function { | value: int; }\n",
+            args=("--check",),
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("a powang native type", result.combined)
+
 
 if __name__ == "__main__":
     unittest.main()
