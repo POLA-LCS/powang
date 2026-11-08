@@ -639,6 +639,7 @@ class PowangObjectType(PowangTypeBase): # user defined types
     private_meths: dict[str, list[PowangFunction]]
     public_static_meths : dict[str, list[PowangFunction]]
     private_static_meths: dict[str, list[PowangFunction]]
+    trait_methods: dict[str, dict[str, list[PowangFunction]]]
     def __init__(self,
         public_props : Optional[dict[str, 'PowangAny']]          = None,
         private_props: Optional[dict[str, 'PowangAny']]          = None,
@@ -646,6 +647,7 @@ class PowangObjectType(PowangTypeBase): # user defined types
         private_meths: Optional[dict[str, list[PowangFunction]]] = None,
         public_static_meths : Optional[dict[str, list[PowangFunction]]] = None,
         private_static_meths: Optional[dict[str, list[PowangFunction]]] = None,
+        trait_methods: Optional[dict[str, dict[str, list[PowangFunction]]]] = None,
     ):
         super().__init__(dict(public_props) if public_props is not None else {})
         self.private_props = dict(private_props) if private_props is not None else {}
@@ -653,6 +655,11 @@ class PowangObjectType(PowangTypeBase): # user defined types
         self.private_meths = dict(private_meths) if private_meths is not None else {}
         self.public_static_meths = dict(public_static_meths) if public_static_meths is not None else {}
         self.private_static_meths = dict(private_static_meths) if private_static_meths is not None else {}
+        self.trait_methods = (
+            {trait: {name: list(methods) for name, methods in members.items()}
+             for trait, members in trait_methods.items()}
+            if trait_methods is not None else {}
+        )
 
     def getConstructors(self) -> list[PowangFunction]:
         constructors = self.getMethods(CONSTRUCTOR_METHOD_NAME, False)
@@ -671,6 +678,19 @@ class PowangObjectType(PowangTypeBase): # user defined types
         if private and (private_methods := self.private_static_meths.get(method_name)) is not None:
             return private_methods + (public_methods if public_methods is not None else [])
         return public_methods
+
+    def getTraitMethods(
+        self,
+        trait_name: str,
+        method_name: str,
+    ) -> Optional[list[PowangFunction]]:
+        return self.trait_methods.get(trait_name, {}).get(method_name)
+
+    def getAllTraitMethods(self, method_name: str) -> list[PowangFunction]:
+        methods: list[PowangFunction] = []
+        for members in self.trait_methods.values():
+            methods.extend(members.get(method_name, []))
+        return methods
 
     def getProperty(self, property_name: str, private: bool) -> Optional['PowangAny']:
         if private and (match_property := self.private_props.get(property_name)) is not None:
@@ -1055,6 +1075,13 @@ def PowangCopyConstructObjectType(
     value.private_static_meths = {
         name: [_memo.get(id(method), method) for method in methods]
         for name, methods in anyType.private_static_meths.items()
+    }
+    value.trait_methods = {
+        trait_name: {
+            name: [_memo.get(id(method), method) for method in methods]
+            for name, methods in members.items()
+        }
+        for trait_name, members in anyType.trait_methods.items()
     }
     value.type_name = anyType.type_name
     value.is_enum = getattr(anyType, 'is_enum', False)

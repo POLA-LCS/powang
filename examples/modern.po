@@ -45,6 +45,21 @@ match numbers {
     }
 }
 
+## Structural traits and default methods.
+trait Greeter {
+    | target: str;
+    fun greet(): str;
+    fun describe(): str >> $"greet={this.greet()} target={this.target}";
+}
+
+type SimpleGreeter[+] {
+    | target: str;
+    fun this.greet(): str >> $"hello {this.target}";
+}
+
+greeter: Greeter = SimpleGreeter.["world"];
+println(greeter.describe());
+
 ## Match with guards.
 fun classify(value: int): str {
     match value {

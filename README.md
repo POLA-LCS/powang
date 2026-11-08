@@ -545,6 +545,51 @@ type Account[+] {
 
 If an explicit constructor declares parameters, it replaces generation. Constructor members are then ignored and produce a warning. A `|` member declared `name: type!` is allowed and performs its single write from the constructor. The `const` keyword cannot be combined with `|`.
 
+### Traits
+
+Traits describe a structural contract. A type satisfies a trait by declaring the required properties and methods. There is no `impl` block.
+
+```po
+trait Drawable {
+    | name: str;
+    fun draw(): str;
+    fun describe(): str {
+        return $"name={this.name} draw={this.draw()}";
+    }
+}
+
+type Screen[+] {
+    | name: str;
+    fun this.draw(): str {
+        return "screen";
+    }
+}
+
+value: Drawable = Screen.["main"];
+value.draw();
+value.describe();
+```
+
+A method signature ending with `;` is required. A method with a body is a default. Default bodies use only the declared trait contract. Accessing an undeclared member is a checker error.
+
+Generic constraints use `T: Trait` or `T: TraitA & TraitB`.
+
+```po
+fun render[T: Drawable](value: T): str >> value.describe();
+```
+
+When two traits require the same method name with incompatible signatures, define trait-qualified methods inside the type and use qualified calls.
+
+```po
+type Dual[+] {
+    fun Drawable.draw(): str >> "drawable";
+    fun Named.draw(): int >> 42;
+}
+
+Drawable.draw(dual);
+Named.draw(dual);
+```
+
 ### Modules
 
 Modules use namespaces, aliases and wildcard imports. Exports are declared with `export`.

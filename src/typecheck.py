@@ -260,6 +260,7 @@ class _Signature:
         'variadic',
         'variadic_index',
         'variadic_type',
+        'type_parameter_constraints',
     )
 
     def __init__(
@@ -277,6 +278,7 @@ class _Signature:
         variadic: bool = False,
         variadic_index: int | None = None,
         variadic_type: str | None = None,
+        type_parameter_constraints: dict[str, list[str]] | None = None,
     ):
         self.name = name
         self.parameter_names = parameter_names
@@ -291,6 +293,24 @@ class _Signature:
         self.variadic = variadic
         self.variadic_index = variadic_index
         self.variadic_type = variadic_type
+        self.type_parameter_constraints = type_parameter_constraints or {}
+
+
+class _TraitInfo:
+    __slots__ = (
+        'name',
+        'properties',
+        'methods',
+        'required_methods',
+        'default_methods',
+    )
+
+    def __init__(self, name: str):
+        self.name = name
+        self.properties: dict[str, str] = {}
+        self.methods: dict[str, list[_Signature]] = {}
+        self.required_methods: set[str] = set()
+        self.default_methods: set[str] = set()
 
 
 class _TypeChecker:
@@ -312,6 +332,9 @@ class _TypeChecker:
         self.this_type: Optional[str] = None
         self.type_parameters: set[str] = set()
         self.current_type_parameters: set[str] = set()
+        self.traits: dict[str, _TraitInfo] = {}
+        self.current_type_parameter_constraints: dict[str, list[str]] = {}
+        self.in_trait_body: Optional[tuple[str, str]] = None
         self.loop_labels: list[Optional[str]] = []
         self.loop_break_flags: list[bool] = []
         self._position: Optional[tuple[int, int]] = None
@@ -353,6 +376,22 @@ class _TypeChecker:
         self.errors.append(error)
 
     def _assign_error(self, where: str, expected: str, encountered: str):
+        trait_name = self._trait_name(expected)
+        if trait_name is not None:
+            reason = self._trait_failure_reason(encountered, trait_name)
+            if reason is not None:
+                error = powang_error_format(
+                    'TYPE', where,
+                    f"type {self._display_type_name(encountered)} cannot satisfy {trait_name}",
+                    [reason],
+                )
+                if self._position is not None:
+                    error.line = self._position[0] + 1
+                    error.column = self._position[1]
+                    error.text = error.render_text()
+                    error.args = (error.text,)
+                self.errors.append(error)
+                return
         error = powang_error_type_match(where, expected, encountered)
         if self._position is not None:
             error.line = self._position[0] + 1
@@ -591,6 +630,214 @@ class _TypeChecker:
             return self._assignable(target, source)
         return False
 
+    @staticmethod
+    def _display_type_name(type_name: Any) -> Any:
+        if isinstance(type_name, str) and type_name.startswith(f'{OBJECT}:'):
+            return type_name.split(':', 1)[1]
+        return type_name
+
+    def _trait_name(self, type_name: Any) -> Optional[str]:
+        if not isinstance(type_name, str):
+            return None
+        name = self._display_type_name(type_name)
+        return name if isinstance(name, str) and name in self.traits else None
+
+    def _normalized_object_name(self, type_name: Any) -> Optional[str]:
+        if not isinstance(type_name, str):
+            return None
+        return self._display_type_name(type_name)
+
+    def _method_signature_compatible(
+        self,
+        required: _Signature,
+        actual: _Signature,
+    ) -> bool:
+        if required.variadic != actual.variadic:
+            return False
+        if required.variadic:
+            fixed_required = required.variadic_index or 0
+            fixed_actual = actual.variadic_index or 0
+            if fixed_required != fixed_actual:
+                return False
+            for index in range(fixed_required):
+                if not self._assignable(
+                    actual.parameter_types[index],
+                    required.parameter_types[index],
+                ):
+                    return False
+            if required.variadic_type is not None and actual.variadic_type is not None:
+                if not self._assignable(
+                    actual.variadic_type,
+                    required.variadic_type,
+                ):
+                    return False
+        else:
+            if len(required.parameter_types) != len(actual.parameter_types):
+                return False
+            for required_type, actual_type in zip(
+                required.parameter_types,
+                actual.parameter_types,
+            ):
+                if not self._assignable(actual_type, required_type):
+                    return False
+        if required.return_type == NOVA:
+            return True
+        return self._assignable(required.return_type, actual.return_type)
+
+    def _trait_method_signature(
+        self,
+        type_name: str,
+        trait_name: str,
+        method_name: str,
+    ) -> Optional[_Signature]:
+        normalized = self._normalized_object_name(type_name)
+        if normalized is None:
+            return None
+        if normalized == trait_name:
+            trait = self.traits.get(trait_name)
+            if trait is None:
+                return None
+            signatures = trait.methods.get(method_name)
+            return signatures[0] if signatures else None
+        info = self.object_types.get(normalized)
+        if info is None:
+            return None
+        qualified = info.get('trait_methods', {}).get(
+            trait_name, {}
+        ).get(method_name)
+        if qualified:
+            return qualified[0]
+        unqualified = info.get('methods', {}).get(method_name)
+        if unqualified:
+            return unqualified[0]
+        trait = self.traits.get(trait_name)
+        if trait is not None and method_name in trait.default_methods:
+            signatures = trait.methods.get(method_name)
+            return signatures[0] if signatures else None
+        return None
+
+    def _trait_satisfies_trait(self, source_name: str, target_name: str) -> bool:
+        source = self.traits.get(source_name)
+        target = self.traits.get(target_name)
+        if source is None or target is None:
+            return False
+        for prop_name, required_type in target.properties.items():
+            actual_type = source.properties.get(prop_name)
+            if actual_type is None:
+                return False
+            if not self._assignable(required_type, actual_type):
+                return False
+        for method_name in target.required_methods:
+            if method_name in target.default_methods:
+                continue
+            actual_signatures = source.methods.get(method_name)
+            required_signatures = target.methods.get(method_name, [])
+            if not actual_signatures:
+                return False
+            if not any(
+                self._method_signature_compatible(required, actual)
+                for required in required_signatures
+                for actual in actual_signatures
+            ):
+                return False
+        return True
+
+    def _type_satisfies_trait(self, type_name: str, trait_name: str) -> bool:
+        normalized = self._normalized_object_name(type_name)
+        trait = self.traits.get(trait_name)
+        if normalized is None or trait is None:
+            return False
+        if normalized == trait_name:
+            return True
+        if normalized in self.traits:
+            return self._trait_satisfies_trait(normalized, trait_name)
+        info = self.object_types.get(normalized)
+        if info is None:
+            return False
+        props = info.get('props', {})
+        for prop_name, required_type in trait.properties.items():
+            actual_type = props.get(prop_name)
+            if actual_type is None:
+                return False
+            if not self._assignable(required_type, actual_type):
+                return False
+        for method_name in trait.required_methods:
+            if method_name in trait.default_methods:
+                continue
+            signature = self._trait_method_signature(
+                normalized, trait_name, method_name
+            )
+            if signature is None:
+                return False
+            required_signatures = trait.methods.get(method_name, [])
+            if not any(
+                self._method_signature_compatible(required, signature)
+                for required in required_signatures
+            ):
+                return False
+        return True
+
+    def _trait_failure_reason(
+        self,
+        type_name: Any,
+        trait_name: str,
+    ) -> Optional[str]:
+        normalized = self._normalized_object_name(type_name)
+        trait = self.traits.get(trait_name)
+        if normalized is None or trait is None:
+            return None
+        if normalized in self.traits:
+            if self._trait_satisfies_trait(normalized, trait_name):
+                return None
+            return f"trait {normalized} does not satisfy {trait_name}"
+        info = self.object_types.get(normalized)
+        if info is None:
+            return f"type {normalized} is not a declared object type"
+        props = info.get('props', {})
+        for prop_name, required_type in trait.properties.items():
+            actual_type = props.get(prop_name)
+            if actual_type is None:
+                return f"missing property {prop_name}"
+            if not self._assignable(required_type, actual_type):
+                return (
+                    f"property {prop_name} has type {actual_type}, "
+                    f"but the trait requires {required_type}"
+                )
+        for method_name in trait.required_methods:
+            if method_name in trait.default_methods:
+                continue
+            signature = self._trait_method_signature(
+                normalized, trait_name, method_name
+            )
+            if signature is None:
+                return f"missing method {method_name}"
+            required_signatures = trait.methods.get(method_name, [])
+            if not any(
+                self._method_signature_compatible(required, signature)
+                for required in required_signatures
+            ):
+                return f"method {method_name} has an incompatible signature"
+        return "does not satisfy the trait contract"
+
+    def _assignable_trait(
+        self,
+        target: str,
+        source: str,
+        target_trait: Optional[str],
+        source_trait: Optional[str],
+    ) -> bool:
+        if target_trait is not None and source_trait is not None:
+            return target_trait == source_trait or \
+                self._trait_satisfies_trait(source_trait, target_trait)
+        if target_trait is not None:
+            source_name = self._normalized_object_name(source)
+            if source_name is None:
+                return False
+            if source_name == OBJ:
+                return False
+            return self._type_satisfies_trait(source_name, target_trait)
+        return target == OBJ
+
     def _assignable(self, target: str, source: str, target_weak: bool = False) -> bool:
         if target == ANY or source == ANY:
             return True
@@ -606,6 +853,12 @@ class _TypeChecker:
             return any(
                 self._union_branch_assignable(branch, source, target_weak)
                 for branch in target_branches
+            )
+        target_trait = self._trait_name(target)
+        source_trait = self._trait_name(source)
+        if target_trait is not None or source_trait is not None:
+            return self._assignable_trait(
+                target, source, target_trait, source_trait
             )
         if target.startswith('&') or source.startswith('&'):
             return target == source
@@ -867,6 +1120,8 @@ class _TypeChecker:
         if node_type == ParserTokenType.CONTINUE_STATEMENT:
             self._check_loop_control('continue', value)
             return ANY
+        if node_type == ParserTokenType.TRAIT_DECLARATION:
+            return self._infer_trait_declaration(value)
         if node_type == ParserTokenType.TYPE_DECLARATION:
             return self._infer_type_declaration(value)
         if node_type == ParserTokenType.EXTERN_REFERENCE:
@@ -1092,6 +1347,99 @@ class _TypeChecker:
             return right
         return _array_of(_union_of_types([left_element, right_element]))
 
+    def _check_trait_set_conflicts(
+        self,
+        type_name: str,
+        trait_names: list[str],
+        where: str,
+    ) -> None:
+        if len(trait_names) < 2:
+            return
+        normalized = self._normalized_object_name(type_name)
+        info = self.object_types.get(normalized) if normalized is not None else None
+        display = self._display_type_name(type_name)
+        for index, first_name in enumerate(trait_names):
+            first_trait = self.traits.get(first_name)
+            if first_trait is None:
+                continue
+            for second_name in trait_names[index + 1:]:
+                second_trait = self.traits.get(second_name)
+                if second_trait is None:
+                    continue
+                shared = set(first_trait.methods) & set(second_trait.methods)
+                for method_name in sorted(shared):
+                    first_signatures = first_trait.methods[method_name]
+                    second_signatures = second_trait.methods[method_name]
+                    if not first_signatures or not second_signatures:
+                        continue
+                    if self._signatures_equivalent(
+                        first_signatures[0], second_signatures[0]
+                    ):
+                        continue
+                    if info is not None:
+                        first_qualified = info.get('trait_methods', {}).get(
+                            first_name, {}
+                        ).get(method_name)
+                        second_qualified = info.get('trait_methods', {}).get(
+                            second_name, {}
+                        ).get(method_name)
+                        if first_qualified and second_qualified:
+                            continue
+                    self._error(
+                        f"type {display} cannot satisfy {first_name} and {second_name}: method {method_name} has incompatible signatures. Add fun {first_name}.{method_name} and fun {second_name}.{method_name}.",
+                        [
+                            f"{first_name}.{method_name}: {first_signatures[0].function_type}",
+                            f"{second_name}.{method_name}: {second_signatures[0].function_type}",
+                        ],
+                        where=where,
+                    )
+                    break
+
+    def _check_type_parameter_constraints(
+        self,
+        signature: _Signature,
+        mapping: dict[str, str],
+        where: str,
+    ) -> None:
+        for parameter_name, trait_names in signature.type_parameter_constraints.items():
+            actual_type = mapping.get(parameter_name)
+            if actual_type is None or actual_type in (ANY, UNDEF, MIXED):
+                continue
+            branches = _split_union(actual_type)
+            if len(branches) > 1:
+                for branch in branches:
+                    self._check_trait_constraint_branch(
+                        branch, trait_names, parameter_name, where
+                    )
+            else:
+                self._check_trait_constraint_branch(
+                    actual_type, trait_names, parameter_name, where
+                )
+
+    def _check_trait_constraint_branch(
+        self,
+        actual_type: str,
+        trait_names: list[str],
+        parameter_name: str,
+        where: str,
+    ) -> None:
+        for trait_name in trait_names:
+            if trait_name not in self.traits:
+                self._error(
+                    f"unknown trait '{trait_name}' in constraint for '{parameter_name}'",
+                    ['declare the trait before using it as a constraint'],
+                    where=where,
+                )
+                continue
+            if not self._type_satisfies_trait(actual_type, trait_name):
+                reason = self._trait_failure_reason(actual_type, trait_name)
+                self._error(
+                    f"type {self._display_type_name(actual_type)} cannot satisfy {trait_name}",
+                    [reason or 'does not satisfy the trait contract'],
+                    where=where,
+                )
+        self._check_trait_set_conflicts(actual_type, trait_names, where)
+
     def _infer_call(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
@@ -1167,10 +1515,13 @@ class _TypeChecker:
                     )
                     return candidates[0].return_type if candidates else ANY
                 candidate = candidates[0]
+                explicit_mapping: dict[str, str] = {}
                 if type_argument_types:
+                    explicit_mapping = dict(
+                        zip(candidate.type_parameters, type_argument_types)
+                    )
                     candidate = self._specialize_signature(
-                        candidate,
-                        dict(zip(candidate.type_parameters, type_argument_types)),
+                        candidate, explicit_mapping
                     )
                 fixed_count = (
                     candidate.variadic_index
@@ -1234,14 +1585,31 @@ class _TypeChecker:
                             candidate.parameter_types[index],
                             argument_type,
                         )
+                if candidate.type_parameter_constraints:
+                    constraint_mapping = explicit_mapping
+                    if not constraint_mapping:
+                        constraint_args = [
+                            argument_type
+                            for argument_type in ordered_types
+                            if argument_type is not None
+                        ]
+                        constraint_mapping = self._infer_type_argument_mapping(
+                            candidate, constraint_args
+                        )
+                    self._check_type_parameter_constraints(
+                        candidate,
+                        constraint_mapping,
+                        f'function call: {callee_name}',
+                    )
                 return candidate.return_type
 
+            explicit_mapping: dict[str, str] = {}
             if type_argument_types:
+                explicit_mapping = dict(
+                    zip(candidates[0].type_parameters, type_argument_types)
+                )
                 candidates = [
-                    self._specialize_signature(
-                        candidate,
-                        dict(zip(candidate.type_parameters, type_argument_types)),
-                    )
+                    self._specialize_signature(candidate, explicit_mapping)
                     for candidate in candidates
                 ]
             matches = [
@@ -1256,6 +1624,13 @@ class _TypeChecker:
                     )
                     if mapping:
                         selected = self._specialize_signature(selected, mapping)
+                else:
+                    mapping = explicit_mapping
+                self._check_type_parameter_constraints(
+                    selected,
+                    mapping,
+                    f'function call: {callee_name}',
+                )
                 return selected.return_type
             self._error(
                 f"No overload of '{callee_name}' accepts the given arguments",
@@ -1272,6 +1647,9 @@ class _TypeChecker:
             signature = self._signature_from_function_type(variable.type, callee_name)
             if signature is None:
                 return ANY
+            mapping = self._infer_type_argument_mapping(signature, argument_types)
+            if mapping:
+                signature = self._specialize_signature(signature, mapping)
             if named_nodes:
                 self._error(
                     f"Function value '{callee_name}' does not accept named arguments",
@@ -1388,6 +1766,7 @@ class _TypeChecker:
             signature.variadic,
             signature.variadic_index,
             variadic_type,
+            signature.type_parameter_constraints,
         )
 
     def _infer_type_argument_mapping(
@@ -1472,6 +1851,14 @@ class _TypeChecker:
         variadic_index = len(parameter_types) - 1 if variadic and parameter_types else None
         variadic_type = parameter_types[-1] if variadic and parameter_types else None
         min_argc = len(parameter_types) - 1 if variadic else len(parameter_types)
+        known_types = set(NATIVE_TYPE_NAMES) | set(self.object_types) | set(self.traits)
+        type_parameters: list[str] = []
+        for parameter_type in parameter_types:
+            if parameter_type.isidentifier() and \
+                    parameter_type[:1].isupper() and \
+                    parameter_type not in known_types and \
+                    parameter_type not in type_parameters:
+                type_parameters.append(parameter_type)
         return _Signature(
             name,
             [f'arg{index}' for index in range(len(parameter_types))],
@@ -1482,7 +1869,7 @@ class _TypeChecker:
             False,
             False,
             type_text,
-            [],
+            type_parameters,
             variadic,
             variadic_index,
             variadic_type,
@@ -1518,6 +1905,15 @@ class _TypeChecker:
         type_parameters = value.get('type_parameters')
         if not isinstance(type_parameters, list):
             type_parameters = []
+        raw_constraints = value.get('type_parameter_constraints')
+        type_parameter_constraints: dict[str, list[str]] = {}
+        if isinstance(raw_constraints, dict):
+            for parameter_name, trait_names in raw_constraints.items():
+                if isinstance(parameter_name, str) and isinstance(trait_names, list):
+                    type_parameter_constraints[parameter_name] = [
+                        trait_name for trait_name in trait_names
+                        if isinstance(trait_name, str)
+                    ]
         variadic = bool(value.get('variadic'))
         variadic_index = value.get('variadic_index')
         if not isinstance(variadic_index, int):
@@ -1577,6 +1973,7 @@ class _TypeChecker:
             variadic,
             variadic_index,
             variadic_type,
+            type_parameter_constraints,
         )
         previous = (
             self.return_type,
@@ -1585,12 +1982,14 @@ class _TypeChecker:
             self.in_function,
             self.this_type,
             self.current_type_parameters,
+            self.current_type_parameter_constraints,
         )
         self.return_type = return_type
         self.return_weak = return_weak
         self.return_allows_error = allows_error
         self.in_function = True
         self.current_type_parameters = set(type_parameters)
+        self.current_type_parameter_constraints = dict(type_parameter_constraints)
         self._scope_push()
         try:
             for index, parameter_name in enumerate(parameter_names):
@@ -1621,8 +2020,274 @@ class _TypeChecker:
                 self.in_function,
                 self.this_type,
                 self.current_type_parameters,
+                self.current_type_parameter_constraints,
             ) = previous
         return signature.function_type or FUNCTION
+
+    def _signatures_equivalent(
+        self,
+        left: _Signature,
+        right: _Signature,
+    ) -> bool:
+        if left.variadic != right.variadic:
+            return False
+        if len(left.parameter_types) != len(right.parameter_types):
+            return False
+        for left_type, right_type in zip(
+            left.parameter_types, right.parameter_types
+        ):
+            if not (
+                self._assignable(left_type, right_type)
+                and self._assignable(right_type, left_type)
+            ):
+                return False
+        if left.variadic_type is not None and right.variadic_type is not None:
+            if not (
+                self._assignable(left.variadic_type, right.variadic_type)
+                and self._assignable(right.variadic_type, left.variadic_type)
+            ):
+                return False
+        return (
+            self._assignable(left.return_type, right.return_type)
+            and self._assignable(right.return_type, left.return_type)
+        )
+
+    def _trait_signatures_for_method(
+        self,
+        trait_names: list[str],
+        method_name: str,
+    ) -> list[tuple[str, list[_Signature]]]:
+        available: list[tuple[str, list[_Signature]]] = []
+        for trait_name in trait_names:
+            trait = self.traits.get(trait_name)
+            if trait is None:
+                continue
+            signatures = trait.methods.get(method_name)
+            if signatures:
+                available.append((trait_name, signatures))
+        return available
+
+    def _infer_trait_qualified_call(
+        self,
+        value: Any,
+        trait_name: str,
+        method_name: str,
+        argument_types: list[str],
+    ) -> str:
+        trait = self.traits.get(trait_name)
+        if trait is None:
+            return ANY
+        signatures = trait.methods.get(method_name)
+        if not signatures:
+            self._error(
+                f"trait '{trait_name}' has no method named '{method_name}'",
+                [f"methods: {', '.join(sorted(trait.methods.keys()))}"],
+                where='trait-qualified call',
+            )
+            return ANY
+        if not argument_types:
+            self._error(
+                f"trait-qualified call '{trait_name}.{method_name}' needs a receiver",
+                ['pass the receiver as the first argument'],
+                where='trait-qualified call',
+            )
+            return ANY
+        receiver_type = argument_types[0]
+        if receiver_type != ANY and \
+                not self._type_satisfies_trait(receiver_type, trait_name):
+            reason = self._trait_failure_reason(receiver_type, trait_name)
+            self._error(
+                f"type {self._display_type_name(receiver_type)} cannot satisfy {trait_name}",
+                [reason or 'does not satisfy the trait contract'],
+                where='trait-qualified call',
+            )
+            return ANY
+        method_argument_types = argument_types[1:]
+        matches = [
+            signature for signature in signatures
+            if self._signature_matches(signature, method_argument_types)
+        ]
+        if not matches:
+            self._error(
+                f"No overload of '{trait_name}.{method_name}' accepts the given arguments",
+                [f"argument types: {', '.join(method_argument_types)}"],
+                where='trait-qualified call',
+            )
+            return signatures[0].return_type
+        value['resolved_trait'] = trait_name
+        return matches[0].return_type
+
+    def _infer_trait_value_method(
+        self,
+        value: Any,
+        trait_name: str,
+        method_name: str,
+        argument_types: list[str],
+    ) -> str:
+        trait = self.traits.get(trait_name)
+        if trait is None:
+            return ANY
+        signatures = trait.methods.get(method_name)
+        if not signatures:
+            self._error(
+                f"trait '{trait_name}' has no method named '{method_name}'",
+                [f"methods: {', '.join(sorted(trait.methods.keys()))}"],
+                where='method call',
+            )
+            return ANY
+        matches = [
+            signature for signature in signatures
+            if self._signature_matches(signature, argument_types)
+        ]
+        if not matches:
+            self._error(
+                f"No overload of '{trait_name}.{method_name}' accepts the given arguments",
+                [f"argument types: {', '.join(argument_types)}"],
+                where='method call',
+            )
+            return signatures[0].return_type
+        value['resolved_trait'] = trait_name
+        return matches[0].return_type
+
+    def _infer_constrained_method_call(
+        self,
+        value: Any,
+        parameter_name: str,
+        method_name: str,
+        argument_types: list[str],
+    ) -> Optional[str]:
+        constraints = self.current_type_parameter_constraints.get(
+            parameter_name, []
+        )
+        if not constraints:
+            return None
+        available = self._trait_signatures_for_method(constraints, method_name)
+        if not available:
+            self._error(
+                f"type parameter '{parameter_name}' has no method named '{method_name}'",
+                [f"constraints: {', '.join(constraints)}"],
+                where='method call',
+            )
+            return ANY
+        if len(available) > 1:
+            first = available[0][1][0]
+            for trait_name, signatures in available[1:]:
+                if signatures and not self._signatures_equivalent(first, signatures[0]):
+                    names = ' and '.join(name for name, _ in available)
+                    self._error(
+                        f"generic parameter {parameter_name} is constrained by {names}, which require incompatible signatures for {method_name}. Use a single trait constraint or a trait-qualified call.",
+                        [
+                            f"{name}.{method_name}: {signatures[0].function_type}"
+                            for name, signatures in available
+                            if signatures
+                        ],
+                        where='method call',
+                    )
+                    return ANY
+        trait_name, signatures = available[0]
+        matches = [
+            signature for signature in signatures
+            if self._signature_matches(signature, argument_types)
+        ]
+        if not matches:
+            self._error(
+                f"No overload of '{trait_name}.{method_name}' accepts the given arguments",
+                [f"argument types: {', '.join(argument_types)}"],
+                where='method call',
+            )
+            return signatures[0].return_type
+        value['resolved_trait'] = trait_name
+        return matches[0].return_type
+
+    def _infer_concrete_trait_method(
+        self,
+        value: Any,
+        object_name: str,
+        method_name: str,
+        argument_types: list[str],
+    ) -> Optional[str]:
+        info = self.object_types.get(object_name)
+        if info is None:
+            return None
+        qualified: list[tuple[str, list[_Signature]]] = []
+        for trait_name, methods in info.get('trait_methods', {}).items():
+            signatures = methods.get(method_name)
+            if signatures:
+                qualified.append((trait_name, signatures))
+        if qualified:
+            if len(qualified) > 1:
+                first = qualified[0][1][0]
+                for trait_name, signatures in qualified[1:]:
+                    if signatures and not self._signatures_equivalent(first, signatures[0]):
+                        names = ' and '.join(
+                            f'{name}.{method_name}' for name, _ in qualified
+                        )
+                        self._error(
+                            f"call to {method_name} is ambiguous between {names}. Cast the value to one trait or use Trait.method.",
+                            [
+                                f"{name}.{method_name}: {signatures[0].function_type}"
+                                for name, signatures in qualified
+                                if signatures
+                            ],
+                            where='method call',
+                        )
+                        return ANY
+            trait_name, signatures = qualified[0]
+            matches = [
+                signature for signature in signatures
+                if self._signature_matches(signature, argument_types)
+            ]
+            if not matches:
+                self._error(
+                    f"No overload of '{trait_name}.{method_name}' accepts the given arguments",
+                    [f"argument types: {', '.join(argument_types)}"],
+                    where='method call',
+                )
+                return signatures[0].return_type
+            value['resolved_trait'] = trait_name
+            return matches[0].return_type
+        defaults: list[tuple[str, list[_Signature]]] = []
+        for trait in self.traits.values():
+            if method_name not in trait.default_methods:
+                continue
+            if not self._type_satisfies_trait(object_name, trait.name):
+                continue
+            signatures = trait.methods.get(method_name, [])
+            if signatures:
+                defaults.append((trait.name, signatures))
+        if defaults:
+            if len(defaults) > 1:
+                first = defaults[0][1][0]
+                for trait_name, signatures in defaults[1:]:
+                    if signatures and not self._signatures_equivalent(first, signatures[0]):
+                        names = ' and '.join(
+                            f'{name}.{method_name}' for name, _ in defaults
+                        )
+                        self._error(
+                            f"call to {method_name} is ambiguous between {names}. Cast the value to one trait or use Trait.method.",
+                            [
+                                f"{name}.{method_name}: {signatures[0].function_type}"
+                                for name, signatures in defaults
+                                if signatures
+                            ],
+                            where='method call',
+                        )
+                        return ANY
+            trait_name, signatures = defaults[0]
+            matches = [
+                signature for signature in signatures
+                if self._signature_matches(signature, argument_types)
+            ]
+            if not matches:
+                self._error(
+                    f"No overload of '{trait_name}.{method_name}' accepts the given arguments",
+                    [f"argument types: {', '.join(argument_types)}"],
+                    where='method call',
+                )
+                return signatures[0].return_type
+            value['resolved_trait'] = trait_name
+            return matches[0].return_type
+        return None
 
     def _infer_method_call(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -1633,6 +2298,10 @@ class _TypeChecker:
         arguments = value.get('arguments')
         argument_nodes = arguments if isinstance(arguments, list) else []
         argument_types = [self._infer(argument) for argument in argument_nodes]
+        if owner_name is not None and owner_name in self.traits and method_name is not None:
+            return self._infer_trait_qualified_call(
+                value, owner_name, method_name, argument_types
+            )
         if owner_name in NATIVE_METHOD_TYPES and method_name is not None:
             if method_name not in NATIVE_METHOD_NAMES.get(owner_name, frozenset()):
                 self._error(
@@ -1643,6 +2312,19 @@ class _TypeChecker:
                 return ANY
             return self._infer_native_method(owner_name, method_name, argument_types, argument_nodes)
         owner_type = self._infer(owner_node)
+        if isinstance(owner_type, str):
+            owner_trait = self._trait_name(owner_type)
+            if owner_trait is not None and method_name is not None:
+                return self._infer_trait_value_method(
+                    value, owner_trait, method_name, argument_types
+                )
+            if owner_type in self.current_type_parameter_constraints and \
+                    method_name is not None:
+                constrained = self._infer_constrained_method_call(
+                    value, owner_type, method_name, argument_types
+                )
+                if constrained is not None:
+                    return constrained
         if owner_name is not None and owner_name in self.object_types:
             static_info = self.object_types[owner_name]
             static_methods = static_info.get('static_methods', {}).get(method_name)
@@ -1674,6 +2356,22 @@ class _TypeChecker:
                 methods = info.get('methods', {}).get(method_name)
                 if methods:
                     return methods[0].return_type
+                trait_result = self._infer_concrete_trait_method(
+                    value, object_name, method_name, argument_types
+                )
+                if trait_result is not None:
+                    return trait_result
+                if self.in_trait_body is not None and \
+                        info.get('trait_name') == self.in_trait_body[0]:
+                    trait_name, trait_method = self.in_trait_body
+                    self._error(
+                        f"trait method {trait_method} uses member {method_name} which is not declared in the trait. Declare {method_name} in the trait or remove the usage.",
+                        [
+                            f"declared members: {', '.join(sorted(info.get('methods', {}).keys()))}",
+                        ],
+                        where='trait default method',
+                    )
+                    return ANY
                 self._error(
                     f"'{object_name}' has no method named '{method_name}'",
                     [f"available methods: {', '.join(sorted(info.get('methods', {}).keys()))}"],
@@ -1845,11 +2543,30 @@ class _TypeChecker:
             }.get(property_name, ANY)
         if isinstance(target_type, str) and target_type.startswith(f'{OBJECT}:'):
             object_name = target_type.split(':', 1)[1]
+            if object_name in self.traits:
+                trait = self.traits[object_name]
+                if property_name in trait.properties:
+                    return trait.properties[property_name]
+                self._error(
+                    f"trait '{object_name}' has no property named '{property_name}'",
+                    [f"properties: {', '.join(sorted(trait.properties.keys()))}"],
+                    where='member access',
+                )
+                return ANY
             info = self.object_types.get(object_name)
             if info is not None:
                 props = info.get('props', {})
                 if property_name in props:
                     return props[property_name]
+                if self.in_trait_body is not None and \
+                        info.get('trait_name') == self.in_trait_body[0]:
+                    trait_name, method_name = self.in_trait_body
+                    self._error(
+                        f"trait method {method_name} uses member {property_name} which is not declared in the trait. Declare {property_name} in the trait or remove the usage.",
+                        [f"declared members: {', '.join(sorted(props.keys()))}"],
+                        where='trait default method',
+                    )
+                    return ANY
                 if info.get('is_enum'):
                     return f'{OBJECT}:{object_name}'
                 self._error(
@@ -3053,6 +3770,78 @@ class _TypeChecker:
                 return
 
     # ------------------------------------------------------------- user types
+    def _infer_trait_declaration(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ANY
+        name = self._identifier_name(value.get('identifier'))
+        if name is None:
+            return ANY
+        if name in self.traits:
+            self._error(
+                f"trait '{name}' is already declared",
+                ['choose a different trait name'],
+                where='trait declaration',
+            )
+            return ANY
+        trait = _TraitInfo(name)
+        properties = value.get('properties')
+        if isinstance(properties, list):
+            for prop in properties:
+                prop_value = prop.get('value') if isinstance(prop, dict) else None
+                if not isinstance(prop_value, dict):
+                    continue
+                prop_name = self._identifier_name(prop_value.get('identifier'))
+                if prop_name is None:
+                    continue
+                trait.properties[prop_name] = self._annotation_type(
+                    prop_value.get('type')
+                )
+        method_nodes: list[tuple[Any, _Signature]] = []
+        methods = value.get('methods')
+        if isinstance(methods, list):
+            for method in methods:
+                if not isinstance(method, dict):
+                    continue
+                signature = self._make_signature(method)
+                if signature is None:
+                    continue
+                trait.methods.setdefault(signature.name, []).append(signature)
+                method_value = method.get('value')
+                if not isinstance(method_value, dict):
+                    continue
+                if method_value.get('signature_only') or \
+                        method_value.get('block') is None:
+                    trait.required_methods.add(signature.name)
+                else:
+                    trait.default_methods.add(signature.name)
+                    method_nodes.append((method, signature))
+        self.traits[name] = trait
+        synthetic_name = f'__trait_{name}'
+        self.object_types[synthetic_name] = {
+            'props': dict(trait.properties),
+            'methods': {
+                method_name: list(signatures)
+                for method_name, signatures in trait.methods.items()
+            },
+            'static_methods': {},
+            'type_parameters': [],
+            'is_enum': False,
+            'variants': [],
+            'trait_name': name,
+        }
+        previous = self.in_trait_body
+        try:
+            for method, signature in method_nodes:
+                self.in_trait_body = (name, signature.name)
+                self._check_function_body(
+                    method,
+                    signature,
+                    this_type=f'{OBJECT}:{synthetic_name}',
+                )
+        finally:
+            self.in_trait_body = previous
+        return f'{OBJECT}:{name}'
+
     def _infer_type_declaration(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
@@ -3063,6 +3852,7 @@ class _TypeChecker:
             'props': {},
             'methods': {},
             'static_methods': {},
+            'trait_methods': {},
             'type_parameters': list(value.get('type_parameters') or []),
             'is_enum': bool(value.get('is_enum')),
             'variants': list(value.get('variants') or []),
@@ -3107,6 +3897,45 @@ class _TypeChecker:
                     else:
                         signature = self._make_signature(method)
                     if signature is not None and signature.name:
+                        qualifier = self._identifier_name(
+                            method.get('value', {}).get('trait_qualifier')
+                        )
+                        if qualifier is not None:
+                            trait = self.traits.get(qualifier)
+                            if trait is None:
+                                self._error(
+                                    f"unknown trait '{qualifier}' in method declaration",
+                                    ['declare the trait before implementing it'],
+                                    where='trait-qualified method',
+                                )
+                                continue
+                            required_signatures = trait.methods.get(signature.name)
+                            if not required_signatures:
+                                self._error(
+                                    f"trait '{qualifier}' has no method named '{signature.name}'",
+                                    [f"methods: {', '.join(sorted(trait.methods.keys()))}"],
+                                    where='trait-qualified method',
+                                )
+                                continue
+                            if not any(
+                                self._method_signature_compatible(required, signature)
+                                for required in required_signatures
+                            ):
+                                required = required_signatures[0]
+                                self._error(
+                                    f"method {name}.{qualifier}.{signature.name}() does not match the signature required by {qualifier}.{signature.name}()",
+                                    [
+                                        f"required: {required.function_type}",
+                                        f"found: {signature.function_type}",
+                                    ],
+                                    where='trait-qualified method',
+                                )
+                                continue
+                            info['trait_methods'].setdefault(
+                                qualifier, {}
+                            ).setdefault(signature.name, []).append(signature)
+                            signatures.append((method, signature, True))
+                            continue
                         is_instance = (
                             signature.name == 'constructor'
                             or bool(method.get('value', {}).get('instance_method'))
@@ -3158,6 +3987,15 @@ class _TypeChecker:
         type_parameters = value.get('type_parameters')
         if not isinstance(type_parameters, list):
             type_parameters = []
+        raw_constraints = value.get('type_parameter_constraints')
+        type_parameter_constraints: dict[str, list[str]] = {}
+        if isinstance(raw_constraints, dict):
+            for parameter_name, trait_names in raw_constraints.items():
+                if isinstance(parameter_name, str) and isinstance(trait_names, list):
+                    type_parameter_constraints[parameter_name] = [
+                        trait_name for trait_name in trait_names
+                        if isinstance(trait_name, str)
+                    ]
         variadic = bool(value.get('variadic'))
         variadic_index = value.get('variadic_index')
         if not isinstance(variadic_index, int):
@@ -3220,6 +4058,7 @@ class _TypeChecker:
             variadic,
             variadic_index,
             variadic_type,
+            type_parameter_constraints,
         )
 
     def _check_function(self, function_node: Any, this_type: Optional[str] = None, register: bool = True) -> Optional[_Signature]:
@@ -3236,6 +4075,15 @@ class _TypeChecker:
         if not isinstance(value, dict):
             return
 
+        for parameter_name, trait_names in signature.type_parameter_constraints.items():
+            for trait_name in trait_names:
+                if trait_name not in self.traits:
+                    self._error(
+                        f"unknown trait '{trait_name}' in constraint for '{parameter_name}'",
+                        ['declare the trait before using it as a constraint'],
+                        where='function declaration',
+                    )
+
         previous = (
             self.return_type,
             self.return_weak,
@@ -3245,6 +4093,7 @@ class _TypeChecker:
             self.loop_labels,
             self.loop_break_flags,
             self.current_type_parameters,
+            self.current_type_parameter_constraints,
         )
         self.return_type = signature.return_type
         self.return_weak = signature.return_weak
@@ -3254,6 +4103,9 @@ class _TypeChecker:
         self.loop_labels = []
         self.loop_break_flags = []
         self.current_type_parameters = set(signature.type_parameters)
+        self.current_type_parameter_constraints = dict(
+            signature.type_parameter_constraints
+        )
 
         self._scope_push()
         try:
@@ -3264,14 +4116,12 @@ class _TypeChecker:
                     type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
                     if signature.variadic and signature.variadic_index == index:
                         name = self._identifier_name(argument_value.get('identifier'))
-                        element_type = self._signature_annotation_type(
-                            type_node, signature.type_parameters
-                        )
+                        element_type = signature.parameter_types[index]
                         self._bind(
                             name or '',
                             _array_of(element_type),
                             True,
-                            self._annotation_weak(type_node),
+                            signature.parameter_weak[index],
                         )
                         continue
                     if self._annotation_reference(type_node):
@@ -3283,7 +4133,28 @@ class _TypeChecker:
                             bound_type = bound_type[1:]
                         self._bind(name or '', bound_type, True, False)
                     else:
-                        self._infer(argument)
+                        name = self._identifier_name(
+                            argument_value.get('identifier')
+                        ) if isinstance(argument_value, dict) else None
+                        bound_type = signature.parameter_types[index]
+                        self._bind(
+                            name or '',
+                            bound_type,
+                            True,
+                            signature.parameter_weak[index],
+                        )
+                        expression = argument_value.get('expression') \
+                            if isinstance(argument_value, dict) else None
+                        if expression is not None:
+                            expression_type = self._infer(expression)
+                            if not self._assignable(
+                                bound_type, expression_type
+                            ):
+                                self._assign_error(
+                                    'default argument',
+                                    bound_type,
+                                    expression_type,
+                                )
             block = value.get('block')
             if isinstance(block, dict) and block.get('value') is not None:
                 self._infer(block)
@@ -3298,6 +4169,7 @@ class _TypeChecker:
                 self.loop_labels,
                 self.loop_break_flags,
                 self.current_type_parameters,
+                self.current_type_parameter_constraints,
             ) = previous
 
     # ----------------------------------------------------------------- extern

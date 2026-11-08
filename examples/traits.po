@@ -1,0 +1,65 @@
+## Structural traits.
+
+trait Drawable {
+    | name: str;
+    fun draw(): str;
+    fun describe(): str {
+        return $"name={this.name} draw={this.draw()}";
+    }
+}
+
+type Screen[+] {
+    | name: str;
+
+    fun this.draw(): str {
+        return "screen";
+    }
+}
+
+screen := Screen.["main"];
+value: Drawable = screen;
+println(value.draw());
+println(value.describe());
+
+## Generic constraints.
+fun render[T: Drawable](value: T): str >> value.describe();
+println(render(screen));
+
+## Conflicting traits use trait-qualified methods.
+trait Named {
+    fun draw(): int;
+}
+
+type Dual[+] {
+    | name: str;
+
+    fun Drawable.draw(): str {
+        return "dual";
+    }
+
+    fun Named.draw(): int {
+        return 42;
+    }
+}
+
+dual := Dual.["dual"];
+drawable: Drawable = dual;
+named: Named = dual;
+println(drawable.draw());
+println(named.draw());
+println(Drawable.draw(dual));
+println(Named.draw(dual));
+
+## A default method can call a qualified implementation.
+trait Described {
+    fun draw(): str;
+    fun describe(): str >> this.draw();
+}
+
+type QualifiedOnly[+] {
+    fun Described.draw(): str {
+        return "qualified";
+    }
+}
+
+println(QualifiedOnly.[].describe());

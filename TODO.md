@@ -6,14 +6,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 2C: traits and interfaces.
-  - Plan: `docs/phase-2c-traits-and-interfaces/README.md` (to be written)
-  - Structural satisfaction.
-  - Trait annotations.
-  - Trait-qualified methods for signature conflicts.
-  - Default trait method bodies checked against the declared contract.
-  - LSP completion after `Trait.`.
-  - Target versions: powang `0.13.0`, powang-lsp `0.19.0`.
+- [ ] Phase 2D: cross-module type checking.
+  - Plan: `docs/phase-2d-cross-module-types/README.md` (to be written)
+  - Check imported and exported types across files.
+  - Report errors at the importing call site.
+  - Preserve module boundaries for traits and object types.
+  - Target versions: powang `0.14.0`, powang-lsp `0.20.0`.
 
 ## Language features in order
 
@@ -36,13 +34,15 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] Unreachable case warnings.
    - Plan: `docs/phase-2b3-match-patterns/README.md`
 
-3. [ ] Traits and interfaces.
-   - Structural satisfaction.
-   - Trait annotations.
-   - Trait-qualified methods for signature conflicts.
-   - LSP completion after `Trait.`.
-   - Decision: a single structural method with a compatible signature satisfies every trait that requires that method. No `Trait.method` is needed when the signatures are identical.
-   - `Trait.method` stays because two traits can require the same method name with different return types or different semantics. Return-type-only distinctions cannot be resolved by structural matching alone.
+3. [x] Traits and interfaces.
+   - [x] Structural satisfaction.
+   - [x] Trait annotations.
+   - [x] Trait-qualified methods for signature conflicts.
+   - [x] LSP completion after `Trait.`.
+   - [x] Default trait method bodies checked against the declared contract.
+   - [x] Generic constraints with `T: Trait` and `T: TraitA & TraitB`.
+   - [x] Conflict and ambiguity diagnostics.
+   - Plan: `docs/phase-2c-traits-and-interfaces/README.md`
    - Diagnostics to implement:
      - `type X cannot satisfy TraitA and TraitB: method draw has incompatible signatures (TraitA.draw() -> str, TraitB.draw() -> bytes). Add fun TraitA.draw and fun TraitB.draw.`
      - `generic parameter T is constrained by TraitA and TraitB, which require incompatible signatures for draw. Use a single trait constraint or a trait-qualified call.`
@@ -92,7 +92,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [ ] `project.format.po` configuration.
 - [ ] LSP calls the standalone formatter and linter.
 - [x] LSP-only `undef type` display for uninitialized typed variables.
-- [ ] LSP trait completion that inserts the full trait method signature.
+- [x] LSP trait completion that inserts the full trait method signature.
 - [ ] Debugger and debug adapter.
 - [ ] Package registry client.
 
@@ -149,6 +149,7 @@ Open questions:
 - [x] Phase 2B1 function types and lambdas.
 - [x] Phase 2B2 variadics, explicit type arguments, spread and `undef type` display.
 - [x] Phase 2B3 match destructuring, range patterns, exhaustiveness and unreachable case warnings.
+- [x] Phase 2C structural traits, default methods, generic constraints and trait-qualified dispatch.
 - [x] LSP `0.16.1` hover syntax highlighting with `powang` fenced code blocks.
 - [x] Plain-text hover prose with no markdown bold or inline code spans.
 - [x] Examples for all Phase 2A, Phase 2B1 and Phase 2B2 features.

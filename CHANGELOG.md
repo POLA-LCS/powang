@@ -2,6 +2,23 @@
 
 All notable changes to powang are documented here.
 
+## 0.13.0
+
+### Added
+
+- Structural `trait` declarations with properties, required methods and default methods.
+- Trait annotations on variables, parameters and return types.
+- Generic trait constraints with `T: Trait` and `T: TraitA & TraitB`.
+- Trait-qualified method definitions with `fun Trait.method(...)`.
+- Trait-qualified calls with `Trait.method(value, ...)`.
+- Conflict and ambiguity diagnostics for incompatible trait signatures.
+- LSP `trait` highlighting and `Trait.` completion.
+
+### Changed
+
+- Function body parameter binding now uses the checker signature, so generic `T` parameters keep their type and constraints.
+- Function values with type parameters infer their type arguments at call sites.
+
 ## 0.12.0
 
 ### Added

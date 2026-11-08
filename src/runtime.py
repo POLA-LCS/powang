@@ -2,7 +2,7 @@ from .parser import *
 from .error import *
 from .builtins import *
 from .scopestack import ScopeType, ScopeStack
-from .state import fresh_state, get_state, set_state, reset_state, copy_for_task, Frame
+from .state import fresh_state, get_state, set_state, reset_state, copy_for_task, Frame, TraitRuntimeInfo
 from .builtins.tasks import check_cancellation, get_task_pool, spawn_task
 from .lexer import *
 from .typecheck import type_check
@@ -323,6 +323,14 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
         undefined_right_value.any = PowangAnyType.type
         undefined_right_value.defined = False
         return undefined_right_value
+    if type_expression['value'] in getattr(state, 'traits', {}):
+        ## A trait annotation is a checker contract. At runtime it behaves like
+        ## `obj`, keeping the concrete object payload and its methods.
+        undefined_right_value = PowangObjectType()
+        undefined_right_value.is_obj = True
+        undefined_right_value.defined = False
+        undefined_right_value.type_name = type_expression['value']
+        return undefined_right_value
     type_alias = state.type_alias
     if type_expression['value'] in type_alias:
         type_expression = type_alias[type_expression['value']]
@@ -494,6 +502,7 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
         target_value.private_meths = copied.private_meths
         target_value.public_static_meths = copied.public_static_meths
         target_value.private_static_meths = copied.private_static_meths
+        target_value.trait_methods = copied.trait_methods
 
     elif target_value.type == PowangObjectType.type:
         copy_constructor_result: Optional[PowangAny] = None
@@ -938,6 +947,83 @@ def _private_access_allowed(target: PowangObjectType) -> bool:
     if ScopeStack.static_method_stack:
         return ScopeStack.static_method_stack[-1] == getattr(target, 'type_name', None)
     return False
+
+
+def _object_satisfies_trait(owner: PowangObjectType, trait: TraitRuntimeInfo) -> bool:
+    for prop_name in trait.properties:
+        if owner.getProperty(prop_name, False) is None:
+            return False
+    for method_name in trait.required_methods:
+        if owner.getMethods(method_name, False) is not None:
+            continue
+        if owner.getTraitMethods(trait.name, method_name) is not None:
+            continue
+        return False
+    return True
+
+
+def _find_default_trait_method(
+    owner: PowangObjectType,
+    method_name: str,
+) -> list[PowangFunction] | None:
+    candidates: list[tuple[str, list[PowangFunction]]] = []
+    for trait in get_state().traits.values():
+        if method_name not in trait.default_methods:
+            continue
+        if _object_satisfies_trait(owner, trait):
+            candidates.append((trait.name, trait.default_methods[method_name]))
+    if len(candidates) == 1:
+        return candidates[0][1]
+    if len(candidates) > 1:
+        names = ', '.join(name for name, _ in candidates)
+        raise powang_throw(powang_error_format(
+            'IMPLEMENTATION', 'method call',
+            f"call to {method_name} is ambiguous between trait defaults", [
+                f"candidates: {names}",
+                "use Trait.method to select one",
+            ],
+        ))
+    return None
+
+
+def callTraitMethod(
+    where: str,
+    trait_name: str,
+    method_name: str,
+    receiver: PowangAny,
+    arguments: list[PowangAny],
+    position: tuple[int, int] | None = None,
+):
+    receiver = unwrap_any_value(receiver)
+    if receiver.type != PowangObjectType.type:
+        raise powang_throw(powang_error_format(
+            'IMPLEMENTATION', where,
+            "Trait methods require an object receiver", [
+                f"but {receiver.type} was encountered",
+            ],
+        ))
+    trait = get_state().traits.get(trait_name)
+    if trait is None:
+        raise powang_throw(powang_error_format(
+            'IMPLEMENTATION', where, f"unknown trait '{trait_name}'",
+        ))
+    methods = receiver.getTraitMethods(trait_name, method_name)
+    if methods is None:
+        methods = receiver.getMethods(
+            method_name, _private_access_allowed(receiver)
+        )
+    if methods is None:
+        methods = trait.default_methods.get(method_name)
+    if methods is None:
+        raise powang_throw(powang_error_format(
+            'IMPLEMENTATION', where,
+            f"trait '{trait_name}' has no implementation for method '{method_name}'",
+        ))
+    candidate = getFunctionCandidate(methods, arguments)
+    return callMethod(
+        where, receiver, method_name, candidate, arguments,
+        position=position,
+    )
 
 
 def callMethod(where: str, owner: PowangObjectType, method_name: str, method: PowangFunction,
@@ -2961,7 +3047,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             fun_identifier = getValidIdentifier(where, expr_value['identifier'])
             require(fun_identifier not in NATI_TYPES, lambda: powang_error_identifier_names_type(where, fun_identifier))
             functions: list[PowangFunction] | None = ScopeStack.get_functions(fun_identifier)
-            if functions is not None:
+            if functions is not None and expr_value.get('trait_qualifier') is None:
                 for func in functions:
                     if len(func.args) != len(expr_value['args']):
                         continue
@@ -3025,6 +3111,37 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
         case ParserTokenType.MODULE_DECLARATION:
             return PowangNova()
 
+        case ParserTokenType.TRAIT_DECLARATION:
+            trait_name = getValidIdentifier(where, expr_value['identifier'])
+            trait = TraitRuntimeInfo(trait_name)
+            for prop in expr_value.get('properties', []):
+                prop_value = prop.get('value') if isinstance(prop, dict) else None
+                if not isinstance(prop_value, dict):
+                    continue
+                prop_name = getValidIdentifier(where, prop_value['identifier'])
+                trait.properties.add(prop_name)
+            ScopeStack.push()
+            try:
+                for method in expr_value.get('methods', []):
+                    method_value = method.get('value') if isinstance(method, dict) else None
+                    if not isinstance(method_value, dict):
+                        continue
+                    method_name = getValidIdentifier(where, method_value['identifier'])
+                    trait.declared_methods.add(method_name)
+                    if method_value.get('signature_only') or \
+                            method_value.get('block') is None:
+                        trait.required_methods.add(method_name)
+                        continue
+                    concrete_method = _replace_type_parameters(method, set())
+                    evaluateAstExpression(concrete_method)
+                    loaded = ScopeStack.functions[-1][method_name][-1]
+                    loaded.instance_method = True
+                    trait.default_methods.setdefault(method_name, []).append(loaded)
+            finally:
+                ScopeStack.pop()
+            get_state().traits[trait_name] = trait
+            return PowangNova()
+
         case ParserTokenType.TYPE_DECLARATION:
             identifier = getValidIdentifier(where, expr_value['identifier'])
             
@@ -3080,11 +3197,19 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 private_meths: dict[str, list[PowangFunction]] = {}
                 public_static_meths: dict[str, list[PowangFunction]] = {}
                 private_static_meths: dict[str, list[PowangFunction]] = {}
+                trait_methods: dict[str, dict[str, list[PowangFunction]]] = {}
                 for public, method in expr_value['methods']:
                     method_identifier: str = method['value']['identifier']['value']
                     concrete_method = _replace_type_parameters(method, type_parameters)
                     evaluateAstExpression(concrete_method)
                     loaded = ScopeStack.functions[-1][method_identifier][-1]
+                    qualifier_node = method['value'].get('trait_qualifier')
+                    qualifier = qualifier_node.get('value') if isinstance(qualifier_node, dict) else None
+                    if qualifier is not None:
+                        trait_methods.setdefault(qualifier, {}).setdefault(
+                            method_identifier, []
+                        ).append(loaded)
+                        continue
                     is_instance = (
                         method_identifier == CONSTRUCTOR_METHOD_NAME
                         or bool(method['value'].get('instance_method'))
@@ -3102,6 +3227,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 public_props, private_props,
                 public_meths, private_meths,
                 public_static_meths, private_static_meths,
+                trait_methods=trait_methods,
             )
             new_user_type.type_name = identifier
             return ScopeStack.new_ObjectType(identifier, new_user_type)
@@ -3164,6 +3290,31 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.METHOD_CALL:
             owner_node = expr_value['owner']
+            if isinstance(owner_node, dict) and \
+                    owner_node.get('type') == LexerTokenType.IDENTIFIER:
+                trait_info = get_state().traits.get(owner_node.get('value'))
+                if trait_info is not None:
+                    trait_arguments, trait_named = _evaluate_argument_nodes(
+                        expr_value['arguments']
+                    )
+                    if trait_named:
+                        raise powang_throw(powang_error_format(
+                            'ARGUMENT', where,
+                            'Named arguments are not supported in trait-qualified calls',
+                        ))
+                    if not trait_arguments:
+                        raise powang_throw(powang_error_format(
+                            'ARGUMENT', where,
+                            f"trait-qualified call '{owner_node['value']}.{expr_value['method']['value']}' needs a receiver",
+                        ))
+                    return callTraitMethod(
+                        where,
+                        owner_node['value'],
+                        expr_value['method']['value'],
+                        trait_arguments[0],
+                        trait_arguments[1:],
+                        position=_node_position(expr_value['method']),
+                    )
             if isinstance(owner_node, dict) and \
                     owner_node.get('type') == LexerTokenType.IDENTIFIER and \
                     owner_node.get('value') in NATIVE_METHOD_TYPES:
@@ -3237,7 +3388,36 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             ]))
 
 
+            resolved_trait = expr_value.get('resolved_trait')
             match_methods = owner_value.getMethods(expr_value['method']['value'], _private_access_allowed(owner_value))
+            if match_methods is None and isinstance(resolved_trait, str):
+                match_methods = owner_value.getTraitMethods(
+                    resolved_trait, expr_value['method']['value']
+                )
+                if match_methods is None:
+                    trait = get_state().traits.get(resolved_trait)
+                    if trait is not None:
+                        match_methods = trait.default_methods.get(
+                            expr_value['method']['value']
+                        )
+            if match_methods is None:
+                qualified_methods = owner_value.getAllTraitMethods(
+                    expr_value['method']['value']
+                )
+                if len(qualified_methods) > 1:
+                    raise powang_throw(powang_error_format(
+                        'IMPLEMENTATION', where,
+                        f"call to {expr_value['method']['value']} is ambiguous between trait methods",
+                        [
+                            "use Trait.method to select one",
+                        ],
+                    ))
+                if qualified_methods:
+                    match_methods = qualified_methods
+                else:
+                    match_methods = _find_default_trait_method(
+                        owner_value, expr_value['method']['value']
+                    )
             if match_methods is None:
                 raise powang_throw(powang_error_identifier_not_found(
                     where, f"method: {expr_value['method']['value']}", [

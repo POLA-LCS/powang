@@ -85,6 +85,7 @@ class Parser:
         self._synthetic_counter: int = 0
         self._consts: dict[str, DictRepr] = {}
         self._type_member_context: bool = False
+        self._trait_member_context: bool = False
 
 
     def parse(self):
@@ -112,10 +113,10 @@ class Parser:
                     ))
                 self.advance() # export
                 if self.next.type == LexerTokenType.KEYWORD:
-                    require(self.next.value in {'fun', 'type', 'extern'}, lambda: powang_error_syntax(
+                    require(self.next.value in {'fun', 'type', 'extern', 'trait'}, lambda: powang_error_syntax(
                         'export declaration',
                         f"export cannot be applied to {self.next.value}",
-                        ["export supports fun, type, extern fun and variable declarations"],
+                        ["export supports fun, type, trait, extern fun and variable declarations"],
                     ))
                 else:
                     require(self.next.type == LexerTokenType.IDENTIFIER, lambda: powang_error_syntax(
@@ -135,6 +136,7 @@ class Parser:
                     ParserTokenType.DECLARATION_TYPED_VAR,
                     ParserTokenType.DECLARATION_INTERPRET,
                     ParserTokenType.TYPE_DECLARATION,
+                    ParserTokenType.TRAIT_DECLARATION,
                     ParserTokenType.EXTERN_REFERENCE,
                 }, lambda: powang_error_syntax(
                     'export declaration',
@@ -175,6 +177,8 @@ class Parser:
                     return self.helper_LoopControl(keyword)
                 case 'match':
                     return self.helper_MatchStatement()
+                case 'trait':
+                    return self.helper_TraitDeclaration()
                 case 'const':
                     return self.helper_ConstDeclaration()
                 case 'fun':
@@ -613,6 +617,84 @@ class Parser:
             'methods'    : None,
             'is_enum'    : True,
             'variants'   : variants,
+        }).toDict()
+
+    def helper_TraitDeclaration(self):
+        identifier = self.Identifier()
+        self.consume(LexerTokenType.LEFT_BRACE, 'trait declaration')
+        properties: list[DictRepr] = []
+        methods: list[DictRepr] = []
+        member_names: set[str] = set()
+        previous = self._trait_member_context
+        self._trait_member_context = True
+        try:
+            while self.next.type != LexerTokenType.RIGHT_BRACE:
+                if self.next.type == LexerTokenType.PIPE:
+                    self.advance('trait property')
+                if self.next.type in {
+                    LexerTokenType.OPERATOR_PLUS,
+                    LexerTokenType.OPERATOR_MINUS,
+                }:
+                    self.advance('trait member access')
+                statement = self.ExpressionStatement()
+                if statement is None:
+                    raise powang_throw(self._syntax_at_current(
+                        powang_error_syntax('trait declaration', "Reached end of file")
+                    ))
+                statement.setdefault('value', {})
+                if statement['type'] in {
+                    ParserTokenType.DECLARATION_UNDEFINED,
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                }:
+                    member_name = statement['value']['identifier']['value']
+                    if member_name in member_names:
+                        raise powang_throw(powang_error_redefined(
+                            'trait member', member_name,
+                        ))
+                    member_names.add(member_name)
+                    if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'trait property',
+                            'trait properties cannot have a default value',
+                            ['declare the property as name: type;'],
+                        )))
+                    properties.append(statement)
+                elif statement['type'] == ParserTokenType.DECLARATION_FUN:
+                    member_name = statement['value']['identifier']['value']
+                    if member_name in member_names:
+                        raise powang_throw(powang_error_redefined(
+                            'trait member', member_name,
+                        ))
+                    member_names.add(member_name)
+                    if member_name == CONSTRUCTOR_METHOD_NAME:
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'trait declaration',
+                            'a trait cannot declare a constructor',
+                        )))
+                    statement['value']['instance_method'] = True
+                    statement['value']['trait_member'] = True
+                    block = statement['value'].get('block')
+                    signature_only = bool(statement['value'].get('signature_only'))
+                    if not signature_only and \
+                            isinstance(block, dict) and block.get('value') is None:
+                        raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                            'trait method',
+                            'trait methods need a body or a semicolon',
+                        )))
+                    methods.append(statement)
+                else:
+                    raise powang_throw(powang_error_syntax(
+                        'trait declaration',
+                        'Expected a property or method declaration',
+                        [f"but {TokenToString(statement['type'])} was encountered"],
+                    ))
+        finally:
+            self._trait_member_context = previous
+        self.consume(LexerTokenType.RIGHT_BRACE, 'trait declaration')
+        return doToken(ParserTokenType.TRAIT_DECLARATION, {
+            'identifier': identifier,
+            'properties': properties,
+            'methods': methods,
         }).toDict()
 
     def DestructurePattern(self):
@@ -1372,6 +1454,7 @@ class Parser:
 
     def _parse_optional_type_parameters(self):
         names: list[str] = []
+        constraints: dict[str, list[str]] = {}
         variadic = False
         if self.next.type == LexerTokenType.LEFT_BRACKET:
             self.advance('type parameters')
@@ -1380,7 +1463,23 @@ class Parser:
                     self.advance('variadic type parameters')
                     variadic = True
                     break
-                names.append(self.Identifier()['value'])
+                name = self.Identifier()['value']
+                if name in names:
+                    raise powang_throw(powang_error_redefined(
+                        'type parameter', name,
+                    ))
+                trait_constraints: list[str] = []
+                if self.next.type == LexerTokenType.COLON:
+                    self.advance('type parameter constraint')
+                    while True:
+                        trait_constraints.append(self.Identifier()['value'])
+                        if self.next.type == LexerTokenType.AMPERSAND:
+                            self.advance('type parameter constraint')
+                            continue
+                        break
+                names.append(name)
+                if trait_constraints:
+                    constraints[name] = trait_constraints
                 if self.next.type == LexerTokenType.COMMA:
                     self.advance()
                 elif self.next.type != LexerTokenType.RIGHT_BRACKET:
@@ -1388,7 +1487,7 @@ class Parser:
                         'type parameters', "Expected ',' or ']' in type parameters",
                     )))
             self.consume(LexerTokenType.RIGHT_BRACKET)
-        return names, variadic
+        return names, variadic, constraints
 
     def _parameter_is_variadic_sugar(self, type_parameters: list[str]):
         if self.next.type != LexerTokenType.IDENTIFIER:
@@ -1501,6 +1600,7 @@ class Parser:
 
     def helper_FunDeclaration(self, allow_body: bool = True):
         instance_method = False
+        trait_qualifier = None
         if self.next.type == LexerTokenType.DOT:
             self.advance('instance method marker')
             instance_method = True
@@ -1511,11 +1611,23 @@ class Parser:
                 self.advance('instance method marker')
                 instance_method = True
                 identifier = self.Identifier()
+            elif self.next.type == LexerTokenType.DOT and not self._trait_member_context:
+                require(self._type_member_context, lambda: powang_error_syntax(
+                    'fun declaration',
+                    'trait-qualified methods must be declared inside a type body',
+                ))
+                self.advance('trait-qualified method')
+                trait_qualifier = token.toDict(token.value)
+                trait_qualifier['line'] = token.line
+                trait_qualifier['column'] = token.column
+                identifier = self.Identifier()
+                instance_method = True
             else:
                 identifier = token.toDict(token.value)
                 identifier['line'] = token.line
                 identifier['column'] = token.column
-        type_parameters, variadic_type_parameters = self._parse_optional_type_parameters()
+        type_parameters, variadic_type_parameters, type_parameter_constraints = \
+            self._parse_optional_type_parameters()
         has_parameter_list = self.next.type == LexerTokenType.LEFT_PARENTHESIS
         if not has_parameter_list:
             if identifier['value'] != CONSTRUCTOR_METHOD_NAME or self.next.type != LexerTokenType.LEFT_BRACE:
@@ -1535,7 +1647,12 @@ class Parser:
         if self.next.type == LexerTokenType.COLON:
             self.advance()
             return_expr = self.Type()
-        if self.next.type == LexerTokenType.LEFT_BRACE:
+        signature_only = False
+        if self._trait_member_context and self.next.type == LexerTokenType.SEMI_COLON:
+            self.advance('trait method signature')
+            block = None
+            signature_only = True
+        elif self.next.type == LexerTokenType.LEFT_BRACE:
             block = self.BlockStatement()
         elif allow_body and self.next.type == LexerTokenType.RIGHT_ARROW:
             require(return_expr is not None, lambda: powang_error_syntax(
@@ -1559,9 +1676,12 @@ class Parser:
             "return": return_expr,
             "block": block,
             "instance_method": instance_method,
+            "trait_qualifier": trait_qualifier,
+            "signature_only": signature_only,
             "type_parameters": type_parameters,
             "variadic": variadic,
             "variadic_index": variadic_index,
+            "type_parameter_constraints": type_parameter_constraints,
         }).toDict()
 
     def helper_LambdaExpression(self):
@@ -1574,7 +1694,8 @@ class Parser:
         if self.next.type == LexerTokenType.IDENTIFIER:
             name = self.next.value
             self.advance('lambda name')
-        type_parameters, variadic_type_parameters = self._parse_optional_type_parameters()
+        type_parameters, variadic_type_parameters, type_parameter_constraints = \
+            self._parse_optional_type_parameters()
         args, min_argc, variadic, variadic_index = self._parse_function_parameters(type_parameters)
         require(not variadic_type_parameters or variadic, lambda: powang_error_syntax(
             'lambda expression',
@@ -1611,6 +1732,7 @@ class Parser:
             "type_parameters": type_parameters,
             "variadic": variadic,
             "variadic_index": variadic_index,
+            "type_parameter_constraints": type_parameter_constraints,
         }).toDict()
 
     def Expression(self):

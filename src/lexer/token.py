@@ -121,6 +121,7 @@ class ParserTokenType(TokenTypeBase):
     INTERPOLATED_STRING      = auto()
     MATCH_STATEMENT          = auto()
     MATCH_EXPRESSION         = auto()
+    TRAIT_DECLARATION        = auto()
     DESTRUCTURE_DECLARATION  = auto()
     DESTRUCTURE_PATTERN      = auto()
     RANGE_STATEMENT          = auto()

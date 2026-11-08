@@ -172,6 +172,16 @@ class NewFeatureExampleTests(unittest.TestCase):
             "ascending",
         )
 
+    def test_traits_example(self) -> None:
+        self.check(
+            "traits.po",
+            "screen\n",
+            "name=main draw=screen",
+            "dual",
+            "42",
+            "qualified",
+        )
+
 
 class AllExamplesTests(unittest.TestCase):
     """Every example is a runnable showcase, not just the three original ones."""

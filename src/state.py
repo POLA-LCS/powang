@@ -56,6 +56,25 @@ class WarningRecord:
     code: str = 'PW200'
 
 
+class TraitRuntimeInfo:
+    """Runtime contract for a structural trait."""
+
+    __slots__ = (
+        'name',
+        'properties',
+        'declared_methods',
+        'required_methods',
+        'default_methods',
+    )
+
+    def __init__(self, name: str):
+        self.name = name
+        self.properties: set[str] = set()
+        self.declared_methods: set[str] = set()
+        self.required_methods: set[str] = set()
+        self.default_methods: dict[str, list] = {}
+
+
 class ScopeState:
     """The lexical stacks for one execution context.
 
@@ -402,6 +421,7 @@ class InterpreterState:
         self.warnings_enabled: bool = True
         self.call_frames: list[Frame] = []
         self.type_parameter_stack: list[set[str]] = []
+        self.traits: dict[str, TraitRuntimeInfo] = {}
 
     def register_handle(self, obj: Any) -> int:
         handle_id = self.next_handle_id
@@ -523,6 +543,7 @@ class InterpreterState:
         clone.log_level = self.log_level
         clone.allow_system = self.allow_system
         clone.warnings_enabled = self.warnings_enabled
+        clone.traits = dict(self.traits)
         return clone
 
     def close(self) -> None:
