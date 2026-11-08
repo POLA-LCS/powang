@@ -156,6 +156,22 @@ class NewFeatureExampleTests(unittest.TestCase):
             "fun[int..., int]",
         )
 
+    def test_match_patterns_example(self) -> None:
+        self.check(
+            "match-patterns.po",
+            "array=123",
+            "head=1 tail=2 firstTail=2",
+            "tuple=30",
+            "point=7",
+            "mapped=12",
+            "nested=10",
+            "negative",
+            "low",
+            "mid",
+            "high",
+            "ascending",
+        )
+
 
 class AllExamplesTests(unittest.TestCase):
     """Every example is a runnable showcase, not just the three original ones."""

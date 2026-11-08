@@ -35,6 +35,16 @@ for [key: str, value: int] >> pairs {
     println($"{key}={value}");
 }
 
+## Match destructuring with a rest binding.
+match numbers {
+    case [first, ...rest] >> {
+        println($"match first={first} rest={size(rest)}");
+    }
+    case _ >> {
+        println("match empty");
+    }
+}
+
 ## Match with guards.
 fun classify(value: int): str {
     match value {

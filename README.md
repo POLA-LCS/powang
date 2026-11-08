@@ -771,6 +771,20 @@ match value {
 }
 ```
 
+Destructuring patterns cover arrays, tuples and objects. Rest bindings collect the remaining elements. Range patterns use an inclusive lower bound and an exclusive upper bound.
+
+```po
+match values {
+    case [head, ...tail] >> ...
+    case .[a, b] >> ...
+    case Point.[x, y] >> ...
+    case 0 >> 10 >> ...
+    case _ >> ...
+}
+```
+
+A match on `bool` or an enum warns when a value or variant is missing. Unreachable cases also produce warnings. Add a wildcard or cover every value to silence the exhaustiveness warning.
+
 ### Pipelines
 
 Pipelines pass the left value as the first argument.

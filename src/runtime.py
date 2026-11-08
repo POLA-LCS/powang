@@ -1120,6 +1120,93 @@ def _evaluate_argument_nodes(nodes):
     return positional, named
 
 
+def _match_pattern(pattern: Any, subject: PowangAny) -> bool:
+    if not isinstance(pattern, dict):
+        return False
+    subject = unwrap_any_value(subject)
+    kind = pattern.get('kind')
+    if kind == 'wildcard':
+        return True
+    if kind == 'literal':
+        pattern_value = unwrap_any_value(evaluateAstExpression(pattern.get('value')))
+        return subject.type == pattern_value.type and subject == pattern_value
+    if kind == 'binding':
+        name = pattern.get('value')
+        name = name.get('value') if isinstance(name, dict) else None
+        if isinstance(name, str):
+            ScopeStack.new_variable(name, PowangCopyConstruct(subject))
+        return True
+    if kind == 'range':
+        start_value = unwrap_any_value(evaluateAstExpression(pattern.get('start')))
+        end_value = unwrap_any_value(evaluateAstExpression(pattern.get('end')))
+        if subject.type not in {PowangInteger.type, PowangNumber.type}:
+            return False
+        if start_value.type not in {PowangInteger.type, PowangNumber.type}:
+            raise powang_throw(powang_error_type_match(
+                'match range', 'int or num', start_value.type,
+            ))
+        if end_value.type not in {PowangInteger.type, PowangNumber.type}:
+            raise powang_throw(powang_error_type_match(
+                'match range', 'int or num', end_value.type,
+            ))
+        return start_value.data <= subject.data < end_value.data
+    if kind in {'array', 'tuple'}:
+        if kind == 'tuple':
+            if subject.type != PowangTuple.type:
+                return False
+        elif subject.type not in {PowangArray.type, PowangTuple.type}:
+            return False
+        entries = pattern.get('entries')
+        if not isinstance(entries, list):
+            entries = []
+        rest = pattern.get('rest')
+        data = subject.data
+        if rest is None and len(data) != len(entries):
+            return False
+        if rest is not None and len(data) < len(entries):
+            return False
+        for entry, item in zip(entries, data):
+            if not _match_pattern(entry, item):
+                return False
+        if isinstance(rest, dict):
+            name = rest.get('name')
+            if isinstance(name, str):
+                tail = data[len(entries):]
+                if subject.type == PowangTuple.type:
+                    rest_value: PowangAny = PowangTuple(
+                        [PowangCopyConstruct(item) for item in tail]
+                    )
+                else:
+                    rest_value = PowangArray(
+                        [PowangCopyConstruct(item) for item in tail]
+                    )
+                ScopeStack.new_variable(name, rest_value)
+        return True
+    if kind == 'object':
+        if subject.type != PowangObjectType.type:
+            return False
+        if getattr(subject, 'type_name', None) != pattern.get('type_name'):
+            return False
+        entries = pattern.get('entries')
+        if not isinstance(entries, list):
+            entries = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return False
+            field = entry.get('field')
+            if not isinstance(field, str):
+                return False
+            property_value = subject.getProperty(
+                field, _private_access_allowed(subject)
+            )
+            if property_value is None:
+                return False
+            if not _match_pattern(entry.get('pattern'), property_value):
+                return False
+        return True
+    return False
+
+
 def _executeCallNode(
     where: str,
     callee_node: DictRepr,
@@ -2544,27 +2631,20 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     pattern = match_case.get('pattern')
                     if not isinstance(pattern, dict):
                         pattern = {}
-                    kind = pattern.get('kind')
-                    matched = False
-                    if kind == 'wildcard':
-                        matched = True
-                    elif kind == 'literal':
-                        pattern_value = evaluateAstExpression(pattern.get('value'))
-                        matched = match_subject.type == pattern_value.type and match_subject == pattern_value
-                    elif kind == 'binding':
-                        name = pattern['value']['value']
-                        ScopeStack.new_variable(name, PowangCopyConstruct(match_subject))
-                        matched = True
+                    if not _match_pattern(pattern, match_subject):
+                        continue
                     guard = match_case.get('guard')
-                    if matched and guard is not None:
-                        matched = PowangBoolean.cast(evaluateAstExpression(guard)).data
-                    if matched:
-                        for match_statement in match_case['block']['value']:
+                    if guard is not None and \
+                            not PowangBoolean.cast(evaluateAstExpression(guard)).data:
+                        continue
+                    block = match_case.get('block')
+                    if isinstance(block, dict) and isinstance(block.get('value'), list):
+                        for match_statement in block['value']:
                             check_cancellation()
                             evaluateAstExpression(match_statement)
                             if ScopeStack.return_value is not None:
                                 break
-                        break
+                    break
                 finally:
                     ScopeStack.pop()
 
@@ -2579,34 +2659,25 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     pattern = match_case.get('pattern')
                     if not isinstance(pattern, dict):
                         pattern = {}
-                    kind = pattern.get('kind')
-                    matched = False
-                    if kind == 'wildcard':
-                        matched = True
-                    elif kind == 'literal':
-                        pattern_value = evaluateAstExpression(pattern.get('value'))
-                        matched = match_subject.type == pattern_value.type and match_subject == pattern_value
-                    elif kind == 'binding':
-                        name = pattern['value']['value']
-                        ScopeStack.new_variable(name, PowangCopyConstruct(match_subject))
-                        matched = True
+                    if not _match_pattern(pattern, match_subject):
+                        continue
                     guard = match_case.get('guard')
-                    if matched and guard is not None:
-                        matched = PowangBoolean.cast(evaluateAstExpression(guard)).data
-                    if matched:
-                        if match_case.get('is_expression'):
-                            match_result = evaluateAstExpression(match_case.get('value'))
-                        else:
-                            block = match_case.get('block')
-                            if isinstance(block, dict) and block.get('value') is not None:
-                                for match_statement in block['value']:
-                                    check_cancellation()
-                                    evaluateAstExpression(match_statement)
-                                    if ScopeStack.return_value is not None:
-                                        match_result = ScopeStack.return_value
-                                        ScopeStack.return_value = None
-                                        break
-                        break
+                    if guard is not None and \
+                            not PowangBoolean.cast(evaluateAstExpression(guard)).data:
+                        continue
+                    if match_case.get('is_expression'):
+                        match_result = evaluateAstExpression(match_case.get('value'))
+                    else:
+                        block = match_case.get('block')
+                        if isinstance(block, dict) and block.get('value') is not None:
+                            for match_statement in block['value']:
+                                check_cancellation()
+                                evaluateAstExpression(match_statement)
+                                if ScopeStack.return_value is not None:
+                                    match_result = ScopeStack.return_value
+                                    ScopeStack.return_value = None
+                                    break
+                    break
                 finally:
                     ScopeStack.pop()
             return match_result

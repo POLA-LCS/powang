@@ -892,23 +892,171 @@ class Parser:
             "else": else_block,
         }).toDict()
         
+    def _pattern_starts_tuple(self) -> bool:
+        if self.next.type != LexerTokenType.DOT:
+            return False
+        state = self._saveParserState()
+        try:
+            self.advance('tuple pattern')
+            return self.next.type == LexerTokenType.LEFT_BRACKET
+        except Exception:
+            return False
+        finally:
+            self._restoreParserState(state)
+
+    def _pattern_starts_object(self) -> bool:
+        if self.next.type != LexerTokenType.IDENTIFIER:
+            return False
+        state = self._saveParserState()
+        try:
+            self.Identifier()
+            if self.next.type != LexerTokenType.DOT:
+                return False
+            self.advance('object pattern')
+            return self.next.type == LexerTokenType.LEFT_BRACKET
+        except Exception:
+            return False
+        finally:
+            self._restoreParserState(state)
+
+    @staticmethod
+    def _pattern_literal_is_numeric(node: DictRepr | None) -> bool:
+        if not isinstance(node, dict):
+            return False
+        if node.get('type') in {
+            LexerTokenType.INTEGER_LITERAL,
+            LexerTokenType.FLOATING_LITERAL,
+        }:
+            return True
+        if node.get('type') == ParserTokenType.UNARY_EXPRESSION:
+            value = node.get('value')
+            if isinstance(value, dict):
+                operator = value.get('operator')
+                operator_value = operator.get('value') if isinstance(operator, dict) else None
+                return operator_value in {'+', '-'} and Parser._pattern_literal_is_numeric(
+                    value.get('right')
+                )
+        return False
+
+    def _SequencePattern(self, kind: str):
+        line = self.next.line if self.next is not None else None
+        column = self.next.column if self.next is not None else None
+        if kind == 'tuple':
+            self.consume(LexerTokenType.DOT, 'tuple pattern')
+        self.consume(LexerTokenType.LEFT_BRACKET, f'{kind} pattern')
+        entries: list[DictRepr] = []
+        rest: DictRepr | None = None
+        while self.next.type != LexerTokenType.RIGHT_BRACKET:
+            if self.next.type == LexerTokenType.ELLIPSIS:
+                self.advance('rest binding')
+                name = None
+                if self.next.type == LexerTokenType.IDENTIFIER:
+                    name = self.Identifier()['value']
+                rest = {'name': name}
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                break
+            entries.append(self.MatchPattern())
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+            else:
+                break
+        self.consume(LexerTokenType.RIGHT_BRACKET, f'{kind} pattern')
+        return {
+            'kind': kind,
+            'entries': entries,
+            'rest': rest,
+            'line': line,
+            'column': column,
+        }
+
+    def _ObjectPattern(self):
+        line = self.next.line if self.next is not None else None
+        column = self.next.column if self.next is not None else None
+        type_name_node = self.Identifier()
+        self.consume(LexerTokenType.DOT, 'object pattern')
+        self.consume(LexerTokenType.LEFT_BRACKET, 'object pattern')
+        entries: list[DictRepr] = []
+        while self.next.type != LexerTokenType.RIGHT_BRACKET:
+            field = self.Identifier()
+            if self.next.type == LexerTokenType.COLON:
+                self.advance('object pattern field')
+                entry_pattern = self.MatchPattern()
+            else:
+                entry_pattern = {
+                    'kind': 'binding',
+                    'value': field,
+                    'type': None,
+                    'line': field.get('line'),
+                    'column': field.get('column'),
+                }
+            entries.append({
+                'field': field['value'],
+                'pattern': entry_pattern,
+                'line': field.get('line'),
+                'column': field.get('column'),
+            })
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+            else:
+                break
+        self.consume(LexerTokenType.RIGHT_BRACKET, 'object pattern')
+        return {
+            'kind': 'object',
+            'type_name': type_name_node['value'],
+            'entries': entries,
+            'line': line,
+            'column': column,
+        }
+
     def MatchPattern(self):
+        line = self.next.line if self.next is not None else None
+        column = self.next.column if self.next is not None else None
+        pattern = self._MatchPatternCore()
+        pattern.setdefault('line', line)
+        pattern.setdefault('column', column)
+        if pattern.get('kind') == 'literal' and \
+                self.next is not None and \
+                self.next.type == LexerTokenType.RIGHT_ARROW and \
+                self._pattern_literal_is_numeric(pattern.get('value')):
+            state = self._saveParserState()
+            try:
+                self.advance('range pattern')
+                end = self.Expression()
+                if self.next is not None and self.next.type == LexerTokenType.RIGHT_ARROW:
+                    return {
+                        'kind': 'range',
+                        'start': pattern.get('value'),
+                        'end': end,
+                        'line': line,
+                        'column': column,
+                    }
+            except Exception:
+                pass
+            self._restoreParserState(state)
+        return pattern
+
+    def _MatchPatternCore(self):
         if self.next.type == LexerTokenType.RIGHT_ARROW:
             ## `case >> expr` is a catch-all wildcard.
             return {'kind': 'wildcard', 'value': None, 'type': None}
         if self.next.type == LexerTokenType.IDENTIFIER and self.next.value == '_':
             self.advance('match wildcard')
             return {'kind': 'wildcard', 'value': None, 'type': None}
-        if self.next.type in {
-            LexerTokenType.INTEGER_LITERAL,
-            LexerTokenType.FLOATING_LITERAL,
-            LexerTokenType.STRING_LITERAL,
-            LexerTokenType.BOOLEAN_LITERAL,
-            LexerTokenType.NOVA_LITERAL,
-            LexerTokenType.INTERPOLATED_STRING_LITERAL,
-        }:
-            return {'kind': 'literal', 'value': self.Literal('match pattern'), 'type': None}
+        if self.next.type == LexerTokenType.IDENTIFIER and self.next.value in {'true', 'false'}:
+            token = self.advance('boolean match pattern')
+            return {
+                'kind': 'literal',
+                'value': token.toDict(),
+                'type': None,
+            }
+        if self.next.type == LexerTokenType.DOT and self._pattern_starts_tuple():
+            return self._SequencePattern('tuple')
+        if self.next.type == LexerTokenType.LEFT_BRACKET:
+            return self._SequencePattern('array')
         if self.next.type == LexerTokenType.IDENTIFIER:
+            if self._pattern_starts_object():
+                return self._ObjectPattern()
             # A dotted name such as Color.RED is a literal pattern, not a
             # binding. Peek ahead without consuming the identifier.
             saved_position = self.tokenizer.position
@@ -927,13 +1075,29 @@ class Parser:
                 self.advance()
                 type_node = self.Type()
             return {'kind': 'binding', 'value': identifier, 'type': type_node}
+        if self.next.type in {
+            LexerTokenType.INTEGER_LITERAL,
+            LexerTokenType.FLOATING_LITERAL,
+            LexerTokenType.STRING_LITERAL,
+            LexerTokenType.BOOLEAN_LITERAL,
+            LexerTokenType.NOVA_LITERAL,
+            LexerTokenType.INTERPOLATED_STRING_LITERAL,
+        }:
+            return {'kind': 'literal', 'value': self.Literal('match pattern'), 'type': None}
+        if self.next.type in {
+            LexerTokenType.OPERATOR_MINUS,
+            LexerTokenType.OPERATOR_PLUS,
+        }:
+            return {'kind': 'literal', 'value': self.UnaryExpression(), 'type': None}
         raise powang_throw(powang_error_syntax(
             'match pattern',
-            'Expected a literal, a binding or _',
+            'Expected a literal, a binding, a destructuring pattern or _',
             [f'but {LexerTokenType.toStr(self.next.type)} was encountered'],
         ))
 
-    def helper_MatchExpression(self, subject: DictRepr):
+    def helper_MatchExpression(self, subject: DictRepr, keyword_token=None):
+        line = keyword_token.line if keyword_token is not None else None
+        column = keyword_token.column if keyword_token is not None else None
         self.consume(LexerTokenType.LEFT_BRACE, 'match expression')
         cases: list[DictRepr] = []
         while self.isNextKeyword('case'):
@@ -951,6 +1115,8 @@ class Parser:
                     'guard': guard,
                     'block': block,
                     'is_expression': False,
+                    'line': pattern.get('line'),
+                    'column': pattern.get('column'),
                 })
             else:
                 value = self.Expression()
@@ -959,14 +1125,20 @@ class Parser:
                     'guard': guard,
                     'value': value,
                     'is_expression': True,
+                    'line': pattern.get('line'),
+                    'column': pattern.get('column'),
                 })
         self.consume(LexerTokenType.RIGHT_BRACE, 'match expression')
         return doToken(ParserTokenType.MATCH_EXPRESSION, {
             'subject': subject,
             'cases': cases,
+            'line': line,
+            'column': column,
         }).toDict()
 
     def helper_MatchStatement(self):
+        line = self.next.line if self.next is not None else None
+        column = self.next.column if self.next is not None else None
         subject = self.Expression()
         self.consume(LexerTokenType.LEFT_BRACE, 'match statement')
         cases: list[DictRepr] = []
@@ -988,11 +1160,15 @@ class Parser:
                 'pattern': pattern,
                 'guard': guard,
                 'block': block,
+                'line': pattern.get('line'),
+                'column': pattern.get('column'),
             })
         self.consume(LexerTokenType.RIGHT_BRACE, 'match statement')
         return doToken(ParserTokenType.MATCH_STATEMENT, {
             'subject': subject,
             'cases': cases,
+            'line': line,
+            'column': column,
         }).toDict()
 
     def helper_ForStatement(self):
@@ -1625,8 +1801,9 @@ class Parser:
                     "property": self.Identifier(),
                 }).toDict()
             elif self.next.type == LexerTokenType.KEYWORD and self.next.value == 'match':
+                match_keyword = self.next
                 self.advance('match expression')
-                expr = self.helper_MatchExpression(expr)
+                expr = self.helper_MatchExpression(expr, match_keyword)
             else:
                 break
         return expr

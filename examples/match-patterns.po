@@ -1,0 +1,79 @@
+## Match destructuring and range patterns.
+
+## Array patterns.
+values := [1, 2, 3];
+match values {
+    case [a, b, c] >> {
+        println($"array={a}{b}{c}");
+    }
+    case _ >> {
+        println("array=other");
+    }
+}
+
+## Rest bindings.
+match values {
+    case [head, ...tail] >> {
+        println($"head={head} tail={size(tail)} firstTail={tail[0]}");
+    }
+}
+
+## Tuple patterns.
+pair := .[10, 20];
+match pair {
+    case .[a, b] >> {
+        println($"tuple={a + b}");
+    }
+}
+
+## Object patterns.
+type Point[+] {
+    | x: int;
+    | y: int;
+}
+
+p := Point.[3, 4];
+match p {
+    case Point.[x, y] >> {
+        println($"point={x + y}");
+    }
+}
+
+match p {
+    case Point.[x: px, y: py] >> {
+        println($"mapped={px * py}");
+    }
+}
+
+## Nested patterns.
+nested := [[1, 2], .[3, 4]];
+match nested {
+    case [[a, b], .[c, d]] >> {
+        println($"nested={a + b + c + d}");
+    }
+}
+
+## Range patterns are inclusive on the left and exclusive on the right.
+fun bucket(value: int): str {
+    return value match {
+        case -10 >> 0 >> "negative"
+        case 0 >> 10 >> "low"
+        case 10 >> 20 >> "mid"
+        case _ >> "high"
+    };
+}
+
+println(bucket(-5));
+println(bucket(5));
+println(bucket(15));
+println(bucket(50));
+
+## Guards run after bindings.
+match [1, 2] {
+    case [a, b] if a < b >> {
+        println("ascending");
+    }
+    case _ >> {
+        println("other");
+    }
+}

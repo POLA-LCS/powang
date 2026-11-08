@@ -6,13 +6,14 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 2B3: match destructuring and exhaustiveness.
-  - Plan: `docs/phase-2b3-match-patterns/README.md` (to be written)
-  - Array, tuple and object patterns.
-  - Range patterns.
-  - Enum and boolean exhaustiveness warnings.
-  - Unreachable case warnings.
-  - Target versions: powang `0.12.0`, powang-lsp `0.18.0`.
+- [ ] Phase 2C: traits and interfaces.
+  - Plan: `docs/phase-2c-traits-and-interfaces/README.md` (to be written)
+  - Structural satisfaction.
+  - Trait annotations.
+  - Trait-qualified methods for signature conflicts.
+  - Default trait method bodies checked against the declared contract.
+  - LSP completion after `Trait.`.
+  - Target versions: powang `0.13.0`, powang-lsp `0.19.0`.
 
 ## Language features in order
 
@@ -26,13 +27,14 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] LSP `undef type` display for uninitialized typed variables.
    - Plan: `docs/phase-2b2-variadics-and-spread/README.md`
 
-2. [ ] Match destructuring and exhaustiveness.
-   - Array patterns.
-   - Tuple patterns.
-   - Object patterns.
-   - Range patterns.
-   - Enum and boolean exhaustiveness warnings.
-   - Unreachable case warnings.
+2. [x] Match destructuring and exhaustiveness.
+   - [x] Array patterns.
+   - [x] Tuple patterns.
+   - [x] Object patterns.
+   - [x] Range patterns.
+   - [x] Enum and boolean exhaustiveness warnings.
+   - [x] Unreachable case warnings.
+   - Plan: `docs/phase-2b3-match-patterns/README.md`
 
 3. [ ] Traits and interfaces.
    - Structural satisfaction.
@@ -52,8 +54,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
      - Do not infer the trait shape from members used in a default body. That would make the contract implicit and fragile. If inferred constraints are wanted later, they should be a separate opt-in feature.
      - At runtime, `this` is the concrete object. Declared trait methods dispatch to the concrete implementations. The checker-only contract is not a runtime type.
 
-4. [ ] Range patterns.
-   - Ranges are currently sugar for C-style `for`. This item is about pattern ranges such as `case 0 >> 10 >> ...`, not loop ranges.
+4. [x] Range patterns.
+   - Range patterns are implemented in Phase 2B3 with an inclusive lower bound and an exclusive upper bound.
+   - Loop ranges remain sugar for C-style `for`.
 
 5. [ ] Cross-module type checking.
    - Check imports and exports across files.
@@ -145,6 +148,7 @@ Open questions:
 - [x] Phase 2A loops, labels, slicing, annotations, frames, spawned methods and constant-condition simplification.
 - [x] Phase 2B1 function types and lambdas.
 - [x] Phase 2B2 variadics, explicit type arguments, spread and `undef type` display.
+- [x] Phase 2B3 match destructuring, range patterns, exhaustiveness and unreachable case warnings.
 - [x] LSP `0.16.1` hover syntax highlighting with `powang` fenced code blocks.
 - [x] Plain-text hover prose with no markdown bold or inline code spans.
 - [x] Examples for all Phase 2A, Phase 2B1 and Phase 2B2 features.

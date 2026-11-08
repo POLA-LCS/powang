@@ -2,6 +2,23 @@
 
 All notable changes to powang are documented here.
 
+## 0.12.0
+
+### Added
+
+- Array, tuple and object destructuring in match patterns.
+- Rest bindings in array and tuple patterns.
+- Nested match patterns.
+- Numeric range patterns with an inclusive lower bound and an exclusive upper bound.
+- Boolean and enum exhaustiveness warnings, `PW215`.
+- Unreachable case warnings, `PW216`.
+- Match expression result type inference.
+
+### Changed
+
+- Match guards run after all destructuring bindings.
+- A boolean `true` or `false` in a match pattern is now a literal, not a binding.
+
 ## 0.11.0
 
 ### Added

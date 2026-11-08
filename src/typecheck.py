@@ -107,6 +107,14 @@ def _array_element_type(type_name: str) -> str:
     return ANY
 
 
+def _is_tuple_type(type_name: str) -> bool:
+    return type_name == 'tup' or (
+        isinstance(type_name, str)
+        and type_name.startswith('tup[')
+        and type_name.endswith(']')
+    )
+
+
 def _array_of(element_type: str) -> str:
     if element_type == ANY:
         return f'{ARRAY}[{ANY}]'
@@ -826,36 +834,7 @@ class _TypeChecker:
         if node_type == ParserTokenType.MATCH_STATEMENT:
             return self._infer_match(value)
         if node_type == ParserTokenType.MATCH_EXPRESSION:
-            self._infer(value.get('subject'))
-            result_type = ANY
-            for case in value.get('cases', []) if isinstance(value.get('cases'), list) else []:
-                if not isinstance(case, dict):
-                    continue
-                pattern = case.get('pattern')
-                if isinstance(pattern, dict) and pattern.get('kind') == 'binding':
-                    name = self._identifier_name(pattern.get('value'))
-                    if name is not None:
-                        self._scope_push()
-                        try:
-                            self._bind(name, ANY, False)
-                            guard = case.get('guard')
-                            if guard is not None:
-                                self._infer(guard)
-                            if case.get('is_expression'):
-                                case_type = self._infer(case.get('value'))
-                                if result_type == ANY:
-                                    result_type = case_type
-                        finally:
-                            self._scope_pop()
-                else:
-                    guard = case.get('guard')
-                    if guard is not None:
-                        self._infer(guard)
-                    if case.get('is_expression'):
-                        case_type = self._infer(case.get('value'))
-                        if result_type == ANY:
-                            result_type = case_type
-            return result_type
+            return self._infer_match(value, as_expression=True)
         if node_type == ParserTokenType.DECLARATION_UNDEFINED:
             return self._infer_declaration_undefined(value)
         if node_type == ParserTokenType.DECLARATION_TYPED_VAR:
@@ -2473,11 +2452,321 @@ class _TypeChecker:
             self._infer(else_block)
         return ANY
 
-    def _infer_match(self, value: Any) -> str:
+    def _tuple_element_types(self, type_name: str) -> tuple[list[str], bool]:
+        if type_name == 'tup':
+            return [], False
+        try:
+            from . import typespec as _ts
+            spec = _ts.type_of_str(type_name)
+            if spec.kind is _ts.Kind.NAMED and spec.name == 'tup':
+                return [_ts.render(arg) for arg in spec.args], bool(spec.rest)
+        except Exception:
+            pass
+        return [], False
+
+    def _check_sequence_entries(
+        self,
+        entries: list,
+        element_types: list[str],
+        tuple_rest: bool,
+        rest: Any,
+    ) -> None:
+        if element_types and not tuple_rest:
+            if rest is None and len(entries) != len(element_types):
+                self._error(
+                    f"tuple pattern has {len(entries)} elements but the subject tuple has {len(element_types)}",
+                    ['add or remove pattern elements, or use ...rest'],
+                    where='match pattern',
+                )
+            elif rest is not None and len(entries) > len(element_types):
+                self._error(
+                    f"tuple pattern has {len(entries)} fixed elements but the subject tuple has {len(element_types)}",
+                    ['remove pattern elements'],
+                    where='match pattern',
+                )
+        for index, entry in enumerate(entries):
+            if index < len(element_types):
+                entry_type = element_types[index]
+            elif tuple_rest and element_types:
+                entry_type = element_types[-1]
+            else:
+                entry_type = ANY
+            self._check_match_pattern(entry, entry_type)
+        if isinstance(rest, dict) and isinstance(rest.get('name'), str):
+            remaining = element_types[len(entries):]
+            rest_type = 'tup[' + ', '.join(remaining) + ']' if remaining else 'tup'
+            self._bind(rest['name'], rest_type, False, False)
+
+    def _pattern_compatible(self, pattern: Any, type_name: str) -> bool:
+        kind = pattern.get('kind') if isinstance(pattern, dict) else None
+        if kind in {'wildcard', 'binding'}:
+            return True
+        if type_name in (ANY, MIXED):
+            return True
+        if kind == 'range':
+            return type_name in (INTEGER, NUMBER)
+        if kind == 'literal':
+            literal_type = self._infer(pattern.get('value'))
+            if literal_type in (ANY, MIXED):
+                return True
+            return self._assignable(type_name, literal_type)
+        if kind == 'array':
+            return type_name in (ARRAY, 'tup') or \
+                _is_array_type(type_name) or _is_tuple_type(type_name)
+        if kind == 'tuple':
+            return type_name == 'tup' or _is_tuple_type(type_name)
+        if kind == 'object':
+            name = pattern.get('type_name')
+            return type_name in (OBJ, OBJECT) or \
+                type_name == f'{OBJECT}:{name}' or type_name == name
+        return True
+
+    def _check_match_pattern(self, pattern: Any, subject_type: str) -> None:
+        if not isinstance(pattern, dict):
+            return
+        subject_unknown = subject_type in (ANY, MIXED)
+        kind = pattern.get('kind')
+        if kind not in {'wildcard', 'binding'}:
+            branches = _split_union(subject_type)
+            if len(branches) > 1:
+                for branch in branches:
+                    if self._pattern_compatible(pattern, branch):
+                        self._check_match_pattern(pattern, branch)
+                        return
+        if kind == 'wildcard':
+            return
+        if kind == 'literal':
+            literal_type = self._infer(pattern.get('value'))
+            if not subject_unknown and literal_type not in (ANY, MIXED):
+                if not self._assignable(subject_type, literal_type):
+                    self._assign_error('match pattern', subject_type, literal_type)
+            return
+        if kind == 'binding':
+            name = self._identifier_name(pattern.get('value'))
+            type_node = pattern.get('type')
+            if type_node is not None:
+                bind_type = self._annotation_type(type_node)
+                if not subject_unknown and not self._assignable(bind_type, subject_type):
+                    self._assign_error('match pattern', bind_type, subject_type)
+            else:
+                bind_type = subject_type
+            if bind_type == MIXED:
+                bind_type = ANY
+            self._bind(name or '', bind_type, type_node is not None, False)
+            return
+        if kind == 'range':
+            start_type = self._infer(pattern.get('start'))
+            end_type = self._infer(pattern.get('end'))
+            for bound_type in (start_type, end_type):
+                if bound_type in (ANY, MIXED):
+                    continue
+                if bound_type not in (INTEGER, NUMBER):
+                    self._assign_error('match range', NUMBER, bound_type)
+            if not subject_unknown and subject_type not in (INTEGER, NUMBER):
+                self._assign_error('match range', NUMBER, subject_type)
+            return
+        if kind in {'array', 'tuple'}:
+            entries = pattern.get('entries')
+            entries = entries if isinstance(entries, list) else []
+            rest = pattern.get('rest')
+            if kind == 'array':
+                if _is_array_type(subject_type) or subject_type == ARRAY:
+                    element_type = _array_element_type(subject_type)
+                    for entry in entries:
+                        self._check_match_pattern(entry, element_type)
+                    if isinstance(rest, dict) and isinstance(rest.get('name'), str):
+                        self._bind(rest['name'], _array_of(element_type), False, False)
+                    return
+                if _is_tuple_type(subject_type):
+                    element_types, tuple_rest = self._tuple_element_types(subject_type)
+                    self._check_sequence_entries(entries, element_types, tuple_rest, rest)
+                    return
+                if not subject_unknown:
+                    self._error(
+                        f"array pattern cannot match subject type {subject_type}",
+                        ['use an arr or tup subject'],
+                        where='match pattern',
+                    )
+                for entry in entries:
+                    self._check_match_pattern(entry, ANY)
+                if isinstance(rest, dict) and isinstance(rest.get('name'), str):
+                    self._bind(rest['name'], ARRAY, False, False)
+                return
+            if _is_tuple_type(subject_type):
+                element_types, tuple_rest = self._tuple_element_types(subject_type)
+                self._check_sequence_entries(entries, element_types, tuple_rest, rest)
+                return
+            if not subject_unknown:
+                self._error(
+                    f"tuple pattern cannot match subject type {subject_type}",
+                    ['use a tup subject'],
+                    where='match pattern',
+                )
+            for entry in entries:
+                self._check_match_pattern(entry, ANY)
+            if isinstance(rest, dict) and isinstance(rest.get('name'), str):
+                self._bind(rest['name'], 'tup', False, False)
+            return
+        if kind == 'object':
+            type_name = pattern.get('type_name')
+            info = self.object_types.get(type_name)
+            if info is None:
+                self._error(
+                    f"unknown object type '{type_name}' in match pattern",
+                    ['declare the type before matching it'],
+                    where='match pattern',
+                )
+                return
+            object_type = f'{OBJECT}:{type_name}'
+            if not subject_unknown and subject_type != OBJ and \
+                    not self._assignable(object_type, subject_type):
+                self._assign_error('match pattern', object_type, subject_type)
+            props = info.get('props', {})
+            entries = pattern.get('entries')
+            entries = entries if isinstance(entries, list) else []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                field = entry.get('field')
+                if field not in props:
+                    self._error(
+                        f"'{type_name}' has no property named '{field}'",
+                        [f"properties: {', '.join(sorted(props.keys()))}"],
+                        where='match pattern',
+                    )
+                    continue
+                self._check_match_pattern(entry.get('pattern'), props[field])
+            return
+        self._error(
+            f"unknown match pattern kind '{kind}'",
+            ['use a literal, binding, array, tuple, object or range pattern'],
+            where='match pattern',
+        )
+
+    @staticmethod
+    def _pattern_literal_key(node: Any) -> Optional[tuple]:
+        if not isinstance(node, dict):
+            return None
+        node_type = node.get('type')
+        if node_type == LexerTokenType.BOOLEAN_LITERAL:
+            return ('bool', 'true' if node.get('value') else 'false')
+        if node_type == LexerTokenType.IDENTIFIER and node.get('value') in {'true', 'false'}:
+            return ('bool', node.get('value'))
+        if node_type == LexerTokenType.INTEGER_LITERAL:
+            return ('int', node.get('value'))
+        if node_type == LexerTokenType.FLOATING_LITERAL:
+            return ('num', node.get('value'))
+        if node_type == LexerTokenType.STRING_LITERAL:
+            return ('str', node.get('value'))
+        if node_type == LexerTokenType.NOVA_LITERAL:
+            return ('nova',)
+        if node_type == ParserTokenType.ACCESS_EXPRESSION:
+            value = node.get('value')
+            if isinstance(value, dict):
+                target = value.get('target')
+                prop = value.get('property')
+                target_name = target.get('value') if isinstance(target, dict) else None
+                prop_name = prop.get('value') if isinstance(prop, dict) else None
+                if isinstance(target_name, str) and isinstance(prop_name, str):
+                    return ('enum', target_name, prop_name)
+        return None
+
+    @staticmethod
+    def _pattern_static_number(node: Any) -> Optional[float]:
+        if not isinstance(node, dict):
+            return None
+        node_type = node.get('type')
+        if node_type == LexerTokenType.INTEGER_LITERAL:
+            return float(node.get('value'))
+        if node_type == LexerTokenType.FLOATING_LITERAL:
+            return float(node.get('value'))
+        if node_type == ParserTokenType.UNARY_EXPRESSION:
+            value = node.get('value')
+            if isinstance(value, dict):
+                operator = value.get('operator')
+                operator_value = operator.get('value') if isinstance(operator, dict) else None
+                number = _TypeChecker._pattern_static_number(value.get('right'))
+                if number is None:
+                    return None
+                if operator_value == '-':
+                    return -number
+                if operator_value == '+':
+                    return number
+        return None
+
+    @staticmethod
+    def _match_range_bounds(pattern: Any) -> Optional[tuple[float, float]]:
+        if not isinstance(pattern, dict):
+            return None
+        start = _TypeChecker._pattern_static_number(pattern.get('start'))
+        end = _TypeChecker._pattern_static_number(pattern.get('end'))
+        if start is None or end is None:
+            return None
+        return start, end
+
+    def _match_case_is_catch_all(self, pattern: Any, subject_type: str) -> bool:
+        if not isinstance(pattern, dict):
+            return False
+        kind = pattern.get('kind')
+        if kind == 'wildcard':
+            return True
+        if kind == 'binding':
+            type_node = pattern.get('type')
+            if type_node is None:
+                return True
+            bind_type = self._annotation_type(type_node)
+            return bind_type == ANY or subject_type not in (ANY, MIXED)
+        return False
+
+    def _warn_non_exhaustive(
+        self,
+        subject_type: str,
+        covered_bool: set[str],
+        covered_enum: set[tuple[str, str]],
+        value: Any,
+    ) -> None:
+        line = value.get('line') if isinstance(value, dict) else None
+        column = value.get('column') if isinstance(value, dict) else None
+        if subject_type == BOOLEAN:
+            missing = [name for name in ('true', 'false') if name not in covered_bool]
+            if missing:
+                get_state().warn(
+                    'match on bool is not exhaustive; missing ' + ', '.join(missing),
+                    line if isinstance(line, int) else None,
+                    column if isinstance(column, int) else None,
+                    code='PW215',
+                )
+            return
+        name = subject_type
+        if isinstance(name, str) and name.startswith(OBJECT + ':'):
+            name = name[len(OBJECT) + 1:]
+        info = self.object_types.get(name) if isinstance(name, str) else None
+        if info is not None and info.get('is_enum'):
+            variants = [v for v in info.get('variants', []) if isinstance(v, str)]
+            covered = {
+                variant for enum_name, variant in covered_enum
+                if enum_name == name
+            }
+            missing = [variant for variant in variants if variant not in covered]
+            if missing:
+                get_state().warn(
+                    f'match on {name} is not exhaustive; missing ' + ', '.join(missing),
+                    line if isinstance(line, int) else None,
+                    column if isinstance(column, int) else None,
+                    code='PW215',
+                )
+
+    def _infer_match(self, value: Any, as_expression: bool = False) -> str:
         if not isinstance(value, dict):
             return ANY
         subject_type = self._infer(value.get('subject'))
         cases = value.get('cases')
+        result_types: list[str] = []
+        catch_all = False
+        covered_bool: set[str] = set()
+        covered_enum: set[tuple[str, str]] = set()
+        covered_literals: set[tuple] = set()
+        covered_ranges: list[tuple[float, float]] = []
         if isinstance(cases, list):
             for case in cases:
                 if not isinstance(case, dict):
@@ -2485,27 +2774,84 @@ class _TypeChecker:
                 self._scope_push()
                 try:
                     pattern = case.get('pattern')
-                    if isinstance(pattern, dict):
+                    unreachable_reason: Optional[str] = None
+                    if catch_all:
+                        unreachable_reason = 'an earlier case matches every value'
+                    elif isinstance(pattern, dict):
                         kind = pattern.get('kind')
-                        if kind == 'binding':
-                            name = self._identifier_name(pattern.get('value'))
-                            type_node = pattern.get('type')
-                            bind_type = self._annotation_type(type_node) if type_node is not None else subject_type
-                            if type_node is not None and subject_type != ANY:
-                                if not self._assignable(bind_type, subject_type):
-                                    self._assign_error('match pattern', bind_type, subject_type)
-                            if bind_type == MIXED:
-                                bind_type = ANY
-                            self._bind(name or '', bind_type, type_node is not None, False)
-                        elif kind == 'literal':
-                            self._infer(pattern.get('value'))
+                        if kind == 'literal':
+                            key = self._pattern_literal_key(pattern.get('value'))
+                            if key is not None and key in covered_literals:
+                                unreachable_reason = 'the same value is already covered'
+                            number = self._pattern_static_number(pattern.get('value'))
+                            if unreachable_reason is None and number is not None:
+                                for lower, upper in covered_ranges:
+                                    if lower <= number < upper:
+                                        unreachable_reason = 'an earlier range covers this value'
+                                        break
+                        elif kind == 'range':
+                            bounds = self._match_range_bounds(pattern)
+                            if bounds is not None:
+                                for lower, upper in covered_ranges:
+                                    if lower <= bounds[0] and bounds[1] <= upper:
+                                        unreachable_reason = 'an earlier range covers this range'
+                                        break
+                    if unreachable_reason is not None:
+                        pattern_line = (
+                            pattern.get('line')
+                            if isinstance(pattern, dict)
+                            else case.get('line')
+                        )
+                        pattern_column = (
+                            pattern.get('column')
+                            if isinstance(pattern, dict)
+                            else case.get('column')
+                        )
+                        get_state().warn(
+                            f'unreachable match case: {unreachable_reason}',
+                            pattern_line if isinstance(pattern_line, int) else None,
+                            pattern_column if isinstance(pattern_column, int) else None,
+                            code='PW216',
+                        )
+                    self._check_match_pattern(pattern, subject_type)
                     guard = case.get('guard')
                     if guard is not None:
                         self._infer(guard)
-                    self._infer(case.get('block'))
+                    if as_expression:
+                        if case.get('is_expression'):
+                            case_type = self._infer(case.get('value'))
+                            if case_type not in (ANY, NOVA):
+                                result_types.append(case_type)
+                        else:
+                            self._infer(case.get('block'))
+                    else:
+                        self._infer(case.get('block'))
+                    if guard is None and isinstance(pattern, dict):
+                        if self._match_case_is_catch_all(pattern, subject_type):
+                            catch_all = True
+                        kind = pattern.get('kind')
+                        if kind == 'literal':
+                            key = self._pattern_literal_key(pattern.get('value'))
+                            if key is not None:
+                                covered_literals.add(key)
+                                if key[0] == 'bool':
+                                    covered_bool.add(key[1])
+                                elif key[0] == 'enum':
+                                    covered_enum.add((key[1], key[2]))
+                        elif kind == 'range':
+                            bounds = self._match_range_bounds(pattern)
+                            if bounds is not None:
+                                covered_ranges.append(bounds)
                 finally:
                     self._scope_pop()
+        if not catch_all:
+            self._warn_non_exhaustive(
+                subject_type, covered_bool, covered_enum, value
+            )
+        if as_expression:
+            return _union_of_types(result_types) if result_types else ANY
         return ANY
+
 
     def _infer_try(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -2719,6 +3065,7 @@ class _TypeChecker:
             'static_methods': {},
             'type_parameters': list(value.get('type_parameters') or []),
             'is_enum': bool(value.get('is_enum')),
+            'variants': list(value.get('variants') or []),
         }
         self.object_types[name] = info
         previous_parameters = self.type_parameters
