@@ -90,6 +90,7 @@ HEADS: dict[str, TypeHead] = {
     "task": TypeHead("task", Shape.OPAQUE, constructible=True),
     "file": TypeHead("file", Shape.OPAQUE),
     "reference": TypeHead("reference", Shape.OPAQUE),
+    "undef": TypeHead("undef", Shape.OPAQUE),
     "mixed": TypeHead("mixed", Shape.OPAQUE),
 }
 
@@ -136,6 +137,8 @@ def render(spec: TypeSpec) -> str:
         result = " | ".join(render(a) for a in spec.args)
     elif spec.kind is Kind.FUNCTION:
         parts = [render(p) for p in spec.params]
+        if spec.rest and parts:
+            parts[-1] += "..."
         parts.append(render(spec.returns) if spec.returns is not None else "nova")
         result = "fun[" + ", ".join(parts) + "]"
     else:
@@ -434,9 +437,17 @@ def _build_values(tokens: list[TypeToken], start: int) -> tuple[TypeSpec, int]:
         if i < len(tokens) and tokens[i].kind == "[":
             i += 1
             types: list[TypeSpec] = []
+            variadic = False
             while i < len(tokens) and tokens[i].kind != "]":
                 item, i = _build_values(tokens, i)
                 types.append(item)
+                if i < len(tokens) and tokens[i].kind == "...":
+                    i += 1
+                    variadic = True
+                    if i < len(tokens) and tokens[i].kind == ",":
+                        i += 1
+                        continue
+                    break
                 if i < len(tokens) and tokens[i].kind == ",":
                     i += 1
                     continue
@@ -446,7 +457,9 @@ def _build_values(tokens: list[TypeToken], start: int) -> tuple[TypeSpec, int]:
             i += 1
             if not types:
                 raise TypeSyntaxError("function type needs a return type")
-            core = func(types[:-1], types[-1])
+            if variadic and len(types) < 2:
+                raise TypeSyntaxError("variadic marker must be on a parameter")
+            core = func(types[:-1], types[-1], rest=variadic)
         else:
             ## Legacy `fun(args): return` form, accepted for compatibility.
             if i >= len(tokens) or tokens[i].kind != "(":
@@ -573,7 +586,7 @@ def from_ast_node(node: dict) -> TypeSpec:
                     return_node = inner.get("return_type")
                     returns = from_ast_node(return_node) if isinstance(return_node, dict) else None
                     return replace(
-                        func(parameters, returns),
+                        func(parameters, returns, rest=bool(inner.get("variadic"))),
                         weak=bool(inner.get("weak")),
                         const=bool(inner.get("const")),
                         reference=bool(inner.get("reference")),
@@ -704,6 +717,8 @@ def from_ast_expr(node: dict) -> TypeSpec:
 def assignable(target: TypeSpec, source: TypeSpec) -> bool:
     if target.name == "any" or source.name == "any":
         return True
+    if target.name == "undef" or source.name == "undef":
+        return True
     if source.name == "nova":
         return target.weak or target.name == "nova"
     if target.name == "nova":
@@ -816,6 +831,9 @@ def _assignable_mapping(target: TypeSpec, source: TypeSpec) -> bool:
 def _assignable_function(target: TypeSpec, source: TypeSpec) -> bool:
     if target.kind is not Kind.FUNCTION or source.kind is not Kind.FUNCTION:
         return False
+    if target.rest or source.rest:
+        if not (target.rest and source.rest):
+            return False
     if len(target.params) != len(source.params):
         return False
     for want, have in zip(target.params, source.params):

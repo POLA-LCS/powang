@@ -2,6 +2,24 @@
 
 All notable changes to powang are documented here.
 
+## 0.11.0
+
+### Added
+
+- Variadic user functions with `values: T...` and `values..` sugar.
+- Generic type parameters on function declarations.
+- Explicit call type arguments with `callee[type](...)`.
+- Prefix spread with `...values` and `...[1, 2, 3]`.
+- Spread support for arrays, tuples, sets, maps and strings.
+- Variadic signatures in `typedeep`, such as `fun[int..., int]`.
+- LSP signature help and hover for variadic functions.
+- LSP `undef type` display for uninitialized typed variables.
+
+### Changed
+
+- Function signatures track type parameters and variadic tails.
+- Explicit type arguments select the template overload before concrete overloads.
+
 ## 0.10.0
 
 ### Added
@@ -131,7 +149,7 @@ All notable changes to powang are documented here.
 - Declarations in `if` conditions, scoped to the branch.
 - Named arguments using `name >> value`.
 - Expression-bodied functions with `>>`.
-- Pipeline expressions using `|>`.
+- Pipeline expressions using `:>`.
 - `const` declarations as compile-time macro substitution.
 - Typed array annotations such as `array[integer]` and `array[string]`. Element types are
   checked on declarations, function arguments, returns, indexing and casts.

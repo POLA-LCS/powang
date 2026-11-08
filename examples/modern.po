@@ -80,3 +80,13 @@ double := fun(value: int): int >> value * 2;
 apply: fun[fun[int, int], int, int] =
     fun(function: fun[int, int], value: int): int >> function(value);
 println(apply(double, 5));
+
+## Variadic functions and spread.
+fun sum(values: int...): int {
+    total := 0;
+    for value >> values {
+        total += value;
+    }
+    return total;
+}
+println(sum(...[1, 2, 3]));

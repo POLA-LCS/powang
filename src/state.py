@@ -401,6 +401,7 @@ class InterpreterState:
         self.warnings: list[WarningRecord] = []
         self.warnings_enabled: bool = True
         self.call_frames: list[Frame] = []
+        self.type_parameter_stack: list[set[str]] = []
 
     def register_handle(self, obj: Any) -> int:
         handle_id = self.next_handle_id

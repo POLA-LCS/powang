@@ -395,6 +395,48 @@ print(apply(double, 7));
 print(typedeep(double));  ## fun[int, int]
 ```
 
+### Variadics and spread
+
+A variadic parameter collects the remaining arguments into an array.
+
+```po
+fun sum(values: int...): int {
+    total := 0;
+    for value >> values {
+        total += value;
+    }
+    return total;
+}
+
+sum();
+sum(1, 2, 3);
+```
+
+Generic variadic functions infer the element type. Explicit type arguments force the template overload.
+
+```po
+fun first[T](values: T...): T {
+    return values[0];
+}
+
+first(7, 8, 9);
+first[str](..."ab");
+
+fun add(a: int, b: int): int >> a + b;
+fun add[T](a: T, b: T): T >> a + b;
+
+add(1, 2);       ## concrete
+add[int](1, 2);  ## template
+```
+
+Spread uses a prefix `...` and only works in argument position. Arrays, tuples, sets, maps and strings can be spread.
+
+```po
+sum(...values);
+sum(...[1, 2, 3]);
+sum(...pairs);
+```
+
 ### Types and OOP
 
 User-defined types support public and private members, constructors and methods. Instances copy by value.

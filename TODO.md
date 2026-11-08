@@ -6,21 +6,25 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 2B2: variadics and spread.
-  - Plan: `docs/phase-2b2-variadics-and-spread/README.md`
-  - Includes explicit type arguments, prefix `...` spread, zero-argument `undef` inference and overload rules.
-  - Companion LSP change: uninitialized typed variables display as `undef type`.
-  - Target versions: powang `0.11.0`, powang-lsp `0.17.0`.
+- [ ] Phase 2B3: match destructuring and exhaustiveness.
+  - Plan: `docs/phase-2b3-match-patterns/README.md` (to be written)
+  - Array, tuple and object patterns.
+  - Range patterns.
+  - Enum and boolean exhaustiveness warnings.
+  - Unreachable case warnings.
+  - Target versions: powang `0.12.0`, powang-lsp `0.18.0`.
 
 ## Language features in order
 
-1. [ ] Variadics and spread.
-   - `fun sum[T](values: T...): T`
-   - `sum(...values)`
-   - `sum(...[1, 2, 3])`
-   - `sum[int](1, 2, 3)`
-   - Zero variadic arguments infer `undef`.
-   - Explicit type arguments select the template overload before concrete overloads.
+1. [x] Variadics and spread.
+   - [x] `fun sum[T](values: T...): T`
+   - [x] `sum(...values)`
+   - [x] `sum(...[1, 2, 3])`
+   - [x] `sum[int](1, 2, 3)`
+   - [x] Zero variadic arguments infer `undef`.
+   - [x] Explicit type arguments select the template overload before concrete overloads.
+   - [x] LSP `undef type` display for uninitialized typed variables.
+   - Plan: `docs/phase-2b2-variadics-and-spread/README.md`
 
 2. [ ] Match destructuring and exhaustiveness.
    - Array patterns.
@@ -84,7 +88,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [ ] Standalone linter as `powang lint`.
 - [ ] `project.format.po` configuration.
 - [ ] LSP calls the standalone formatter and linter.
-- [ ] LSP-only `undef type` display for uninitialized typed variables.
+- [x] LSP-only `undef type` display for uninitialized typed variables.
 - [ ] LSP trait completion that inserts the full trait method signature.
 - [ ] Debugger and debug adapter.
 - [ ] Package registry client.
@@ -140,6 +144,7 @@ Open questions:
 - [x] Phase 1 correctness and guardrails.
 - [x] Phase 2A loops, labels, slicing, annotations, frames, spawned methods and constant-condition simplification.
 - [x] Phase 2B1 function types and lambdas.
+- [x] Phase 2B2 variadics, explicit type arguments, spread and `undef type` display.
 - [x] LSP `0.16.1` hover syntax highlighting with `powang` fenced code blocks.
 - [x] Plain-text hover prose with no markdown bold or inline code spans.
-- [x] Examples for all Phase 2A and Phase 2B1 features.
+- [x] Examples for all Phase 2A, Phase 2B1 and Phase 2B2 features.

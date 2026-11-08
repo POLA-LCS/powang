@@ -617,6 +617,9 @@ class PowangFunction(PowangTypeBase):
         self.lambda_name: Optional[str] = None
         self.is_lambda: bool = False
         self.mutable_capture: bool = False
+        self.type_parameters: list[str] = []
+        self.variadic: bool = False
+        self.variadic_index: Optional[int] = None
         
     def __repr__(self) -> str:
         return f"({', '.join(f"{arg['value']['identifier']['value']}: {arg}" for arg in self.args)}): {self.return_expr['value']}"
@@ -1005,6 +1008,12 @@ def PowangCopyConstruct(any: PowangAny, _memo: Optional[dict[int, PowangAny]] = 
             value.is_lambda = any.is_lambda
         if hasattr(any, 'mutable_capture'):
             value.mutable_capture = any.mutable_capture
+        if hasattr(any, 'type_parameters'):
+            value.type_parameters = list(any.type_parameters)
+        if hasattr(any, 'variadic'):
+            value.variadic = any.variadic
+        if hasattr(any, 'variadic_index'):
+            value.variadic_index = any.variadic_index
         return _copy_common(any, value)
 
     value = PowangTypeMap(any.type)(any.data)

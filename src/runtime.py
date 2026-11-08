@@ -314,7 +314,16 @@ def _evaluateDestructureDeclaration(where: str, expr_value: DictRepr) -> PowangA
 
 
 def getUndefinedVariable(where: str, type_expression: DictRepr):
-    type_alias = get_state().type_alias
+    state = get_state()
+    active_type_parameters: set[str] = set()
+    for names in getattr(state, 'type_parameter_stack', []):
+        active_type_parameters.update(names)
+    if type_expression['value'] in active_type_parameters:
+        undefined_right_value: PowangAny = PowangAnyType()
+        undefined_right_value.any = PowangAnyType.type
+        undefined_right_value.defined = False
+        return undefined_right_value
+    type_alias = state.type_alias
     if type_expression['value'] in type_alias:
         type_expression = type_alias[type_expression['value']]
     alternatives = type_expression.get('alternatives')
@@ -689,6 +698,29 @@ def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, c
         param_type = param_type_node.get('value') if isinstance(param_type_node, dict) else None
         is_reference = isinstance(param_type, dict) and bool(param_type.get('reference'))
 
+        if getattr(candidate, 'variadic', False) and \
+                getattr(candidate, 'variadic_index', None) == i:
+            parameter_name = argument_value.get('identifier', {}).get('value')
+            items = call_parameters[i:]
+            type_parameters = set(getattr(candidate, 'type_parameters', []) or [])
+            element_name = param_type if isinstance(param_type, str) else None
+            if element_name not in type_parameters and isinstance(param_type_node, dict):
+                for item in items:
+                    element_target = getUndefinedVariable(
+                        where, param_type_node.get('value', {})
+                    )
+                    assignWithChecks(
+                        'function call',
+                        element_target,
+                        item,
+                        areSameObjectType(element_target, item),
+                    )
+            ScopeStack.new_variable(
+                parameter_name,
+                PowangArray([copy_for_task(item) for item in items]),
+            )
+            break
+
         if is_reference:
             if i >= len(call_parameters):
                 continue
@@ -720,7 +752,7 @@ def checkFunctionArguments(where: str, callee: str, candidate: PowangFunction, c
                 # force object assign condition
             )
 
-    if len(call_parameters) > len(candidate.args):
+    if not getattr(candidate, 'variadic', False) and len(call_parameters) > len(candidate.args):
         raise powang_throw(powang_error_format("ARGUMENT", 'Function call', 'too many arguments'))
     if len(call_parameters) < candidate.min_argc:
         raise powang_throw(powang_error_format("ARGUMENT", 'Function call', 'not enought arguments'))
@@ -778,9 +810,12 @@ def _bind_lambda_name(captured, name: str, function: PowangFunction):
 
 def _lambda_function_type(args, return_node):
     parameter_types = []
+    variadic = False
     for argument in args:
         argument_value = argument.get('value') if isinstance(argument, dict) else None
         type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
+        if isinstance(argument_value, dict) and argument_value.get('variadic'):
+            variadic = True
         if isinstance(type_node, dict):
             try:
                 parameter_types.append(_typespec.render(_typespec.from_ast_node(type_node)))
@@ -788,6 +823,8 @@ def _lambda_function_type(args, return_node):
                 parameter_types.append(PowangAnyType.type)
         else:
             parameter_types.append(PowangAnyType.type)
+    if variadic and parameter_types:
+        parameter_types[-1] = parameter_types[-1] + '...'
     if isinstance(return_node, dict):
         try:
             return_type = _typespec.render(_typespec.from_ast_node(return_node))
@@ -841,6 +878,9 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
     if captured_this is not None:
         ScopeStack.method_call_stack.append(captured_this)
     state = get_state()
+    state.type_parameter_stack.append(
+        set(getattr(candidate, 'type_parameters', []) or [])
+    )
     frame_file = state.paths.get('RELATIVE') if state.paths else None
     state.call_frames.append(Frame(
         frame_name or callee,
@@ -884,6 +924,7 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
     finally:
         if captured_this is not None:
             ScopeStack.method_call_stack.pop()
+        state.type_parameter_stack.pop()
         state.call_frames.pop()
         if saved_scopes is not None:
             ScopeStack.restore_scopes(saved_scopes)
@@ -984,19 +1025,34 @@ def resolveNamedArguments(
         for arg in candidate.args
         if isinstance(arg, dict) and isinstance(arg.get('value'), dict)
     ]
-    resolved: list[PowangAny | None] = [None] * len(arg_names)
+    variadic = getattr(candidate, 'variadic', False)
+    variadic_index = getattr(candidate, 'variadic_index', None)
+    fixed_count = (
+        variadic_index
+        if variadic and isinstance(variadic_index, int)
+        else len(arg_names)
+    )
+    fixed_names = arg_names[:fixed_count]
+    resolved: list[PowangAny | None] = [None] * fixed_count
+    extra: list[PowangAny] = []
     for index, value in enumerate(positional):
-        if index >= len(resolved):
+        if index < fixed_count:
+            resolved[index] = value
+        elif variadic:
+            extra.append(value)
+        else:
             raise powang_throw(powang_error_format('ARGUMENT', where, 'too many arguments'))
-        resolved[index] = value
     for name, value in named:
-        if name not in arg_names:
+        if name not in fixed_names:
+            detail = (
+                'named arguments cannot target a variadic parameter'
+                if name in arg_names and name not in fixed_names
+                else f"parameters: {', '.join(fixed_names)}"
+            )
             raise powang_throw(powang_error_format(
-                'ARGUMENT', where, f"has no parameter named '{name}'", [
-                    f"parameters: {', '.join(arg_names)}",
-                ],
+                'ARGUMENT', where, f"has no parameter named '{name}'", [detail],
             ))
-        index = arg_names.index(name)
+        index = fixed_names.index(name)
         if resolved[index] is not None:
             raise powang_throw(powang_error_format(
                 'ARGUMENT', where, f"received '{name}' more than once",
@@ -1008,8 +1064,8 @@ def resolveNamedArguments(
         if index < candidate.min_argc:
             raise powang_throw(powang_error_format(
                 'ARGUMENT', where,
-                f"Missing required argument '{arg_names[index]}'", [
-                    f"parameters: {', '.join(arg_names)}",
+                f"Missing required argument '{fixed_names[index]}'", [
+                    f"parameters: {', '.join(fixed_names)}",
                 ],
             ))
         argument_value = candidate.args[index].get('value') if isinstance(candidate.args[index], dict) else None
@@ -1017,15 +1073,60 @@ def resolveNamedArguments(
         if default_expression is None:
             raise powang_throw(powang_error_format(
                 'ARGUMENT', where,
-                f"Missing required argument '{arg_names[index]}'", [
-                    f"parameters: {', '.join(arg_names)}",
+                f"Missing required argument '{fixed_names[index]}'", [
+                    f"parameters: {', '.join(fixed_names)}",
                 ],
             ))
         resolved[index] = evaluateAstExpression(default_expression)
-    return [value for value in resolved if value is not None]
+    return [value for value in resolved if value is not None] + extra
 
 
-def _executeCallNode(where: str, callee_node: DictRepr, call_parameters: list[PowangAny], named_arguments: list[tuple[str, PowangAny]] | None = None) -> PowangAny:
+def _spread_values(value: PowangAny) -> list[PowangAny]:
+    if value.type == PowangArray.type:
+        return list(value.data)
+    if value.type == PowangTuple.type:
+        return list(value.data)
+    if value.type == PowangSet.type:
+        return list(value.data.keys())
+    if value.type == PowangMap.type:
+        return [PowangTuple([key, item]) for key, item in value.data.items()]
+    if value.type == PowangString.type:
+        return [PowangString(char) for char in value.data]
+    raise powang_throw(powang_error_type_match(
+        'spread',
+        f'{PowangArray.type}, {PowangTuple.type}, {PowangSet.type}, '
+        f'{PowangMap.type} or {PowangString.type}',
+        value.type,
+    ))
+
+
+def _evaluate_argument_nodes(nodes):
+    positional: list[PowangAny] = []
+    named: list[tuple[str, PowangAny]] = []
+    for node in nodes if isinstance(nodes, list) else []:
+        if isinstance(node, dict) and node.get('type') == ParserTokenType.NAMED_ARGUMENT:
+            named_value = node.get('value')
+            if isinstance(named_value, dict):
+                name_node = named_value.get('name')
+                name = name_node.get('value') if isinstance(name_node, dict) else None
+                if isinstance(name, str):
+                    named.append((name, evaluateAstExpression(named_value.get('value'))))
+            continue
+        if isinstance(node, dict) and node.get('type') == ParserTokenType.SPREAD_EXPRESSION:
+            value = evaluateAstExpression(node.get('value'))
+            positional.extend(_spread_values(value))
+            continue
+        positional.append(evaluateAstExpression(node))
+    return positional, named
+
+
+def _executeCallNode(
+    where: str,
+    callee_node: DictRepr,
+    call_parameters: list[PowangAny],
+    named_arguments: list[tuple[str, PowangAny]] | None = None,
+    type_argument_count: int = 0,
+) -> PowangAny:
     """Perform a call whose arguments have already been evaluated.
 
     Shared by normal ``CALL_EXPRESSION`` evaluation and by task workers, which
@@ -1062,6 +1163,16 @@ def _executeCallNode(where: str, callee_node: DictRepr, call_parameters: list[Po
     ## resolving. Wildcard-imported externs still carry an `external` attribute,
     ## so they are dispatched through the extern path.
     if (match_functions := ScopeStack.get_functions(call_callee)) is not None:
+        if type_argument_count:
+            match_functions = [
+                candidate for candidate in match_functions
+                if len(getattr(candidate, 'type_parameters', []) or []) == type_argument_count
+            ]
+            if not match_functions:
+                raise powang_throw(powang_error_format(
+                    'ARGUMENT', where,
+                    f"No generic overload of '{call_callee}' accepts {type_argument_count} type arguments",
+                ))
         if named_arguments:
             if len(match_functions) != 1:
                 raise powang_throw(powang_error_format(
@@ -2093,10 +2204,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 right_node = expr_value['right']
                 if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.CALL_EXPRESSION:
                     call_value = right_node['value']
-                    pipeline_parameters = [binary_left] + [
-                        evaluateAstExpression(argument)
-                        for argument in call_value.get('arguments', [])
-                    ]
+                    pipeline_args, _ = _evaluate_argument_nodes(
+                        call_value.get('arguments', [])
+                    )
+                    pipeline_parameters = [binary_left] + pipeline_args
                     return _executeCallNode(where, call_value['callee'], pipeline_parameters)
                 if isinstance(right_node, dict) and right_node.get('type') == ParserTokenType.METHOD_CALL:
                     method_value = right_node['value']
@@ -2104,10 +2215,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     if isinstance(owner_node, dict) and \
                             owner_node.get('type') == LexerTokenType.IDENTIFIER and \
                             owner_node.get('value') in NATIVE_METHOD_TYPES:
-                        pipeline_parameters = [binary_left] + [
-                            evaluateAstExpression(argument)
-                            for argument in method_value.get('arguments', [])
-                        ]
+                        pipeline_args, _ = _evaluate_argument_nodes(
+                            method_value.get('arguments', [])
+                        )
+                        pipeline_parameters = [binary_left] + pipeline_args
                         return call_native_method(
                             where,
                             owner_node['value'],
@@ -2115,10 +2226,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                             pipeline_parameters,
                         )
                     owner_value = evaluateAstExpression(method_value['owner'])
-                    pipeline_parameters = [binary_left] + [
-                        evaluateAstExpression(argument)
-                        for argument in method_value.get('arguments', [])
-                    ]
+                    pipeline_args, _ = _evaluate_argument_nodes(
+                        method_value.get('arguments', [])
+                    )
+                    pipeline_parameters = [binary_left] + pipeline_args
                     if owner_value.type == PowangModule.type:
                         return callModuleMember(where, owner_value, method_value['method']['value'], pipeline_parameters)
                     require(owner_value.type == PowangObjectType.type, lambda: powang_error_format('IMPLEMENTATION', where,
@@ -2363,19 +2474,17 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.CALL_EXPRESSION:
             call_callee_node = expr_value['callee']
-            call_parameters: list[PowangAny] = []
-            named_arguments: list[tuple[str, PowangAny]] = []
-            for call_arg in expr_value['arguments']:
-                if isinstance(call_arg, dict) and call_arg.get('type') == ParserTokenType.NAMED_ARGUMENT:
-                    named_value = call_arg.get('value')
-                    if isinstance(named_value, dict):
-                        name_node = named_value.get('name')
-                        name = name_node.get('value') if isinstance(name_node, dict) else None
-                        if isinstance(name, str):
-                            named_arguments.append((name, evaluateAstExpression(named_value.get('value'))))
-                    continue
-                call_parameters.append(evaluateAstExpression(call_arg))
-            return _executeCallNode(where, call_callee_node, call_parameters, named_arguments)
+            call_parameters, named_arguments = _evaluate_argument_nodes(
+                expr_value.get('arguments', [])
+            )
+            type_arguments = expr_value.get('type_arguments')
+            return _executeCallNode(
+                where,
+                call_callee_node,
+                call_parameters,
+                named_arguments,
+                len(type_arguments) if isinstance(type_arguments, list) else 0,
+            )
 
         case ParserTokenType.SPAWN_EXPRESSION:
             ## Arguments are evaluated on the parent thread, then copied so
@@ -2385,11 +2494,8 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             spawn_node = expr_value['call']
             spawn_call = spawn_node['value']
             spawn_arguments = spawn_call.get('arguments', [])
-            if any(
-                isinstance(spawn_arg, dict)
-                and spawn_arg.get('type') == ParserTokenType.NAMED_ARGUMENT
-                for spawn_arg in spawn_arguments
-            ):
+            parent_parameters, spawn_named = _evaluate_argument_nodes(spawn_arguments)
+            if spawn_named:
                 raise powang_throw(powang_error_format(
                     'TASK', 'spawn',
                     'Named arguments are not supported in spawn',
@@ -2400,10 +2506,6 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 if spawn_node.get('type') == ParserTokenType.METHOD_CALL
                 else spawn_call.get('callee')
             )
-            parent_parameters = [
-                evaluateAstExpression(spawn_arg)
-                for spawn_arg in spawn_arguments
-            ]
             task_parameters = [copy_for_task(parameter) for parameter in parent_parameters]
 
             parent_state = get_state()
@@ -2765,6 +2867,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             function.min_argc = expr_value.get('min_argc', 0)
             function.is_lambda = True
             function.mutable_capture = bool(expr_value.get('mutable_capture'))
+            function.type_parameters = list(expr_value.get('type_parameters') or [])
+            function.variadic = bool(expr_value.get('variadic'))
+            function.variadic_index = expr_value.get('variadic_index')
             function.function_type = _lambda_function_type(lambda_args, lambda_return_node)
             function.captured_this = (
                 ScopeStack.method_call_stack[-1]
@@ -2821,6 +2926,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 return_type['value']
             )
             new_function.min_argc = expr_value['min_argc']
+            new_function.type_parameters = list(expr_value.get('type_parameters') or [])
+            new_function.variadic = bool(expr_value.get('variadic'))
+            new_function.variadic_index = expr_value.get('variadic_index')
             new_function.function_type = _lambda_function_type(
                 expr_value['args'], return_type
             )
@@ -2988,10 +3096,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if isinstance(owner_node, dict) and \
                     owner_node.get('type') == LexerTokenType.IDENTIFIER and \
                     owner_node.get('value') in NATIVE_METHOD_TYPES:
-                native_arguments = [
-                    evaluateAstExpression(call_arg)
-                    for call_arg in expr_value['arguments']
-                ]
+                native_arguments, _ = _evaluate_argument_nodes(
+                    expr_value['arguments']
+                )
                 return call_native_method(
                     where,
                     owner_node['value'],
@@ -3008,21 +3115,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                             where, f"method: {expr_value['method']['value']}", [
                                 "perhaps is a private static method?"
                             ]))
-                    static_arguments: list[PowangAny] = []
-                    static_named: list[tuple[str, PowangAny]] = []
-                    for call_arg in expr_value['arguments']:
-                        if isinstance(call_arg, dict) and \
-                                call_arg.get('type') == ParserTokenType.NAMED_ARGUMENT:
-                            named_value = call_arg.get('value')
-                            if isinstance(named_value, dict):
-                                name_node = named_value.get('name')
-                                name = name_node.get('value') if isinstance(name_node, dict) else None
-                                if isinstance(name, str):
-                                    static_named.append(
-                                        (name, evaluateAstExpression(named_value.get('value')))
-                                    )
-                            continue
-                        static_arguments.append(evaluateAstExpression(call_arg))
+                    static_arguments, static_named = _evaluate_argument_nodes(
+                        expr_value['arguments']
+                    )
                     if static_named and len(static_methods) != 1:
                         raise powang_throw(powang_error_format(
                             'ARGUMENT', where,
@@ -3050,7 +3145,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                         ScopeStack.static_method_stack.pop()
             owner_value = evaluateAstExpression(expr_value['owner'])
             owner_value = unwrap_any_value(owner_value)
-            call_parameters = [evaluateAstExpression(call_arg) for call_arg in expr_value['arguments']]
+            call_parameters, _ = _evaluate_argument_nodes(expr_value['arguments'])
             if owner_value.type in NATIVE_METHOD_TYPES:
                 return call_native_method(
                     where,

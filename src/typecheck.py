@@ -15,6 +15,7 @@ what makes the typing gradual: unannotated programs keep running exactly as
 before.
 """
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -87,6 +88,7 @@ NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, HANDLE, OBJ}
 ARRAY_OPEN = f'{ARRAY}['
 ARRAY_CLOSE = ']'
 MIXED = 'mixed'
+UNDEF = 'undef'
 
 
 def _is_array_type(type_name: str) -> bool:
@@ -246,6 +248,10 @@ class _Signature:
         'return_weak',
         'allows_error',
         'function_type',
+        'type_parameters',
+        'variadic',
+        'variadic_index',
+        'variadic_type',
     )
 
     def __init__(
@@ -259,6 +265,10 @@ class _Signature:
         return_weak: bool,
         allows_error: bool,
         function_type: str | None = None,
+        type_parameters: list[str] | None = None,
+        variadic: bool = False,
+        variadic_index: int | None = None,
+        variadic_type: str | None = None,
     ):
         self.name = name
         self.parameter_names = parameter_names
@@ -269,6 +279,10 @@ class _Signature:
         self.return_weak = return_weak
         self.allows_error = allows_error
         self.function_type = function_type
+        self.type_parameters = type_parameters or []
+        self.variadic = variadic
+        self.variadic_index = variadic_index
+        self.variadic_type = variadic_type
 
 
 class _TypeChecker:
@@ -289,6 +303,7 @@ class _TypeChecker:
         self.in_function: bool = False
         self.this_type: Optional[str] = None
         self.type_parameters: set[str] = set()
+        self.current_type_parameters: set[str] = set()
         self.loop_labels: list[Optional[str]] = []
         self.loop_break_flags: list[bool] = []
         self._position: Optional[tuple[int, int]] = None
@@ -466,6 +481,8 @@ class _TypeChecker:
                 ]
                 return_node = inner.get('return_type')
                 returns = self._annotation_type(return_node, ANY) if isinstance(return_node, dict) else ANY
+                if inner.get('variadic') and parameters:
+                    parameters[-1] = parameters[-1] + '...'
                 parts = parameters + [returns]
                 rendered = 'fun[' + ', '.join(parts) + ']'
                 referenced = bool(inner.get('reference', False)) or bool(type_node.get('reference', False))
@@ -568,6 +585,10 @@ class _TypeChecker:
 
     def _assignable(self, target: str, source: str, target_weak: bool = False) -> bool:
         if target == ANY or source == ANY:
+            return True
+        if target == UNDEF or source == UNDEF:
+            return True
+        if target in self.current_type_parameters or source in self.current_type_parameters:
             return True
         source_branches = _split_union(source)
         if len(source_branches) > 1:
@@ -1107,6 +1128,11 @@ class _TypeChecker:
             else:
                 positional_nodes.append(argument)
         argument_types = [self._infer(argument) for argument in positional_nodes]
+        type_arguments = value.get('type_arguments')
+        type_argument_types = [
+            self._annotation_type(type_node)
+            for type_node in (type_arguments if isinstance(type_arguments, list) else [])
+        ]
         callee_name = self._identifier_name(callee)
         if callee_name is None:
             # Still walk the callee expression so nested checks are not lost.
@@ -1141,6 +1167,18 @@ class _TypeChecker:
 
         if callee_name in self.functions:
             candidates = self.functions[callee_name]
+            if type_argument_types:
+                candidates = [
+                    candidate for candidate in candidates
+                    if len(candidate.type_parameters) == len(type_argument_types)
+                ]
+                if not candidates:
+                    self._error(
+                        f"No generic overload of '{callee_name}' accepts {len(type_argument_types)} type arguments",
+                        [f"available templates: {len(self.functions[callee_name])}"],
+                        where=f'function call: {callee_name}',
+                    )
+                    return ANY
             if named_nodes:
                 if len(candidates) != 1:
                     self._error(
@@ -1150,16 +1188,35 @@ class _TypeChecker:
                     )
                     return candidates[0].return_type if candidates else ANY
                 candidate = candidates[0]
-                ordered_types: list[Optional[str]] = [None] * len(candidate.parameter_types)
+                if type_argument_types:
+                    candidate = self._specialize_signature(
+                        candidate,
+                        dict(zip(candidate.type_parameters, type_argument_types)),
+                    )
+                fixed_count = (
+                    candidate.variadic_index
+                    if candidate.variadic and candidate.variadic_index is not None
+                    else len(candidate.parameter_types)
+                )
+                ordered_types: list[Optional[str]] = [None] * fixed_count
                 for index, argument_type in enumerate(argument_types):
-                    if index >= len(ordered_types):
+                    if index < fixed_count:
+                        ordered_types[index] = argument_type
+                    elif candidate.variadic:
+                        if candidate.variadic_type is not None and \
+                                not self._assignable(candidate.variadic_type, argument_type):
+                            self._assign_error(
+                                f'function call: {callee_name}',
+                                candidate.variadic_type,
+                                argument_type,
+                            )
+                    else:
                         self._error(
                             f"Function '{callee_name}' received too many arguments",
-                            [f"expected at most {len(ordered_types)}"],
+                            [f"expected at most {fixed_count}"],
                             where=f'function call: {callee_name}',
                         )
                         break
-                    ordered_types[index] = argument_type
                 for named in named_nodes:
                     named_value = named.get('value')
                     if not isinstance(named_value, dict):
@@ -1167,10 +1224,10 @@ class _TypeChecker:
                     name = self._identifier_name(named_value.get('name'))
                     if name is None:
                         continue
-                    if name not in candidate.parameter_names:
+                    if name not in candidate.parameter_names[:fixed_count]:
                         self._error(
                             f"Function '{callee_name}' has no parameter named '{name}'",
-                            [f"parameters: {', '.join(candidate.parameter_names)}"],
+                            [f"parameters: {', '.join(candidate.parameter_names[:fixed_count])}"],
                             where=f'function call: {callee_name}',
                         )
                         continue
@@ -1200,12 +1257,27 @@ class _TypeChecker:
                         )
                 return candidate.return_type
 
+            if type_argument_types:
+                candidates = [
+                    self._specialize_signature(
+                        candidate,
+                        dict(zip(candidate.type_parameters, type_argument_types)),
+                    )
+                    for candidate in candidates
+                ]
             matches = [
                 candidate for candidate in candidates
                 if self._signature_matches(candidate, argument_types)
             ]
             if matches:
-                return matches[0].return_type
+                selected = matches[0]
+                if not type_argument_types:
+                    mapping = self._infer_type_argument_mapping(
+                        selected, argument_types
+                    )
+                    if mapping:
+                        selected = self._specialize_signature(selected, mapping)
+                return selected.return_type
             self._error(
                 f"No overload of '{callee_name}' accepts the given arguments",
                 [
@@ -1227,6 +1299,40 @@ class _TypeChecker:
                     ['pass the arguments positionally'],
                     where=f'function call: {callee_name}',
                 )
+                return signature.return_type
+            if signature.variadic:
+                fixed = signature.variadic_index if signature.variadic_index is not None else 0
+                if len(argument_types) < signature.min_argc:
+                    self._error(
+                        f"Function value '{callee_name}' received too few arguments",
+                        [f"expected at least {signature.min_argc}"],
+                        where=f'function call: {callee_name}',
+                    )
+                    return signature.return_type
+                for index in range(min(fixed, len(argument_types))):
+                    if not self._assignable(
+                        signature.parameter_types[index],
+                        argument_types[index],
+                        signature.parameter_weak[index],
+                    ):
+                        self._assign_error(
+                            f'function call: {callee_name}',
+                            signature.parameter_types[index],
+                            argument_types[index],
+                        )
+                        break
+                if signature.variadic_type is not None:
+                    for index in range(fixed, len(argument_types)):
+                        if not self._assignable(
+                            signature.variadic_type,
+                            argument_types[index],
+                        ):
+                            self._assign_error(
+                                f'function call: {callee_name}',
+                                signature.variadic_type,
+                                argument_types[index],
+                            )
+                            break
                 return signature.return_type
             if len(argument_types) > len(signature.parameter_types):
                 self._error(
@@ -1259,7 +1365,105 @@ class _TypeChecker:
             self._infer(value.get('call'))
         return TASK
 
+    @staticmethod
+    def _substitute_type_parameters(type_text: str, mapping: dict[str, str]) -> str:
+        result = type_text
+        for name, actual in mapping.items():
+            result = re.sub(rf'\b{re.escape(name)}\b', actual, result)
+        return result
+
+    def _specialize_signature(
+        self,
+        signature: _Signature,
+        mapping: dict[str, str],
+    ) -> _Signature:
+        if not mapping:
+            return signature
+        parameter_types = [
+            self._substitute_type_parameters(type_text, mapping)
+            for type_text in signature.parameter_types
+        ]
+        return_type = self._substitute_type_parameters(signature.return_type, mapping)
+        variadic_type = (
+            self._substitute_type_parameters(signature.variadic_type, mapping)
+            if signature.variadic_type is not None
+            else None
+        )
+        rendered_params = list(parameter_types)
+        if signature.variadic and signature.variadic_index is not None and \
+                0 <= signature.variadic_index < len(rendered_params):
+            rendered_params[signature.variadic_index] = \
+                rendered_params[signature.variadic_index] + '...'
+        function_type = 'fun[' + ', '.join(rendered_params + [return_type]) + ']'
+        return _Signature(
+            signature.name,
+            signature.parameter_names,
+            parameter_types,
+            signature.parameter_weak,
+            signature.min_argc,
+            return_type,
+            signature.return_weak,
+            signature.allows_error,
+            function_type,
+            signature.type_parameters,
+            signature.variadic,
+            signature.variadic_index,
+            variadic_type,
+        )
+
+    def _infer_type_argument_mapping(
+        self,
+        signature: _Signature,
+        argument_types: list[str],
+    ) -> dict[str, str]:
+        if not signature.type_parameters:
+            return {}
+        mapped: dict[str, list[str]] = {}
+        fixed = (
+            signature.variadic_index
+            if signature.variadic and signature.variadic_index is not None
+            else len(signature.parameter_types)
+        )
+        for index in range(min(fixed, len(argument_types))):
+            parameter_type = signature.parameter_types[index]
+            if parameter_type in signature.type_parameters and \
+                    argument_types[index] != ANY:
+                mapped.setdefault(parameter_type, []).append(argument_types[index])
+        if signature.variadic and signature.variadic_type in signature.type_parameters:
+            tail = argument_types[fixed:]
+            if tail:
+                for argument_type in tail:
+                    if argument_type != ANY:
+                        mapped.setdefault(signature.variadic_type, []).append(argument_type)
+            else:
+                mapped.setdefault(signature.variadic_type, []).append(UNDEF)
+        return {
+            name: _union_of_types(types)
+            for name, types in mapped.items()
+        }
+
     def _signature_matches(self, signature: _Signature, argument_types: list[str]) -> bool:
+        if signature.variadic:
+            fixed = signature.variadic_index if signature.variadic_index is not None else 0
+            if len(argument_types) < signature.min_argc:
+                return False
+            for index in range(min(fixed, len(argument_types))):
+                parameter_type = signature.parameter_types[index]
+                parameter_weak = signature.parameter_weak[index]
+                if parameter_type in signature.type_parameters:
+                    continue
+                if parameter_type == ANY or argument_types[index] == ANY:
+                    continue
+                if not self._assignable(parameter_type, argument_types[index], parameter_weak):
+                    return False
+            if signature.variadic_type is not None and \
+                    signature.variadic_type not in signature.type_parameters:
+                for index in range(fixed, len(argument_types)):
+                    if argument_types[index] == ANY:
+                        continue
+                    if not self._assignable(signature.variadic_type, argument_types[index]):
+                        return False
+            return True
         if len(argument_types) > len(signature.parameter_types):
             return False
         if len(argument_types) < signature.min_argc:
@@ -1267,6 +1471,8 @@ class _TypeChecker:
         for index, argument_type in enumerate(argument_types):
             parameter_type = signature.parameter_types[index]
             parameter_weak = signature.parameter_weak[index]
+            if parameter_type in signature.type_parameters:
+                continue
             if parameter_type == ANY or argument_type == ANY:
                 continue
             if not self._assignable(parameter_type, argument_type, parameter_weak):
@@ -1283,16 +1489,24 @@ class _TypeChecker:
             return None
         parameter_types = [_ts.render(parameter) for parameter in spec.params]
         return_type = _ts.render(spec.returns) if spec.returns is not None else ANY
+        variadic = bool(spec.rest)
+        variadic_index = len(parameter_types) - 1 if variadic and parameter_types else None
+        variadic_type = parameter_types[-1] if variadic and parameter_types else None
+        min_argc = len(parameter_types) - 1 if variadic else len(parameter_types)
         return _Signature(
             name,
             [f'arg{index}' for index in range(len(parameter_types))],
             parameter_types,
             [False] * len(parameter_types),
-            len(parameter_types),
+            max(0, min_argc),
             return_type,
             False,
             False,
             type_text,
+            [],
+            variadic,
+            variadic_index,
+            variadic_type,
         )
 
     def _collect_return_types(self, node: Any, result: Optional[list[str]] = None) -> list[str]:
@@ -1322,6 +1536,13 @@ class _TypeChecker:
         arguments = value.get('args')
         if not isinstance(arguments, list):
             arguments = []
+        type_parameters = value.get('type_parameters')
+        if not isinstance(type_parameters, list):
+            type_parameters = []
+        variadic = bool(value.get('variadic'))
+        variadic_index = value.get('variadic_index')
+        if not isinstance(variadic_index, int):
+            variadic_index = None
         parameter_names: list[str] = []
         parameter_types: list[str] = []
         parameter_weak: list[bool] = []
@@ -1334,28 +1555,49 @@ class _TypeChecker:
             )
             if not parameter_names[-1]:
                 parameter_names[-1] = f'arg{index}'
-            parameter_types.append(self._annotation_type(type_node))
+            parameter_types.append(
+                self._signature_annotation_type(type_node, type_parameters)
+            )
             parameter_weak.append(self._annotation_weak(type_node))
+        variadic_type = (
+            parameter_types[variadic_index]
+            if variadic and variadic_index is not None
+            and 0 <= variadic_index < len(parameter_types)
+            else None
+        )
         name = value.get('name') if isinstance(value.get('name'), str) else None
         return_node = value.get('return')
         if isinstance(return_node, dict):
-            return_type = self._annotation_type(return_node, NOVA)
+            return_type = self._signature_annotation_type(
+                return_node, type_parameters, NOVA
+            )
             return_weak = self._annotation_weak(return_node)
             allows_error = self._annotation_error_union(return_node)
         else:
             return_type = ANY
             return_weak = False
             allows_error = False
+        min_argc = value.get('min_argc')
+        if not isinstance(min_argc, int):
+            min_argc = len(parameter_types)
+        rendered_params = list(parameter_types)
+        if variadic and variadic_index is not None and 0 <= variadic_index < len(rendered_params):
+            rendered_params[variadic_index] = rendered_params[variadic_index] + '...'
+        function_type = 'fun[' + ', '.join(rendered_params + [return_type]) + ']'
         signature = _Signature(
             name or '<lambda>',
             parameter_names,
             parameter_types,
             parameter_weak,
-            len(parameter_types),
+            min_argc,
             return_type,
             return_weak,
             allows_error,
-            'fun[' + ', '.join(parameter_types + [return_type]) + ']',
+            function_type,
+            type_parameters,
+            variadic,
+            variadic_index,
+            variadic_type,
         )
         previous = (
             self.return_type,
@@ -1363,15 +1605,20 @@ class _TypeChecker:
             self.return_allows_error,
             self.in_function,
             self.this_type,
+            self.current_type_parameters,
         )
         self.return_type = return_type
         self.return_weak = return_weak
         self.return_allows_error = allows_error
         self.in_function = True
+        self.current_type_parameters = set(type_parameters)
         self._scope_push()
         try:
             for index, parameter_name in enumerate(parameter_names):
-                self._bind(parameter_name, parameter_types[index], True, parameter_weak[index])
+                bound_type = parameter_types[index]
+                if variadic and variadic_index == index:
+                    bound_type = _array_of(bound_type)
+                self._bind(parameter_name, bound_type, True, parameter_weak[index])
             if name is not None:
                 self._bind(name, signature.function_type or ANY, True, False)
             block = value.get('block')
@@ -1382,7 +1629,10 @@ class _TypeChecker:
                 if collected:
                     return_type = _union_of_types(collected)
                     signature.return_type = return_type
-                    signature.function_type = 'fun[' + ', '.join(parameter_types + [return_type]) + ']'
+                    rendered_params = list(parameter_types)
+                    if variadic and variadic_index is not None and 0 <= variadic_index < len(rendered_params):
+                        rendered_params[variadic_index] = rendered_params[variadic_index] + '...'
+                    signature.function_type = 'fun[' + ', '.join(rendered_params + [return_type]) + ']'
         finally:
             self._scope_pop()
             (
@@ -1391,6 +1641,7 @@ class _TypeChecker:
                 self.return_allows_error,
                 self.in_function,
                 self.this_type,
+                self.current_type_parameters,
             ) = previous
         return signature.function_type or FUNCTION
 
@@ -2529,6 +2780,22 @@ class _TypeChecker:
         return f'{OBJECT}:{name}'
 
     # --------------------------------------------------------------- functions
+    def _signature_annotation_type(
+        self,
+        type_node: Any,
+        type_parameters: list[str],
+        default: str = ANY,
+    ) -> str:
+        inner = type_node.get('value') if isinstance(type_node, dict) else None
+        if isinstance(inner, str) and inner in type_parameters:
+            return inner
+        if isinstance(inner, dict):
+            name = inner.get('value')
+            if isinstance(name, str) and name in type_parameters and \
+                    not inner.get('generics'):
+                return name
+        return self._annotation_type(type_node, default)
+
     def _make_signature(self, function_node: Any) -> Optional[_Signature]:
         if not isinstance(function_node, dict):
             return None
@@ -2541,6 +2808,13 @@ class _TypeChecker:
         arguments = value.get('args')
         if not isinstance(arguments, list):
             arguments = []
+        type_parameters = value.get('type_parameters')
+        if not isinstance(type_parameters, list):
+            type_parameters = []
+        variadic = bool(value.get('variadic'))
+        variadic_index = value.get('variadic_index')
+        if not isinstance(variadic_index, int):
+            variadic_index = None
 
         parameter_names: list[str] = []
         parameter_types: list[str] = []
@@ -2555,12 +2829,19 @@ class _TypeChecker:
             type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
             parameter_name = self._identifier_name(argument_value.get('identifier')) if isinstance(argument_value, dict) else None
             parameter_names.append(parameter_name or '')
-            parameter_types.append(self._annotation_type(type_node))
+            parameter_types.append(
+                self._signature_annotation_type(type_node, type_parameters)
+            )
             parameter_weak.append(self._annotation_weak(type_node))
 
         min_argc = value.get('min_argc')
         if not isinstance(min_argc, int):
             min_argc = len(parameter_types)
+        variadic_type = (
+            parameter_types[variadic_index]
+            if variadic and variadic_index is not None and 0 <= variadic_index < len(parameter_types)
+            else None
+        )
 
         return_node = value.get('return')
         if return_node is None:
@@ -2568,11 +2849,16 @@ class _TypeChecker:
             return_weak = False
             allows_error = False
         else:
-            return_type = self._annotation_type(return_node, NOVA)
+            return_type = self._signature_annotation_type(
+                return_node, type_parameters, NOVA
+            )
             return_weak = self._annotation_weak(return_node)
             allows_error = self._annotation_error_union(return_node)
 
-        function_type = 'fun[' + ', '.join(parameter_types + [return_type]) + ']'
+        rendered_params = list(parameter_types)
+        if variadic and variadic_index is not None and 0 <= variadic_index < len(rendered_params):
+            rendered_params[variadic_index] = rendered_params[variadic_index] + '...'
+        function_type = 'fun[' + ', '.join(rendered_params + [return_type]) + ']'
         return _Signature(
             name,
             parameter_names,
@@ -2583,6 +2869,10 @@ class _TypeChecker:
             return_weak,
             allows_error,
             function_type,
+            type_parameters,
+            variadic,
+            variadic_index,
+            variadic_type,
         )
 
     def _check_function(self, function_node: Any, this_type: Optional[str] = None, register: bool = True) -> Optional[_Signature]:
@@ -2607,6 +2897,7 @@ class _TypeChecker:
             self.this_type,
             self.loop_labels,
             self.loop_break_flags,
+            self.current_type_parameters,
         )
         self.return_type = signature.return_type
         self.return_weak = signature.return_weak
@@ -2615,14 +2906,27 @@ class _TypeChecker:
         self.this_type = this_type
         self.loop_labels = []
         self.loop_break_flags = []
+        self.current_type_parameters = set(signature.type_parameters)
 
         self._scope_push()
         try:
             arguments = value.get('args')
             if isinstance(arguments, list):
-                for argument in arguments:
+                for index, argument in enumerate(arguments):
                     argument_value = argument.get('value') if isinstance(argument, dict) else None
                     type_node = argument_value.get('type') if isinstance(argument_value, dict) else None
+                    if signature.variadic and signature.variadic_index == index:
+                        name = self._identifier_name(argument_value.get('identifier'))
+                        element_type = self._signature_annotation_type(
+                            type_node, signature.type_parameters
+                        )
+                        self._bind(
+                            name or '',
+                            _array_of(element_type),
+                            True,
+                            self._annotation_weak(type_node),
+                        )
+                        continue
                     if self._annotation_reference(type_node):
                         ## Inside the body a reference parameter behaves like
                         ## the target variable's own type.
@@ -2646,6 +2950,7 @@ class _TypeChecker:
                 self.this_type,
                 self.loop_labels,
                 self.loop_break_flags,
+                self.current_type_parameters,
             ) = previous
 
     # ----------------------------------------------------------------- extern

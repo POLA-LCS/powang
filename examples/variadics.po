@@ -1,0 +1,61 @@
+## Variadic functions, explicit type arguments and spread.
+
+fun sum(values: int...): int {
+    total := 0;
+    for value >> values {
+        total += value;
+    }
+    return total;
+}
+
+print(sum());
+print(" ");
+print(sum(1));
+print(" ");
+print(sum(1, 2, 3));
+print("\n");
+
+## Generic variadic functions infer the element type.
+fun first[T](values: T...): T {
+    return values[0];
+}
+
+print(first(7, 8, 9));
+print(" ");
+print(first[str](..."ab"));
+print("\n");
+
+## Explicit type arguments force the template overload.
+fun add(a: int, b: int): int >> a + b;
+
+fun add[T](a: T, b: T): T {
+    println("TEMPLATE");
+    return a + b;
+}
+
+print(add(1, 2));
+print(" ");
+print(add[int](1, 2));
+print("\n");
+
+## Spread expands arrays, tuples, sets, maps and strings.
+fun count(values: any...): int >> size(values);
+
+pair := .[1, 2, 3];
+unique := [/1, 2, 3];
+pairs := ["a" >> 1, "b" >> 2];
+
+print(count(...[1, 2, 3]));
+print(" ");
+print(count(...pair));
+print(" ");
+print(count(...unique));
+print(" ");
+print(count(...pairs));
+print(" ");
+print(count(..."abc"));
+print("\n");
+
+## typedeep reports the variadic signature.
+print(typedeep(sum));
+print("\n");

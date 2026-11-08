@@ -1194,6 +1194,135 @@ class Parser:
             self.advance()
         return None
 
+    def _parse_optional_type_parameters(self):
+        names: list[str] = []
+        variadic = False
+        if self.next.type == LexerTokenType.LEFT_BRACKET:
+            self.advance('type parameters')
+            while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                if self.next.type == LexerTokenType.ELLIPSIS:
+                    self.advance('variadic type parameters')
+                    variadic = True
+                    break
+                names.append(self.Identifier()['value'])
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'type parameters', "Expected ',' or ']' in type parameters",
+                    )))
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+        return names, variadic
+
+    def _parameter_is_variadic_sugar(self, type_parameters: list[str]):
+        if self.next.type != LexerTokenType.IDENTIFIER:
+            return None
+        state = self._saveParserState()
+        identifier = self.Identifier()
+        if self.next.type != LexerTokenType.DOT:
+            self._restoreParserState(state)
+            return None
+        self.advance('variadic parameter')
+        if self.next.type != LexerTokenType.DOT:
+            self._restoreParserState(state)
+            return None
+        self.advance('variadic parameter')
+        element_type = type_parameters[0] if len(type_parameters) == 1 else PowangAnyType.type
+        type_node = doToken(ParserTokenType.TYPE, {
+            'value': element_type,
+            'weak': False,
+            'const': False,
+            'error_union': False,
+            'reference': False,
+            'element_type': None,
+            'generics': [],
+            'variadic': False,
+            'alternatives': [],
+            'auto': False,
+        }).toDict()
+        statement = doToken(ParserTokenType.DECLARATION_UNDEFINED, {
+            'identifier': identifier,
+            'type': type_node,
+        }).toDict()
+        return statement, True
+
+    def _parse_function_parameters(self, type_parameters: list[str]):
+        self.consume(LexerTokenType.LEFT_PARENTHESIS)
+        args: list[DictRepr] = []
+        has_defaults = False
+        min_argc = 0
+        variadic = False
+        variadic_index: Optional[int] = None
+        i = 1
+        while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+            sugar = self._parameter_is_variadic_sugar(type_parameters)
+            if sugar is not None:
+                statement, variadic_parameter = sugar
+            else:
+                statement = self.Statement()
+                variadic_parameter = False
+            if self.next.type == LexerTokenType.ELLIPSIS:
+                self.advance('variadic parameter')
+                variadic_parameter = True
+            if variadic_parameter:
+                if variadic:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'function parameters', 'Only one variadic parameter is allowed',
+                    )))
+                if has_defaults:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'function parameters',
+                        'A variadic parameter cannot follow a default parameter',
+                    )))
+                if isinstance(statement.get('value'), dict) and \
+                        statement['value'].get('expression') is not None:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'function parameters',
+                        'A variadic parameter cannot have a default value',
+                    )))
+                statement['value']['variadic'] = True
+                variadic = True
+                variadic_index = len(args)
+                args.append(statement)
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                if self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+                    raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                        'function parameters', 'The variadic parameter must be last',
+                    )))
+                break
+            if not has_defaults:
+                require(statement['type'] in {
+                    ParserTokenType.DECLARATION_UNDEFINED,
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                }, lambda: powang_error_syntax('fun declaration', "Invalid argument expression", [
+                    "Expected a variable declaration",
+                    f"but {TokenToString(statement['type'])} was encountered",
+                ]))
+                if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
+                    has_defaults = True
+                else:
+                    min_argc += 1
+            elif statement['type'] == ParserTokenType.DECLARATION_UNDEFINED:
+                raise powang_throw(powang_error_format(
+                    'LOGIC', 'fun arguments expression', "Missing default value", [
+                        f"expected argument {i} to have a default value",
+                    ],
+                ))
+            else:
+                require(statement['type'] in {
+                    ParserTokenType.DECLARATION_TYPED_VAR,
+                }, lambda: powang_error_syntax('fun declaration', "Invalid argument expression", [
+                    "Expected a variable declaration with default value",
+                    f"but {TokenToString(statement['type'])} was encountered",
+                ]))
+            args.append(statement)
+            if self.next.type == LexerTokenType.COMMA:
+                self.advance()
+            i += 1
+        self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+        return args, min_argc, variadic, variadic_index
+
     def helper_FunDeclaration(self, allow_body: bool = True):
         instance_method = False
         if self.next.type == LexerTokenType.DOT:
@@ -1210,10 +1339,7 @@ class Parser:
                 identifier = token.toDict(token.value)
                 identifier['line'] = token.line
                 identifier['column'] = token.column
-        args: list[DictRepr] = []
-        has_defaults = False
-        i = 1
-        min_argc: int = 0
+        type_parameters, variadic_type_parameters = self._parse_optional_type_parameters()
         has_parameter_list = self.next.type == LexerTokenType.LEFT_PARENTHESIS
         if not has_parameter_list:
             if identifier['value'] != CONSTRUCTOR_METHOD_NAME or self.next.type != LexerTokenType.LEFT_BRACE:
@@ -1222,40 +1348,13 @@ class Parser:
                     "Expected '(' after the function name",
                     [f"but {TokenToString(self.next.type)} was encountered"],
                 )))
+            args, min_argc, variadic, variadic_index = [], 0, False, None
         else:
-            self.consume(LexerTokenType.LEFT_PARENTHESIS)
-        while has_parameter_list and self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
-            statement = self.Statement()
-            if not has_defaults:
-                require(statement['type'] in {
-                    ParserTokenType.DECLARATION_UNDEFINED,
-                    ParserTokenType.DECLARATION_TYPED_VAR
-                }, lambda: powang_error_syntax('fun declaration', "Invalid argument expression", [
-                    "Expected a variable declaration",
-                    f"but {TokenToString(statement['type'])} was encountered"
-                ]))
-                if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
-                    has_defaults = True
-                else:
-                    min_argc += 1
-            elif statement['type'] == ParserTokenType.DECLARATION_UNDEFINED:
-                raise powang_throw(powang_error_format('LOGIC', 'fun arguments expression', f"Missing default value", [
-                    f"expected argument {i} to have a default value",
-                    "this is not the case..."
-                ]))
-            else:
-                require(statement['type'] in {
-                    ParserTokenType.DECLARATION_TYPED_VAR
-                }, lambda: powang_error_syntax('fun declaration', "Invalid argument expression", [
-                    "Expected a variable declaration with default value",
-                    f"but {TokenToString(statement['type'])} was encountered"
-                ]))
-            args.append(statement)
-            if self.next.type == LexerTokenType.COMMA:
-                self.advance()
-            i += 1
-        if has_parameter_list:
-            self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+            args, min_argc, variadic, variadic_index = self._parse_function_parameters(type_parameters)
+        require(not variadic_type_parameters or variadic, lambda: powang_error_syntax(
+            'function declaration',
+            'A variadic type parameter list needs a variadic value parameter',
+        ))
         return_expr = None
         if self.next.type == LexerTokenType.COLON:
             self.advance()
@@ -1284,6 +1383,9 @@ class Parser:
             "return": return_expr,
             "block": block,
             "instance_method": instance_method,
+            "type_parameters": type_parameters,
+            "variadic": variadic,
+            "variadic_index": variadic_index,
         }).toDict()
 
     def helper_LambdaExpression(self):
@@ -1296,47 +1398,12 @@ class Parser:
         if self.next.type == LexerTokenType.IDENTIFIER:
             name = self.next.value
             self.advance('lambda name')
-        self.consume(LexerTokenType.LEFT_PARENTHESIS, 'lambda parameters')
-        args: list[DictRepr] = []
-        has_defaults = False
-        min_argc = 0
-        i = 1
-        while self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
-            statement = self.Statement()
-            if not has_defaults:
-                require(statement['type'] in {
-                    ParserTokenType.DECLARATION_UNDEFINED,
-                    ParserTokenType.DECLARATION_TYPED_VAR,
-                }, lambda: powang_error_syntax(
-                    'lambda parameters', "Invalid argument expression", [
-                        "Expected a variable declaration",
-                        f"but {TokenToString(statement['type'])} was encountered",
-                    ],
-                ))
-                if statement['type'] == ParserTokenType.DECLARATION_TYPED_VAR:
-                    has_defaults = True
-                else:
-                    min_argc += 1
-            elif statement['type'] == ParserTokenType.DECLARATION_UNDEFINED:
-                raise powang_throw(powang_error_format(
-                    'LOGIC', 'lambda parameters', "Missing default value", [
-                        f"expected argument {i} to have a default value",
-                    ],
-                ))
-            else:
-                require(statement['type'] in {
-                    ParserTokenType.DECLARATION_TYPED_VAR,
-                }, lambda: powang_error_syntax(
-                    'lambda parameters', "Invalid argument expression", [
-                        "Expected a variable declaration with default value",
-                        f"but {TokenToString(statement['type'])} was encountered",
-                    ],
-                ))
-            args.append(statement)
-            if self.next.type == LexerTokenType.COMMA:
-                self.advance()
-            i += 1
-        self.consume(LexerTokenType.RIGHT_PARENTHESIS)
+        type_parameters, variadic_type_parameters = self._parse_optional_type_parameters()
+        args, min_argc, variadic, variadic_index = self._parse_function_parameters(type_parameters)
+        require(not variadic_type_parameters or variadic, lambda: powang_error_syntax(
+            'lambda expression',
+            'A variadic type parameter list needs a variadic value parameter',
+        ))
         return_expr = None
         if self.next.type == LexerTokenType.COLON:
             self.advance()
@@ -1365,6 +1432,9 @@ class Parser:
             "min_argc": min_argc,
             "return": return_expr,
             "block": block,
+            "type_parameters": type_parameters,
+            "variadic": variadic,
+            "variadic_index": variadic_index,
         }).toDict()
 
     def Expression(self):
@@ -1508,6 +1578,10 @@ class Parser:
             elif self.next.type == LexerTokenType.LEFT_PARENTHESIS:
                 expr = self.CallExpression(expr)
             elif self.next.type == LexerTokenType.LEFT_BRACKET:
+                type_call = self._try_type_arguments_call(expr)
+                if type_call is not None:
+                    expr = type_call
+                    continue
                 if expr.get('type') == LexerTokenType.IDENTIFIER:
                     type_reference = self._tryParameterizedTypeReference(expr)
                     if type_reference is not None:
@@ -1556,6 +1630,33 @@ class Parser:
             else:
                 break
         return expr
+
+    def _try_type_arguments_call(self, expr: DictRepr):
+        if expr.get('type') != LexerTokenType.IDENTIFIER:
+            return None
+        state = self._saveParserState()
+        try:
+            self.consume(LexerTokenType.LEFT_BRACKET, 'type arguments')
+            type_arguments: list[DictRepr] = []
+            while self.next.type != LexerTokenType.RIGHT_BRACKET:
+                type_arguments.append(self.Type())
+                if self.next.type == LexerTokenType.COMMA:
+                    self.advance()
+                elif self.next.type != LexerTokenType.RIGHT_BRACKET:
+                    raise powang_throw(powang_error_syntax(
+                        'type arguments', "Expected ',' or ']' in type arguments",
+                    ))
+            self.consume(LexerTokenType.RIGHT_BRACKET, 'type arguments')
+            if self.next.type != LexerTokenType.LEFT_PARENTHESIS:
+                raise powang_throw(powang_error_syntax(
+                    'type arguments', "Expected '(' after type arguments",
+                ))
+            call = self.CallExpression(expr)
+            call['value']['type_arguments'] = type_arguments
+            return call
+        except Exception:
+            self._restoreParserState(state)
+            return None
 
     def _dot_starts_instantiation(self) -> bool:
         state = self._saveParserState()
@@ -1689,6 +1790,13 @@ class Parser:
         self.consume(LexerTokenType.LEFT_PARENTHESIS)
         args: list[DictRepr] = []
         while self.next is not None and self.next.type != LexerTokenType.RIGHT_PARENTHESIS:
+            if self.next.type == LexerTokenType.ELLIPSIS:
+                self.advance('spread argument')
+                value = self.Expression()
+                args.append(doToken(ParserTokenType.SPREAD_EXPRESSION, value).toDict())
+                if self.next.type == LexerTokenType.COMMA:
+                    self.consume(LexerTokenType.COMMA)
+                continue
             if self.next.type == LexerTokenType.IDENTIFIER:
                 state = self._saveParserState()
                 name = self.Identifier()
@@ -2018,8 +2126,16 @@ class Parser:
             self.advance('function type')
             self.consume(LexerTokenType.LEFT_BRACKET, 'function type')
             types: list[DictRepr] = []
+            variadic = False
             while self.next.type != LexerTokenType.RIGHT_BRACKET:
                 types.append(self.Type())
+                if self.next.type == LexerTokenType.ELLIPSIS:
+                    self.advance('variadic parameter type')
+                    variadic = True
+                    if self.next.type == LexerTokenType.COMMA:
+                        self.advance()
+                        continue
+                    break
                 if self.next.type == LexerTokenType.COMMA:
                     self.advance()
                 elif self.next.type != LexerTokenType.RIGHT_BRACKET:
@@ -2030,6 +2146,11 @@ class Parser:
             if not types:
                 raise powang_throw(self._syntax_at_current(powang_error_syntax(
                     'function type', "Function types need a return type",
+                )))
+            if variadic and len(types) < 2:
+                raise powang_throw(self._syntax_at_current(powang_error_syntax(
+                    'function type',
+                    "A variadic function type needs a return type after the variadic parameter",
                 )))
             const = False
             error_union = False
@@ -2049,7 +2170,7 @@ class Parser:
                 "reference": reference,
                 "element_type": None,
                 "generics": [],
-                "variadic": False,
+                "variadic": variadic,
                 "line": fun_token.line if fun_token is not None else None,
                 "column": fun_token.column if fun_token is not None else None,
             }).toDict()

@@ -146,6 +146,16 @@ class NewFeatureExampleTests(unittest.TestCase):
     def test_function_types_example(self) -> None:
         self.check("function-types.po", "12", "14", "10 8", "fun[int, int]")
 
+    def test_variadics_example(self) -> None:
+        self.check(
+            "variadics.po",
+            "0 1 6",
+            "7 a",
+            "3 TEMPLATE",
+            "3 3 3 2 3",
+            "fun[int..., int]",
+        )
+
 
 class AllExamplesTests(unittest.TestCase):
     """Every example is a runnable showcase, not just the three original ones."""
