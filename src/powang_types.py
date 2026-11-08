@@ -4,6 +4,21 @@ from threading import Lock
 from .lexer.token import DictRepr
 from .error import *
 
+def _resolved_index(index, size: int, where: str) -> int:
+    require(
+        index.type == PowangInteger.type,
+        lambda: powang_error_type_match(where, PowangInteger.type, index.type),
+    )
+    value = index.data
+    if value < 0:
+        value += size
+    require(
+        0 <= value < size,
+        lambda: powang_error_index_out_of_range(index.data, size),
+    )
+    return value
+
+
 class PowangTypeBase:
     @dataclass
     class PropertyConst:
@@ -323,9 +338,9 @@ class PowangString(PowangTypeBase):
         return PowangInteger(len(self.data))
 
     def index(self, index: 'PowangAny') -> 'PowangString':
-        require(index.type == PowangInteger.type, lambda: powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type))
-        require(0 <= index.data < (size := self.size().data), lambda: powang_error_index_out_of_range(index.data, size))
-        return PowangString(self.data[index.data])
+        return PowangString(
+            self.data[_resolved_index(index, len(self.data), f'{PowangString.type} indexing')]
+        )
 
     def iterate(self) -> 'PowangArray':
         return PowangArray([PowangString(char) for char in self.data])
@@ -379,9 +394,7 @@ class PowangArray(PowangTypeBase):
         return PowangInteger(len(self.data))
     
     def index(self, index: 'PowangAny') -> 'PowangAny':
-        require(index.type == PowangInteger.type, lambda: powang_error_type_match(f'{PowangArray.type} indexing', PowangInteger.type, index.type))
-        require(0 <= index.data < (size := self.size().data), lambda: powang_error_index_out_of_range(index.data, size))
-        return self.data[index.data]
+        return self.data[_resolved_index(index, len(self.data), f'{PowangArray.type} indexing')]
     
     def iterate(self) -> 'PowangArray':
         return PowangArray(self.data)
@@ -524,9 +537,7 @@ class PowangTuple(PowangTypeBase):
         return PowangInteger(len(self.data))
 
     def index(self, index: 'PowangAny') -> 'PowangAny':
-        require(index.type == PowangInteger.type, lambda: powang_error_type_match(f'{PowangTuple.type} indexing', PowangInteger.type, index.type))
-        require(0 <= index.data < (size := self.size().data), lambda: powang_error_index_out_of_range(index.data, size))
-        return self.data[index.data]
+        return self.data[_resolved_index(index, len(self.data), f'{PowangTuple.type} indexing')]
 
     def iterate(self) -> 'PowangArray':
         return PowangArray(self.data)

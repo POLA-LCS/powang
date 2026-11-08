@@ -1592,6 +1592,27 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
         _evaluation_depth.reset(depth_token)
 
 
+def slice_value(where: str, target: PowangAny, start: PowangAny | None, end: PowangAny | None) -> PowangAny:
+    def bound(value: PowangAny | None) -> int | None:
+        if value is None or value.type == PowangNova.type:
+            return None
+        require(
+            value.type == PowangInteger.type,
+            lambda: powang_error_type_match('slice index', PowangInteger.type, value.type),
+        )
+        return value.data
+
+    start_index = bound(start)
+    end_index = bound(end)
+    if target.type == PowangString.type:
+        return PowangString(target.data[start_index:end_index])
+    if target.type == PowangArray.type:
+        return PowangArray(list(target.data[start_index:end_index]))
+    if target.type == PowangTuple.type:
+        return PowangTuple(list(target.data[start_index:end_index]))
+    raise powang_throw(powang_error_unsupported_operation('slice', target.type, 'slice'))
+
+
 def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> PowangAny:
     if expression == {}:
         return PowangNova()
@@ -1997,6 +2018,16 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 'IMPLEMENTATION', where, "Index to that type is not implemented yet."
             ))
             return index_expression_value
+
+        case ParserTokenType.SLICE_EXPRESSION:
+            slice_target = unwrap_any_value(
+                evaluateAstExpression(expression['value']['target'])
+            )
+            start_node = expression['value'].get('start')
+            end_node = expression['value'].get('end')
+            slice_start = evaluateAstExpression(start_node) if start_node is not None else None
+            slice_end = evaluateAstExpression(end_node) if end_node is not None else None
+            return slice_value(where, slice_target, slice_start, slice_end)
 
         case ParserTokenType.POSTFIX_UNWRAP:
             ## `expr?` propagates an error value by returning it from the

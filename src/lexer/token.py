@@ -84,6 +84,7 @@ class ParserTokenType(TokenTypeBase):
     BINARY_EXPRESSION       = auto()
     ARRAY_EXPRESSION        = auto()
     INDEX_EXPRESSION        = auto()
+    SLICE_EXPRESSION        = auto()
     CALL_EXPRESSION         = auto()
     BLOCK_STATEMENT         = auto()
     TYPE                    = auto()

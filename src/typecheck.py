@@ -738,6 +738,8 @@ class _TypeChecker:
             return self._infer_method_call(value)
         if node_type == ParserTokenType.INDEX_EXPRESSION:
             return self._infer_index(value)
+        if node_type == ParserTokenType.SLICE_EXPRESSION:
+            return self._infer_slice(value)
         if node_type == ParserTokenType.ACCESS_EXPRESSION:
             return self._infer_access(value)
         if node_type == ParserTokenType.SAFE_ACCESS_EXPRESSION:
@@ -1372,6 +1374,24 @@ class _TypeChecker:
         if _is_array_type(target_type):
             return _array_element_type(target_type)
         # Map values have no statically known element type in this slice.
+        return ANY
+
+    def _infer_slice(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ANY
+        target_type = self._infer(value.get('target'))
+        start = value.get('start')
+        end = value.get('end')
+        if start is not None:
+            self._infer(start)
+        if end is not None:
+            self._infer(end)
+        if target_type == STRING:
+            return STRING
+        if _is_array_type(target_type):
+            return target_type
+        if target_type == 'tup' or target_type.startswith('tup['):
+            return target_type
         return ANY
 
     def _infer_access(self, value: Any) -> str:

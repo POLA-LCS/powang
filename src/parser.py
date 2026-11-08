@@ -1627,7 +1627,25 @@ class Parser:
         
     def IndexExpression(self, target: DictRepr):
         self.consume(LexerTokenType.LEFT_BRACKET)
+        if self.next.type == LexerTokenType.RIGHT_ARROW:
+            self.advance('slice')
+            end = None if self.next.type == LexerTokenType.RIGHT_BRACKET else self.Expression()
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+            return doToken(ParserTokenType.SLICE_EXPRESSION, {
+                "target": target,
+                "start": None,
+                "end": end,
+            }).toDict()
         index = self.Expression()
+        if self.next.type == LexerTokenType.RIGHT_ARROW:
+            self.advance('slice')
+            end = None if self.next.type == LexerTokenType.RIGHT_BRACKET else self.Expression()
+            self.consume(LexerTokenType.RIGHT_BRACKET)
+            return doToken(ParserTokenType.SLICE_EXPRESSION, {
+                "target": target,
+                "start": index,
+                "end": end,
+            }).toDict()
         if self.next.type == LexerTokenType.COMMA:
             elements = [index]
             while self.next.type == LexerTokenType.COMMA:
