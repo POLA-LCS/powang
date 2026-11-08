@@ -50,6 +50,27 @@ def _simplify(node: Any, warn: Optional[Callable]) -> Any:
     node_type = node.get('type')
     value = node.get('value')
 
+    if node_type == ParserTokenType.LOOP_STATEMENT and isinstance(value, dict):
+        condition = value.get('condition')
+        literal = _bool_value(condition)
+        if literal is False:
+            _warn(
+                warn,
+                'loop condition is always false, this loop has no effect',
+                condition,
+                'PW212',
+            )
+            return _empty_block(node)
+        if literal is True:
+            _warn(
+                warn,
+                'use loop instead of loop if true',
+                condition,
+                'PW213',
+            )
+        value['block'] = _simplify(value.get('block'), warn)
+        return node
+
     if node_type == ParserTokenType.IF_STATEMENT and isinstance(value, dict):
         condition = value.get('expression')
         literal = _bool_value(condition)

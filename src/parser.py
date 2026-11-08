@@ -166,6 +166,10 @@ class Parser:
                     ))
                 case 'for':
                     return self.helper_ForStatement()
+                case 'loop':
+                    return self.helper_LoopStatement()
+                case 'break' | 'continue':
+                    return self.helper_LoopControl(keyword)
                 case 'match':
                     return self.helper_MatchStatement()
                 case 'const':
@@ -821,6 +825,41 @@ class Parser:
         self._restoreParserState(state)
         return self.Expression()
 
+    def _LoopLabel(self):
+        if self.next.type == LexerTokenType.PIPE:
+            self.advance('loop label')
+            identifier = self.Identifier()
+            self.consume(LexerTokenType.PIPE, 'loop label')
+            return identifier['value']
+        return None
+
+    def helper_LoopStatement(self):
+        label = self._LoopLabel()
+        condition = None
+        if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'if':
+            self.advance('loop condition')
+            condition = self.Condition()
+        block = self.BlockStatement()
+        return doToken(ParserTokenType.LOOP_STATEMENT, {
+            'label': label,
+            'condition': condition,
+            'block': block,
+        }).toDict()
+
+    def helper_LoopControl(self, keyword: str):
+        label = None
+        if self.next.type == LexerTokenType.IDENTIFIER:
+            label = self.next.value
+            self.advance('loop control label')
+        if self.next.type == LexerTokenType.SEMI_COLON:
+            self.advance()
+        token_type = (
+            ParserTokenType.BREAK_STATEMENT
+            if keyword == 'break'
+            else ParserTokenType.CONTINUE_STATEMENT
+        )
+        return doToken(token_type, {'label': label}).toDict()
+
     def helper_IfStatement(self):
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
               expr = self.ParenthesizedExpression()
@@ -954,6 +993,7 @@ class Parser:
         }).toDict()
 
     def helper_ForStatement(self):
+        label = self._LoopLabel()
         has_paren = False
         if self.next.type == LexerTokenType.LEFT_PARENTHESIS:
             self.consume(LexerTokenType.LEFT_PARENTHESIS)
@@ -1088,6 +1128,7 @@ class Parser:
                     self.consume(LexerTokenType.RIGHT_PARENTHESIS)
                 block = self.BlockStatement()
                 return doToken(ParserTokenType.FOR_STATEMENT, {
+                    "label": label,
                     "start_expression": start_declaration,
                     "middle_expression": condition,
                     "last_expression": increment,
@@ -1110,6 +1151,7 @@ class Parser:
                 }).toDict()
                 block['value'] = [destructure_declaration] + block['value']
             return doToken(ParserTokenType.FOR_EACH_STATEMENT, {
+                "label": label,
                 "iterator": start_expression,
                 "expression": iterable_expression,
                 "block": block,
@@ -1130,6 +1172,7 @@ class Parser:
 
         block = self.BlockStatement()
         return doToken(ParserTokenType.FOR_STATEMENT, {
+            "label": label,
             "start_expression"  : start_expression,
             "middle_expression": middle_expression,
             "last_expression"  : last_expression,

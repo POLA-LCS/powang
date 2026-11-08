@@ -285,6 +285,8 @@ class _TypeChecker:
         self.in_function: bool = False
         self.this_type: Optional[str] = None
         self.type_parameters: set[str] = set()
+        self.loop_labels: list[Optional[str]] = []
+        self.loop_break_flags: list[bool] = []
         self._position: Optional[tuple[int, int]] = None
 
     # ------------------------------------------------------------------ utils
@@ -823,6 +825,14 @@ class _TypeChecker:
             return self._infer_for(value)
         if node_type == ParserTokenType.FOR_EACH_STATEMENT:
             return self._infer_for_each(value)
+        if node_type == ParserTokenType.LOOP_STATEMENT:
+            return self._infer_loop(value)
+        if node_type == ParserTokenType.BREAK_STATEMENT:
+            self._check_loop_control('break', value)
+            return ANY
+        if node_type == ParserTokenType.CONTINUE_STATEMENT:
+            self._check_loop_control('continue', value)
+            return ANY
         if node_type == ParserTokenType.TYPE_DECLARATION:
             return self._infer_type_declaration(value)
         if node_type == ParserTokenType.EXTERN_REFERENCE:
@@ -2047,10 +2057,79 @@ class _TypeChecker:
             self._infer(finally_block)
         return ANY
 
+    def _push_loop_label(self, label: Optional[str]) -> None:
+        if label is not None and label in self.loop_labels:
+            self._error(
+                f"loop label '{label}' is already in use",
+                ["choose a different label"],
+                where='loop',
+            )
+        self.loop_labels.append(label)
+        self.loop_break_flags.append(False)
+
+    def _pop_loop_label(self) -> None:
+        self.loop_labels.pop()
+        self.loop_break_flags.pop()
+
+    def _check_loop_control(self, keyword: str, value: Any) -> None:
+        if not self.loop_labels:
+            self._error(
+                f"'{keyword}' is only valid inside a loop",
+                ["move it into a loop body"],
+                where='loop control',
+            )
+            return
+        label = value.get('label') if isinstance(value, dict) else None
+        if label is not None and label not in self.loop_labels:
+            self._error(
+                f"unknown loop label '{label}'",
+                ["the label must name an enclosing loop"],
+                where='loop control',
+            )
+            return
+        if keyword == 'break':
+            if label is None:
+                self.loop_break_flags[-1] = True
+            else:
+                index = len(self.loop_labels) - 1 - self.loop_labels[::-1].index(label)
+                self.loop_break_flags[index] = True
+
+    @staticmethod
+    def _literal_bool(node: Any) -> Optional[bool]:
+        if not isinstance(node, dict):
+            return None
+        if node.get('type') == LexerTokenType.IDENTIFIER and node.get('value') in {'true', 'false'}:
+            return node.get('value') == 'true'
+        return None
+
+    def _infer_loop(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ANY
+        self._push_loop_label(value.get('label'))
+        try:
+            condition = value.get('condition')
+            if condition is not None:
+                self._infer(condition)
+            self._infer(value.get('block'))
+            unconditional = condition is None or self._literal_bool(condition) is True
+            if unconditional and not self.loop_break_flags[-1]:
+                line = value.get('line')
+                column = value.get('column')
+                get_state().warn(
+                    'loop has no break',
+                    line if isinstance(line, int) else None,
+                    column if isinstance(column, int) else None,
+                    code='PW210',
+                )
+        finally:
+            self._pop_loop_label()
+        return ANY
+
     def _infer_for(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
         self._scope_push()
+        self._push_loop_label(value.get('label'))
         try:
             self._infer(value.get('start_expression'))
             middle = value.get('middle_expression')
@@ -2061,6 +2140,7 @@ class _TypeChecker:
                 self._infer(last)
             self._infer(value.get('block'))
         finally:
+            self._pop_loop_label()
             self._scope_pop()
         return ANY
 
@@ -2068,6 +2148,7 @@ class _TypeChecker:
         if not isinstance(value, dict):
             return ANY
         self._scope_push()
+        self._push_loop_label(value.get('label'))
         try:
             iterable_node = value.get('expression')
             iterable_type = self._infer(iterable_node)
@@ -2103,6 +2184,7 @@ class _TypeChecker:
                 self._infer(if_expression)
             self._infer(value.get('block'))
         finally:
+            self._pop_loop_label()
             self._scope_pop()
         return ANY
 
@@ -2300,12 +2382,16 @@ class _TypeChecker:
             self.return_allows_error,
             self.in_function,
             self.this_type,
+            self.loop_labels,
+            self.loop_break_flags,
         )
         self.return_type = signature.return_type
         self.return_weak = signature.return_weak
         self.return_allows_error = signature.allows_error
         self.in_function = True
         self.this_type = this_type
+        self.loop_labels = []
+        self.loop_break_flags = []
 
         self._scope_push()
         try:
@@ -2335,6 +2421,8 @@ class _TypeChecker:
                 self.return_allows_error,
                 self.in_function,
                 self.this_type,
+                self.loop_labels,
+                self.loop_break_flags,
             ) = previous
 
     # ----------------------------------------------------------------- extern

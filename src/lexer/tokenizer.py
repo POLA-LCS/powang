@@ -13,7 +13,7 @@ class Tokenizer:
     Keywords: set[str] = {
         'if', 'else', 'for', 'fun', 'return', 'use', 'type', 'extern',
         'export', 'try', 'catch', 'finally', 'spawn', 'match', 'case', 'const',
-        'enum', 'module',
+        'enum', 'module', 'loop', 'break', 'continue',
     }
     
     RegexPatterns: dict[

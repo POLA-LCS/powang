@@ -16,6 +16,22 @@ import copy
 import importlib
 from contextvars import ContextVar
 
+
+class BreakSignal(Exception):
+    def __init__(self, label: str | None = None):
+        super().__init__(label)
+        self.label = label
+
+
+class ContinueSignal(Exception):
+    def __init__(self, label: str | None = None):
+        super().__init__(label)
+        self.label = label
+
+
+def _loop_signal_matches(signal, label: str | None) -> bool:
+    return signal.label is None or signal.label == label
+
 ## Extern allowlist. This is installation configuration, not run state, so it
 ## stays a process-wide immutable set. The extern *bindings* declared by a
 ## program live on its InterpreterState.
@@ -2230,7 +2246,41 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             if pending_error is not None and not finally_took_return:
                 raise pending_error
 
+        case ParserTokenType.LOOP_STATEMENT:
+            loop_label = expr_value.get('label')
+            loop_condition = expr_value.get('condition')
+            loop_block = expr_value.get('block')
+            running = True
+            while running:
+                check_cancellation()
+                ScopeStack.push()
+                try:
+                    if loop_condition is not None:
+                        condition_value = evaluateAstExpression(loop_condition)
+                        if not PowangBoolean.cast(condition_value).data:
+                            running = False
+                            break
+                    try:
+                        for statement in loop_block['value']:
+                            check_cancellation()
+                            evaluateAstExpression(statement)
+                            if ScopeStack.return_value is not None:
+                                running = False
+                                break
+                    except ContinueSignal as signal:
+                        if _loop_signal_matches(signal, loop_label):
+                            continue
+                        raise
+                    except BreakSignal as signal:
+                        if _loop_signal_matches(signal, loop_label):
+                            running = False
+                            break
+                        raise
+                finally:
+                    ScopeStack.pop()
+
         case ParserTokenType.FOR_STATEMENT:
+            for_label = expr_value.get('label')
             for_start_expression = expr_value['start_expression']
             for_middle_expression = expr_value['middle_expression']
             for_last_expression = expr_value['last_expression']
@@ -2250,12 +2300,21 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     check_cancellation()
                     ScopeStack.push()
                     try:
-                        for statement in for_block['value']:
-                            check_cancellation()
-                            evaluateAstExpression(statement)
-                            if ScopeStack.return_value is not None:
+                        try:
+                            for statement in for_block['value']:
+                                check_cancellation()
+                                evaluateAstExpression(statement)
+                                if ScopeStack.return_value is not None:
+                                    running = False
+                                    break
+                        except ContinueSignal as signal:
+                            if not _loop_signal_matches(signal, for_label):
+                                raise
+                        except BreakSignal as signal:
+                            if _loop_signal_matches(signal, for_label):
                                 running = False
-                                break
+                            else:
+                                raise
                     finally:
                         ScopeStack.pop()
 
@@ -2267,6 +2326,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 ScopeStack.pop()
 
         case ParserTokenType.FOR_EACH_STATEMENT:
+            for_each_label = expr_value.get('label')
             for_each_iterable_expression = expr_value['expression']
 
             ScopeStack.push()
@@ -2297,12 +2357,22 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                                 not evaluateAstExpression(expr_value['if_expression']).data:
                             continue
 
-                        for for_each_statement in for_each_block['value']:
-                            check_cancellation()
-                            evaluateAstExpression(for_each_statement)
-                            if ScopeStack.return_value is not None:
+                        try:
+                            for for_each_statement in for_each_block['value']:
+                                check_cancellation()
+                                evaluateAstExpression(for_each_statement)
+                                if ScopeStack.return_value is not None:
+                                    running = False
+                                    break
+                        except ContinueSignal as signal:
+                            if _loop_signal_matches(signal, for_each_label):
+                                continue
+                            raise
+                        except BreakSignal as signal:
+                            if _loop_signal_matches(signal, for_each_label):
                                 running = False
                                 break
+                            raise
                     finally:
                         ScopeStack.pop()
             finally:
@@ -2349,6 +2419,12 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             )
             new_function.min_argc = expr_value['min_argc']
             return ScopeStack.new_function(fun_identifier, new_function)
+
+        case ParserTokenType.BREAK_STATEMENT:
+            raise BreakSignal(expr_value.get('label'))
+
+        case ParserTokenType.CONTINUE_STATEMENT:
+            raise ContinueSignal(expr_value.get('label'))
 
         case ParserTokenType.RETURN_EXPRESSION:
             current_scope_type = ScopeStack.current_scope_type()
