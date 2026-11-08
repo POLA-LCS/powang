@@ -2,6 +2,18 @@
 
 All notable changes to powang are documented here.
 
+## 0.13.2
+
+### Added
+
+- Built-in object type templates are registered in every runtime scope.
+- `project` is bound implicitly in imported modules when a project configuration is loaded.
+- `Project` is highlighted as a user type by the LSP.
+
+### Changed
+
+- The LSP now offers implicit `project` completion and hover in Powang files.
+
 ## 0.13.1
 
 ### Added

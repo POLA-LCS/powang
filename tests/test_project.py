@@ -70,6 +70,33 @@ class ProjectRuntimeTests(unittest.TestCase):
             result = run_file(main_path)
         self.assertEqual(result.stdout, "warning\n")
 
+    def test_project_is_implicit_in_imported_modules(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="powang-project-module-") as directory:
+            root = Path(directory)
+            write_po(
+                root,
+                "project.po",
+                "module project;\n"
+                "export project: Project = Project.[logLevel >> \"debug\"];\n",
+            )
+            write_po(
+                root,
+                "helper.po",
+                "module helper;\n"
+                "export fun value(): str {\n"
+                "    current: Project = project;\n"
+                "    return current.logLevel;\n"
+                "}\n",
+            )
+            main_path = write_po(
+                root,
+                "main.po",
+                "use \"./helper.po\" as helper;\n"
+                "print(helper.value()); print(\"\\n\");\n",
+            )
+            result = run_file(main_path)
+        self.assertEqual(result.stdout, "debug\n")
+
 
 class ProjectDiagnosticTests(unittest.TestCase):
     def test_unknown_project_field(self) -> None:

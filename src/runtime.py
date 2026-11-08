@@ -3622,6 +3622,9 @@ def evaluate_module_ast(
     ScopeStack.reset_scopes()
     ScopeStack.push(ScopeType.GLOBAL)
     try:
+        if getattr(get_state(), 'project_value', None) is not None and \
+                not _has_project_declaration(program_ast):
+            ScopeStack.new_variable('project', get_state().project_value)
         for statement in program_ast:
             evaluateAstExpression(statement)
 

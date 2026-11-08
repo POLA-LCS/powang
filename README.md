@@ -976,7 +976,7 @@ print(project.logLevel);
 print(project.modules[0]);
 ```
 
-The `Project` type is available as a type annotation. It cannot be redeclared.
+When `project.po` is loaded, the `project` value is also available implicitly inside imported modules. The `Project` type is registered as a runtime built-in object type. It cannot be redeclared.
 
 ## Project layout
 

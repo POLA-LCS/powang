@@ -153,6 +153,7 @@ Open questions:
 - [x] Phase 2B3 match destructuring, range patterns, exhaustiveness and unreachable case warnings.
 - [x] Phase 2C structural traits, default methods, generic constraints and trait-qualified dispatch.
 - [x] `Project` built-in object type, `project.po` member access and documentation.
+- [x] Project runtime templates, implicit module import and LSP user-type highlighting.
 - [x] LSP `0.16.1` hover syntax highlighting with `powang` fenced code blocks.
 - [x] Plain-text hover prose with no markdown bold or inline code spans.
 - [x] Examples for all Phase 2A, Phase 2B1 and Phase 2B2 features.

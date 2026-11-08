@@ -75,6 +75,31 @@ class TraitRuntimeInfo:
         self.default_methods: dict[str, list] = {}
 
 
+def _builtin_field_placeholder(type_name: str) -> PowangAny:
+    if type_name.startswith('arr['):
+        return PowangArray()
+    if type_name == PowangString.type:
+        return PowangString('')
+    if type_name == PowangBoolean.type:
+        return PowangBoolean(False)
+    if type_name == PowangInteger.type:
+        return PowangInteger(0)
+    if type_name == PowangNumber.type:
+        return PowangNumber(0.0)
+    return PowangAnyType()
+
+
+def builtin_object_templates() -> dict[str, PowangObjectType]:
+    templates: dict[str, PowangObjectType] = {}
+    for type_name, fields in BUILTIN_OBJECT_TYPES.items():
+        template = PowangObjectType()
+        template.type_name = type_name
+        for field_name, field_type in fields.items():
+            template.data[field_name] = _builtin_field_placeholder(field_type)
+        templates[type_name] = template
+    return templates
+
+
 class ScopeState:
     """The lexical stacks for one execution context.
 
@@ -91,7 +116,7 @@ class ScopeState:
 
         self.variables: list[dict[str, PowangAny]] = [{}]
         self.functions: list[dict[str, list[PowangFunction]]] = [{}]
-        self.ObjectTypes: list[dict[str, PowangObjectType]] = [{}]
+        self.ObjectTypes: list[dict[str, PowangObjectType]] = [builtin_object_templates()]
         self.wildcard_sources: list[dict[str, str]] = [{}]
 
     def get_variable(self, name: str) -> Optional[PowangAny]:
@@ -201,7 +226,7 @@ class ScopeState:
         self.important = []
         self.variables = []
         self.functions = []
-        self.ObjectTypes = []
+        self.ObjectTypes = [builtin_object_templates()]
         self.wildcard_sources = []
         return True
 
