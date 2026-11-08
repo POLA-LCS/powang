@@ -332,6 +332,8 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
         undefined_right_value.any = PowangAnyType.type
     elif type_expression['value'] in NATI_TYPES:
         undefined_right_value = PowangTypeMap(type_expression['value'])()
+        if type_expression['value'] == 'obj':
+            undefined_right_value.is_obj = True
     else:
         user_type = ScopeStack.get_ObjectType(type_expression['value'])
         if user_type is None:
@@ -451,6 +453,27 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
         ## Error values carry a structured payload beside `data`; copy both.
         target_value.data = right_value.data
         target_value.error = right_value.error
+
+    elif target_value.type in {PowangTask.type, PowangFileStream.type, PowangHandle.type} and \
+            right_value.type == target_value.type:
+        ## Task, file and handle values are opaque handles. A typed
+        ## declaration must keep the whole handle, not only its `data` id.
+        target_value.__dict__.update(vars(right_value))
+
+    elif target_value.type == PowangObjectType.type and getattr(target_value, 'is_obj', False) \
+            and right_value.type == PowangObjectType.type:
+        ## `obj` is the top user-instance annotation. The runtime keeps the
+        ## concrete object payload and type name, without constructor lookup.
+        copied = PowangCopyConstructObjectType(right_value)
+        target_value.defined = True
+        target_value.weak.has_value = right_value.weak.has_value
+        target_value.type_name = right_value.type_name
+        target_value.data = copied.data
+        target_value.private_props = copied.private_props
+        target_value.public_meths = copied.public_meths
+        target_value.private_meths = copied.private_meths
+        target_value.public_static_meths = copied.public_static_meths
+        target_value.private_static_meths = copied.private_static_meths
 
     elif target_value.type == PowangObjectType.type:
         copy_constructor_result: Optional[PowangAny] = None
@@ -1751,6 +1774,12 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 binary_right = getCastTypeName(where, expr_value['right'])
                 if binary_left.type == PowangAnyType.type:
                     binary_left = PowangUnwrapAny(binary_left)
+
+                if binary_right == 'obj' and binary_left.type == PowangObjectType.type:
+                    return PowangCopyConstruct(binary_left)
+                if binary_left.type == PowangObjectType.type and \
+                        binary_left.type_name == binary_right:
+                    return PowangCopyConstruct(binary_left)
 
                 if target_spec.kind is _ts.Kind.UNION:
                     union_casted = cast_to_union_type(where, target_spec, binary_left)

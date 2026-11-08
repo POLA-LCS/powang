@@ -20,7 +20,10 @@ NATI_TYPES: set[str] = {
     PowangHandle.type ,
     PowangProject.type,
     PowangErrorValue.type,
+    PowangFileStream.type,
+    PowangTask.type,
     'tup',
+    'obj',
 }
 
 

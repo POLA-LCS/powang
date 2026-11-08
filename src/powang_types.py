@@ -673,9 +673,9 @@ class PowangFileStream(PowangTypeBase):
     data: str
     type: Literal['file'] = 'file'
 
-    def __init__(self, data: PowangString, mode: PowangString):
-        super().__init__(data)
-        self.mode = mode
+    def __init__(self, data: Optional[PowangString] = None, mode: Optional[PowangString] = None):
+        super().__init__(data if data is not None else PowangString(''))
+        self.mode = mode if mode is not None else PowangString('r')
         self.text_io: Optional[TextIO] = None
 
 # ====== ERROR VALUE =========
@@ -892,6 +892,7 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangTuple.type      : PowangTuple,
         PowangProject.type    : PowangProject,
         PowangHandle.type     : PowangHandle,
+        'obj'                 : PowangObjectType,
     }[type]
 
 def _copy_common(source: PowangAny, destination: PowangAny) -> PowangAny:
@@ -905,6 +906,8 @@ def _copy_common(source: PowangAny, destination: PowangAny) -> PowangAny:
     destination.const = PowangTypeBase.PropertyConst(source.const.it_is, source.const.can_change)
     if hasattr(source, 'declared_spec'):
         destination.declared_spec = source.declared_spec
+    if hasattr(source, 'is_obj'):
+        destination.is_obj = source.is_obj
     return destination
 
 

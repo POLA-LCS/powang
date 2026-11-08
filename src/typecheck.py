@@ -76,12 +76,13 @@ SET = PowangSet.type
 FUNCTION = PowangFunction.type
 ERROR = PowangErrorValue.type
 OBJECT = PowangObjectType.type
+OBJ = 'obj'
 FILE = PowangFileStream.type
 TASK = PowangTask.type
 
 ## `function` and `file` are runtime types but are absent from the parser's
 ## NATI_TYPES set, so they need explicit handling here.
-NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, HANDLE}
+NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, HANDLE, OBJ}
 
 ARRAY_OPEN = f'{ARRAY}['
 ARRAY_CLOSE = ']'
@@ -422,6 +423,8 @@ class _TypeChecker:
     def _normalized_type_name(self, name: str) -> str:
         if name == "any" or name in self.type_parameters:
             return ANY
+        if name == OBJ:
+            return OBJ
         seen: set[str] = set()
         while name in self.type_alias and name not in seen:
             seen.add(name)
@@ -588,6 +591,10 @@ class _TypeChecker:
             # Only weak declarations accept nova.
             return target_weak
         if target == NOVA:
+            return False
+        if target == OBJ:
+            return source == OBJ or source.startswith(f'{OBJECT}:')
+        if source == OBJ:
             return False
         if target.startswith(f'{OBJECT}:'):
             # Constructors perform implicit conversion at runtime. Gradual
@@ -1400,6 +1407,13 @@ class _TypeChecker:
         target_type = self._infer(value.get('target'))
         property_name = self._identifier_name(value.get('property'))
         if property_name is None:
+            return ANY
+        if target_type == OBJ:
+            self._error(
+                "member access on 'obj' requires a cast or trait",
+                ["cast the value to a concrete type first"],
+                where='member access',
+            )
             return ANY
         if target_type == ERROR:
             return {
