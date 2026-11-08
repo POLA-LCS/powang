@@ -6,6 +6,7 @@ from .state import fresh_state, get_state, set_state, reset_state, copy_for_task
 from .builtins.tasks import check_cancellation, get_task_pool, spawn_task
 from .lexer import *
 from .typecheck import type_check
+from .simplify import simplify_program
 from .module_loader import get_module_loader
 from . import typespec as _typespec
 
@@ -1582,6 +1583,14 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
     where = TokenToString(expression['type'])
     expr_value = expression['value']
     match expression['type']:
+        case ParserTokenType.BLOCK_STATEMENT:
+            result = PowangNova()
+            for statement in expr_value:
+                result = evaluateAstExpression(statement)
+                if ScopeStack.return_value is not None:
+                    break
+            return result
+
         case LexerTokenType.IDENTIFIER:
             if expr_value == 'nova':
                 return PowangNova()
@@ -2881,6 +2890,7 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
     try:
         program_parser = Parser(content, source_path=PATHS.get('RELATIVE'))
         program_raw_ast = program_parser.parse()
+        program_raw_ast = simplify_program(program_raw_ast, get_state().warn)
         if check:
             relative_path = PATHS.get('RELATIVE')
             type_errors = type_check(

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .parser import Parser, NATI_TYPES, PATHS
+from .simplify import simplify_program
 from .state import get_state
 from .powang_types import (
     PowangArray,
@@ -2366,4 +2367,5 @@ def check_source(source: str, path: Optional[str] = None) -> list[PowangError]:
     elif 'RELATIVE' not in PATHS:
         PATHS['RELATIVE'] = PATHS['ABSOLUTE']
     program_ast = Parser(source, source_path=path).parse()
+    program_ast = simplify_program(program_ast, get_state().warn)
     return type_check(program_ast, path)
