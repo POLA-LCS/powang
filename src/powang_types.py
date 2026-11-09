@@ -633,6 +633,7 @@ class PowangFunction(PowangTypeBase):
         self.lambda_name: Optional[str] = None
         self.is_lambda: bool = False
         self.mutable_capture: bool = False
+        self.is_async: bool = False
         self.type_parameters: list[str] = []
         self.variadic: bool = False
         self.variadic_index: Optional[int] = None
@@ -888,6 +889,10 @@ class PowangTask(PowangTypeBase):
         self.cancel_requested: bool = False
         self.future: Any = None
         self.handled: bool = False
+        self.lazy_work: Optional[Callable[[], 'PowangAny']] = None
+        self.lazy_state: Any = None
+        self.lazy_pool: Any = None
+        self.lazy_counted: bool = False
         self.lock: Lock = Lock()
 
     def __repr__(self) -> str:
@@ -1044,6 +1049,8 @@ def PowangCopyConstruct(any: PowangAny, _memo: Optional[dict[int, PowangAny]] = 
             value.is_lambda = any.is_lambda
         if hasattr(any, 'mutable_capture'):
             value.mutable_capture = any.mutable_capture
+        if hasattr(any, 'is_async'):
+            value.is_async = any.is_async
         if hasattr(any, 'type_parameters'):
             value.type_parameters = list(any.type_parameters)
         if hasattr(any, 'variadic'):

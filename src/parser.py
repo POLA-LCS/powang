@@ -115,10 +115,10 @@ class Parser:
                     ))
                 self.advance() # export
                 if self.next.type == LexerTokenType.KEYWORD:
-                    require(self.next.value in {'fun', 'type', 'extern', 'trait'}, lambda: powang_error_syntax(
+                    require(self.next.value in {'fun', 'type', 'extern', 'trait', 'async'}, lambda: powang_error_syntax(
                         'export declaration',
                         f"export cannot be applied to {self.next.value}",
-                        ["export supports fun, type, trait, extern fun and variable declarations"],
+                        ["export supports fun, type, trait, async fun, extern fun and variable declarations"],
                     ))
                 else:
                     require(self.next.type == LexerTokenType.IDENTIFIER, lambda: powang_error_syntax(
@@ -179,6 +179,14 @@ class Parser:
                     return self.helper_LoopControl(keyword)
                 case 'match':
                     return self.helper_MatchStatement()
+                case 'async':
+                    require(self.isNextKeyword('fun'), lambda: powang_error_syntax(
+                        'async declaration',
+                        "Expected 'fun' after 'async'",
+                        ["async is only valid before a function declaration"],
+                    ))
+                    self.advance('async function')
+                    return self.helper_FunDeclaration(is_async=True)
                 case 'trait':
                     return self.helper_TraitDeclaration()
                 case 'const':
@@ -1604,7 +1612,7 @@ class Parser:
         self.consume(LexerTokenType.RIGHT_PARENTHESIS)
         return args, min_argc, variadic, variadic_index
 
-    def helper_FunDeclaration(self, allow_body: bool = True):
+    def helper_FunDeclaration(self, allow_body: bool = True, is_async: bool = False):
         instance_method = False
         trait_qualifier = None
         if self.next.type == LexerTokenType.DOT:
@@ -1684,13 +1692,14 @@ class Parser:
             "instance_method": instance_method,
             "trait_qualifier": trait_qualifier,
             "signature_only": signature_only,
+            "is_async": is_async,
             "type_parameters": type_parameters,
             "variadic": variadic,
             "variadic_index": variadic_index,
             "type_parameter_constraints": type_parameter_constraints,
         }).toDict()
 
-    def helper_LambdaExpression(self):
+    def helper_LambdaExpression(self, is_async: bool = False):
         self.consume(LexerTokenType.KEYWORD, 'lambda expression')
         mutable = False
         if self.next.type == LexerTokenType.AMPERSAND:
@@ -1731,6 +1740,7 @@ class Parser:
         return doToken(ParserTokenType.FUN_EXPRESSION, {
             "name": name,
             "mutable_capture": mutable,
+            "is_async": is_async,
             "args": args,
             "min_argc": min_argc,
             "return": return_expr,
@@ -1842,6 +1852,16 @@ class Parser:
             return doToken(ParserTokenType.REFERENCE_EXPRESSION, {
                 "target": target,
             }).toDict()
+        if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'await':
+            await_token = self.next
+            self.advance('await expression')
+            awaited = self.UnaryExpression()
+            return {
+                'type': ParserTokenType.AWAIT_EXPRESSION,
+                'value': awaited,
+                'line': await_token.line,
+                'column': await_token.column,
+            }
         if self.next.type == LexerTokenType.KEYWORD and self.next.value == 'spawn':
             self.advance('spawn expression')
             spawned = self.UnaryExpression()
@@ -2289,6 +2309,13 @@ class Parser:
                 return identifier
             case LexerTokenType.KEYWORD if self.next.value == 'fun':
                 return self.helper_LambdaExpression()
+            case LexerTokenType.KEYWORD if self.next.value == 'async':
+                self.advance('async lambda')
+                require(self.isNextKeyword('fun'), lambda: powang_error_syntax(
+                    'async lambda',
+                    "Expected 'fun' after 'async'",
+                ))
+                return self.helper_LambdaExpression(is_async=True)
         return self.Literal('primary expression')
 
     def helper_TupleExpression(self):

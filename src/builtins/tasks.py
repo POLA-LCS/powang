@@ -107,6 +107,7 @@ class TaskPool:
         )
         self._lock = Lock()
         self._pending: int = 0
+        self._lazy_pending: int = 0
         self._ids = count(1)
         self.tasks: list[PowangTask] = []
         self.closed: bool = False
@@ -158,6 +159,44 @@ class TaskPool:
             with self._lock:
                 self._pending -= 1
 
+    def register_lazy(self, task: PowangTask, cloned_state) -> PowangTask:
+        with self._lock:
+            if self.closed:
+                try:
+                    cloned_state.close()
+                except Exception:
+                    pass
+                raise powang_throw(powang_error_format(
+                    'TASK', 'await', 'the task pool is shut down', []
+                ))
+            if self._lazy_pending >= self.max_pending:
+                try:
+                    cloned_state.close()
+                except Exception:
+                    pass
+                raise powang_throw(powang_error_format(
+                    'TASK',
+                    'await',
+                    'too many pending async tasks',
+                    [
+                        f"pending async tasks: {self._lazy_pending}",
+                        f"limit: {self.max_pending}",
+                        "await or cancel pending async tasks before creating more",
+                    ],
+                ))
+            task.lazy_state = cloned_state
+            task.lazy_pool = self
+            task.lazy_counted = True
+            self._lazy_pending += 1
+            self.tasks.append(task)
+        return task
+
+    def _release_lazy(self, task: PowangTask) -> None:
+        with self._lock:
+            if task.lazy_counted:
+                task.lazy_counted = False
+                self._lazy_pending = max(0, self._lazy_pending - 1)
+
     def _run(self, task: PowangTask, work: Callable[[], PowangAny], cloned_state) -> None:
         task_token = CURRENT_TASK.set(task)
         state_token = set_state(cloned_state)
@@ -205,6 +244,17 @@ class TaskPool:
             self.closed = True
 
         deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
+        for task in tasks:
+            if task.lazy_state is not None:
+                try:
+                    task.lazy_state.close()
+                except Exception:
+                    pass
+                task.lazy_state = None
+                task.lazy_work = None
+            task.lazy_counted = False
+        with self._lock:
+            self._lazy_pending = 0
         for task in tasks:
             future = task.future
             if future is None or future.done():
@@ -284,6 +334,111 @@ def shutdown_state_tasks(state) -> None:
 
 
 # --------------------------------------------------------------------- builtins
+def run_lazy_task(task: PowangTask) -> PowangAny:
+    """Run or collect a lazy async task on the current thread."""
+    if task.lazy_pool is not None:
+        task.lazy_pool._release_lazy(task)
+    with task.lock:
+        if task.status == 'done':
+            task.handled = True
+            result = task.result
+            return copy_for_task(result) if result is not None else PowangNova()
+        if task.status == 'failed':
+            task.handled = True
+            error = task.error
+            original = str(error) if error is not None else 'task failed'
+            raise powang_throw(powang_error_format(
+                'TASK', 'await', 'task failed', [original]
+            ))
+        if task.status == 'canceled':
+            task.handled = True
+            error = task.error
+            original = str(error) if error is not None else 'cancellation requested'
+            raise powang_throw(powang_error_format(
+                'TASK', 'await', 'task canceled', [original]
+            ))
+        if task.status == 'running':
+            task.handled = True
+            raise powang_throw(powang_error_format(
+                'TASK', 'await', 'task is already running',
+                ['an async task cannot await itself'],
+            ))
+        if task.cancel_requested:
+            task.status = 'canceled'
+            task.handled = True
+            lazy_state = task.lazy_state
+            task.lazy_state = None
+            task.lazy_work = None
+            if lazy_state is not None:
+                try:
+                    lazy_state.close()
+                except Exception:
+                    pass
+            raise powang_throw(powang_error_format(
+                'TASK', 'await', 'task canceled',
+                ['cancellation requested before the task started'],
+            ))
+        task.status = 'running'
+
+    lazy_state = task.lazy_state
+    work = task.lazy_work
+    if lazy_state is None or work is None:
+        with task.lock:
+            task.status = 'failed'
+            task.handled = True
+            task.error = powang_error_format(
+                'TASK', 'await', 'async task has no work', []
+            )
+        raise powang_throw(task.error)
+
+    task_token = CURRENT_TASK.set(task)
+    state_token = set_state(lazy_state)
+    try:
+        try:
+            result = work()
+        except BaseException as raw_error:
+            converted = powang_error_from_exception(raw_error)
+            with task.lock:
+                canceled = bool(getattr(raw_error, '_task_cancel', False)) \
+                    or task.cancel_requested
+                task.status = 'canceled' if canceled else 'failed'
+                task.error = converted or powang_error_format(
+                    'TASK', 'task', 'task raised an unexpected error', [
+                        f"{type(raw_error).__name__}: {raw_error}",
+                    ]
+                )
+        else:
+            with task.lock:
+                task.result = result
+                task.status = 'done'
+    finally:
+        CURRENT_TASK.reset(task_token)
+        reset_state(state_token)
+        task.lazy_state = None
+        task.lazy_work = None
+        try:
+            lazy_state.close()
+        except Exception:
+            pass
+
+    with task.lock:
+        task.handled = True
+        status = task.status
+        result = task.result
+        error = task.error
+    if status == 'failed':
+        original = str(error) if error is not None else 'task failed'
+        raise powang_throw(powang_error_format(
+            'TASK', 'await', 'task failed', [original]
+        ))
+    if status == 'canceled':
+        original = str(error) if error is not None else 'cancellation requested'
+        raise powang_throw(powang_error_format(
+            'TASK', 'await', 'task canceled', [original]
+        ))
+    return copy_for_task(result) if result is not None else PowangNova()
+
+
 def builtin_wait(task: PowangAny, timeout: PowangAny | None = None) -> PowangAny:
     """Block until the task settles and return a copy of its result.
 
@@ -293,6 +448,8 @@ def builtin_wait(task: PowangAny, timeout: PowangAny | None = None) -> PowangAny
     whose details include the original error text.
     """
     task = _require_task('wait', task)
+    if task.lazy_pool is not None:
+        return run_lazy_task(task)
 
     timeout_seconds: Optional[float] = None
     if timeout is not None:
@@ -347,6 +504,23 @@ def builtin_cancel(task: PowangAny) -> PowangNova:
     the flag at its next statement boundary.
     """
     task = _require_task('cancel', task)
+    if task.lazy_pool is not None:
+        with task.lock:
+            if task.status in {'pending', 'running'}:
+                task.cancel_requested = True
+                if task.status == 'pending':
+                    task.status = 'canceled'
+        if task.status == 'canceled' and task.lazy_state is not None:
+            lazy_state = task.lazy_state
+            task.lazy_state = None
+            task.lazy_work = None
+            try:
+                lazy_state.close()
+            except Exception:
+                pass
+        if task.lazy_pool is not None:
+            task.lazy_pool._release_lazy(task)
+        return PowangNova()
     with task.lock:
         if task.status in {'pending', 'running'}:
             task.cancel_requested = True

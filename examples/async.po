@@ -1,0 +1,28 @@
+## Async functions and await. Calls return lazy tasks, await runs them.
+
+use "./lib/async_math.po" as async_math;
+
+async fun add_doubled(a: int, b: int): int {
+    left := await async_math.double(a);
+    right := await async_math.double(b);
+    return left + right;
+}
+
+println(await add_doubled(2, 3));
+
+type Calculator[+] {
+    | base: int;
+
+    async fun this.add(value: int): int >> this.base + value;
+}
+
+calculator := Calculator.[10];
+println(await calculator.add(5));
+
+triple := async fun(value: int): int >> value * 3;
+println(await triple(4));
+
+task := async_math.double(7);
+println(task_status(task));
+println(wait(task));
+println(task_status(task));

@@ -127,6 +127,7 @@ class ParserTokenType(TokenTypeBase):
     RANGE_STATEMENT          = auto()
     SAFE_ACCESS_EXPRESSION   = auto()
     COALESCE_EXPRESSION      = auto()
+    AWAIT_EXPRESSION         = auto()
     NAMED_ARGUMENT           = auto()
     PIPELINE_EXPRESSION      = auto()
     CONST_DECLARATION        = auto()

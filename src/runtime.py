@@ -4,7 +4,7 @@ from .builtins import *
 from .scopestack import ScopeType, ScopeStack
 from .state import fresh_state, get_state, set_state, reset_state, copy_for_task, Frame, TraitRuntimeInfo
 from .powang_types import BUILTIN_OBJECT_TYPES
-from .builtins.tasks import check_cancellation, get_task_pool, spawn_task
+from .builtins.tasks import check_cancellation, get_task_pool, spawn_task, run_lazy_task, builtin_wait
 from .lexer import *
 from .typecheck import type_check
 from .simplify import simplify_program
@@ -1124,7 +1124,41 @@ def callFunctionValue(
     external = getattr(candidate, 'external', None)
     if external is not None:
         return callExternalFunction(where, callee, candidate, external, call_parameters)
+    if getattr(candidate, 'is_async', False):
+        return _createLazyFunctionValueTask(
+            where, callee, candidate, call_parameters
+        )
     return callFunction(where, callee, candidate, call_parameters)
+
+
+def _createLazyFunctionValueTask(
+    where: str,
+    callee: str,
+    function_value: PowangFunction,
+    call_parameters: list[PowangAny],
+) -> PowangTask:
+    parent_state = get_state()
+    pool = get_task_pool(parent_state)
+    task_state = parent_state.clone_for_task()
+    memo: dict[int, PowangAny] = {}
+    try:
+        cloned_function = copy_for_task(function_value, memo)
+        cloned_parameters = [
+            copy_for_task(parameter, memo) for parameter in call_parameters
+        ]
+    except BaseException:
+        task_state.close()
+        raise
+
+    def work() -> PowangAny:
+        return callFunction(
+            where, callee, cloned_function, cloned_parameters
+        )
+
+    task = PowangTask(pool.next_id())
+    task.status = 'pending'
+    task.lazy_work = work
+    return pool.register_lazy(task, task_state)
 
 
 def resolveNamedArguments(
@@ -1391,6 +1425,8 @@ def _executeCallNode(
                     'ARGUMENT', where, 'Named arguments are not supported for external functions',
                 ))
             return callExternalFunction(where, call_callee, candidate, external, call_parameters)
+        if getattr(candidate, 'is_async', False):
+            return _createLazyCallTask(where, callee_node, call_parameters)
         return callFunction(
             where,
             call_callee,
@@ -1417,6 +1453,8 @@ def _executeCallNode(
     # First-class function values: a variable may hold a PowangFunction.
     if (call_variable := ScopeStack.get_variable(call_callee)) is not None \
             and call_variable.type == PowangFunction.type:
+        if getattr(call_variable, 'is_async', False):
+            return _createLazyCallTask(where, callee_node, call_parameters)
         return callFunction(
             where,
             call_callee,
@@ -1474,13 +1512,34 @@ def _prepareTaskMethodCall(
     owner_value = unwrap_any_value(evaluateAstExpression(owner_node))
     task_owner = copy_for_task(owner_value)
     if task_owner.type == PowangModule.type:
-        return lambda: callModuleMember(
+        return lambda: _callModuleMemberSynchronously(
             where, task_owner, method_name, call_parameters
         )
     if task_owner.type == PowangObjectType.type:
-        methods = owner_value.getMethods(
-            method_name, _private_access_allowed(owner_value)
+        resolved_trait = method_value.get('resolved_trait')
+        methods = task_owner.getMethods(
+            method_name, _private_access_allowed(task_owner)
         )
+        if methods is None and isinstance(resolved_trait, str):
+            methods = task_owner.getTraitMethods(
+                resolved_trait, method_name
+            )
+            if methods is None:
+                trait = get_state().traits.get(resolved_trait)
+                if trait is not None:
+                    methods = trait.default_methods.get(method_name)
+        if methods is None:
+            qualified_methods = task_owner.getAllTraitMethods(method_name)
+            if len(qualified_methods) > 1:
+                raise powang_throw(powang_error_format(
+                    'IMPLEMENTATION', where,
+                    f"call to {method_name} is ambiguous between trait methods",
+                    ['use Trait.method to select one'],
+                ))
+            if qualified_methods:
+                methods = qualified_methods
+            else:
+                methods = _find_default_trait_method(task_owner, method_name)
         if methods is None:
             raise powang_throw(powang_error_identifier_not_found(
                 where, f"method: {method_name}", [
@@ -1557,9 +1616,32 @@ def _prepareTaskCall(where: str, callee_node: DictRepr, call_parameters: list[Po
                 where, owner_value, method_name, call_parameters
             )
         if owner_value.type == PowangObjectType.type:
+            resolved_trait = method_value.get('resolved_trait')
             methods = owner_value.getMethods(
                 method_name, _private_access_allowed(owner_value)
             )
+            if methods is None and isinstance(resolved_trait, str):
+                methods = owner_value.getTraitMethods(
+                    resolved_trait, method_name
+                )
+                if methods is None:
+                    trait = get_state().traits.get(resolved_trait)
+                    if trait is not None:
+                        methods = trait.default_methods.get(method_name)
+            if methods is None:
+                qualified_methods = owner_value.getAllTraitMethods(method_name)
+                if len(qualified_methods) > 1:
+                    raise powang_throw(powang_error_format(
+                        'IMPLEMENTATION', where,
+                        f"call to {method_name} is ambiguous between trait methods",
+                        ['use Trait.method to select one'],
+                    ))
+                if qualified_methods:
+                    methods = qualified_methods
+                else:
+                    methods = _find_default_trait_method(
+                        owner_value, method_name
+                    )
             if methods is None:
                 raise powang_throw(powang_error_identifier_not_found(
                     where, f"method: {method_name}", [
@@ -1587,7 +1669,7 @@ def _prepareTaskCall(where: str, callee_node: DictRepr, call_parameters: list[Po
             access_target = evaluateAstExpression(access_value['target'])
             member_name = getValidIdentifier(where, access_value['property'])
             if access_target.type == PowangModule.type:
-                return lambda: callModuleMember(
+                return lambda: _callModuleMemberSynchronously(
                     where, access_target, member_name, call_parameters
                 )
         callee_value = evaluateAstExpression(callee_node)
@@ -1624,6 +1706,34 @@ def _prepareTaskCall(where: str, callee_node: DictRepr, call_parameters: list[Po
     raise powang_throw(powang_error_identifier_not_found(where, call_callee))
 
 
+def _createLazyCallTask(
+    where: str,
+    callee_node: DictRepr,
+    call_parameters: list[PowangAny],
+    is_method: bool = False,
+) -> PowangTask:
+    parent_state = get_state()
+    pool = get_task_pool(parent_state)
+    task_state = parent_state.clone_for_task()
+    task_parameters = [copy_for_task(parameter) for parameter in call_parameters]
+    try:
+        if is_method:
+            method_node = {
+                'type': ParserTokenType.METHOD_CALL,
+                'value': callee_node,
+            }
+            work = _prepareTaskMethodCall(where, method_node, task_parameters)
+        else:
+            work = _prepareTaskCall(where, callee_node, task_parameters)
+    except BaseException:
+        task_state.close()
+        raise
+    task = PowangTask(pool.next_id())
+    task.status = 'pending'
+    task.lazy_work = work
+    return pool.register_lazy(task, task_state)
+
+
 def getModuleMember(where: str, module: PowangModule, member_name: str):
     member = module.getMember(member_name)
     if member is None:
@@ -1656,6 +1766,28 @@ def callModuleMember(
         candidate = getFunctionCandidate(member, call_parameters)
         return callFunctionValue(where, member_name, candidate, call_parameters)
     return callFunctionValue(where, member_name, member, call_parameters)
+
+
+def _callModuleMemberSynchronously(
+    where: str,
+    module: PowangModule,
+    member_name: str,
+    call_parameters: list[PowangAny],
+) -> PowangAny:
+    """Call an exported member without turning an async function into a task.
+
+    Task preparation already represents the asynchronous call. Running the
+    module body synchronously keeps nested tasks from forming.
+    """
+    member = getModuleMember(where, module, member_name)
+    candidate = (
+        getFunctionCandidate(member, call_parameters)
+        if isinstance(member, list)
+        else member
+    )
+    if getattr(candidate, 'type', None) != PowangFunction.type:
+        return callFunctionValue(where, member_name, candidate, call_parameters)
+    return callFunction(where, member_name, candidate, call_parameters)
 
 
 def bindWildcardImport(where: str, module: PowangModule) -> None:
@@ -2693,6 +2825,15 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 len(type_arguments) if isinstance(type_arguments, list) else 0,
             )
 
+        case ParserTokenType.AWAIT_EXPRESSION:
+            awaited = unwrap_any_value(evaluateAstExpression(expr_value))
+            require(awaited.type == PowangTask.type, lambda: powang_error_type_match(
+                'await', PowangTask.type, awaited.type,
+            ))
+            if awaited.lazy_pool is not None:
+                return run_lazy_task(awaited)
+            return builtin_wait(awaited)
+
         case ParserTokenType.SPAWN_EXPRESSION:
             ## Arguments are evaluated on the parent thread, then copied so
             ## the task cannot share mutable storage with the parent. The
@@ -3058,6 +3199,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             function.min_argc = expr_value.get('min_argc', 0)
             function.is_lambda = True
             function.mutable_capture = bool(expr_value.get('mutable_capture'))
+            function.is_async = bool(expr_value.get('is_async'))
             function.type_parameters = list(expr_value.get('type_parameters') or [])
             function.variadic = bool(expr_value.get('variadic'))
             function.variadic_index = expr_value.get('variadic_index')
@@ -3117,6 +3259,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 return_type['value']
             )
             new_function.min_argc = expr_value['min_argc']
+            new_function.is_async = bool(expr_value.get('is_async'))
             new_function.type_parameters = list(expr_value.get('type_parameters') or [])
             new_function.variadic = bool(expr_value.get('variadic'))
             new_function.variadic_index = expr_value.get('variadic_index')
@@ -3403,6 +3546,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     static_arguments = resolveNamedArguments(
                         where, candidate, static_arguments, static_named
                     )
+                    if getattr(candidate, 'is_async', False):
+                        return _createLazyCallTask(
+                            where, expr_value, static_arguments, is_method=True
+                        )
                     ScopeStack.static_method_stack.append(user_type.type_name)
                     try:
                         return callFunction(
@@ -3425,6 +3572,19 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     [owner_value] + call_parameters,
                 )
             if owner_value.type == PowangModule.type:
+                module_member = owner_value.getMember(expr_value['method']['value'])
+                if isinstance(module_member, list) and module_member:
+                    module_candidate = getFunctionCandidate(
+                        module_member, call_parameters
+                    )
+                    if getattr(module_candidate, 'is_async', False):
+                        return _createLazyCallTask(
+                            where, expr_value, call_parameters, is_method=True
+                        )
+                elif getattr(module_member, 'is_async', False):
+                    return _createLazyCallTask(
+                        where, expr_value, call_parameters, is_method=True
+                    )
                 return callModuleMember(
                     where,
                     owner_value,
@@ -3474,6 +3634,10 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     ]))
 
             method_candidate = getFunctionCandidate(match_methods, call_parameters)
+            if getattr(method_candidate, 'is_async', False):
+                return _createLazyCallTask(
+                    where, expr_value, call_parameters, is_method=True
+                )
             return callMethod(
                 where,
                 owner_value,

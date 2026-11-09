@@ -6,11 +6,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 3A: async and await.
-  - Plan: `docs/phase-3a-async-await/README.md` (to be written)
-  - Scheduler and suspension design.
-  - `spawn` remains the parallel task primitive.
-  - Target versions: powang `0.15.0`, powang-lsp `0.21.0`.
+- [ ] Phase 3B: package registry and dependency resolver.
+  - Needs a manifest, lock file and cache design.
+  - Target versions: powang `0.16.0`, powang-lsp `0.22.0`.
 
 ## Language features in order
 
@@ -65,9 +63,14 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] Import cycle detection.
    - Plan: `docs/phase-2d-cross-module-types/README.md`
 
-6. [ ] Async and await.
-   - Needs a scheduler and suspension design.
-   - `spawn` remains the parallel task primitive.
+6. [x] Async and await.
+   - [x] `async fun` declarations, methods, statics, trait defaults and lambdas.
+   - [x] `await` expressions and top-level await.
+   - [x] Lazy async tasks with `spawn` as the parallel primitive.
+   - [x] Await type checking and result type propagation.
+   - [x] Lazy task wait, cancel, status, limits, error propagation and shutdown cleanup.
+   - [x] LSP keyword highlighting, completion, hover, indexing and diagnostics.
+   - Plan: `docs/phase-3a-async-await/README.md`
 
 7. [ ] Package registry and dependency resolver.
    - Needs a manifest, lock file and cache design.

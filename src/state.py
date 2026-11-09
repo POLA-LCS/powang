@@ -313,6 +313,14 @@ def _copy_function_for_task(
     )
     _memo[key] = copied
     copied.min_argc = function.min_argc
+    copied.is_async = getattr(function, 'is_async', False)
+    copied.is_lambda = getattr(function, 'is_lambda', False)
+    copied.mutable_capture = getattr(function, 'mutable_capture', False)
+    copied.function_type = getattr(function, 'function_type', None)
+    copied.type_parameters = list(getattr(function, 'type_parameters', []) or [])
+    copied.variadic = getattr(function, 'variadic', False)
+    copied.variadic_index = getattr(function, 'variadic_index', None)
+    copied.lambda_name = getattr(function, 'lambda_name', None)
     if hasattr(function, 'external'):
         copied.external = function.external
     copied.defined = function.defined

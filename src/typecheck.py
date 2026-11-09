@@ -240,12 +240,19 @@ BUILTIN_RETURN_TYPES: dict[str, str] = {
 
 
 class _VariableInfo:
-    __slots__ = ('type', 'annotated', 'weak')
+    __slots__ = ('type', 'annotated', 'weak', 'async_value')
 
-    def __init__(self, type_name: str, annotated: bool, weak: bool = False):
+    def __init__(
+        self,
+        type_name: str,
+        annotated: bool,
+        weak: bool = False,
+        async_value: bool = False,
+    ):
         self.type = type_name
         self.annotated = annotated
         self.weak = weak
+        self.async_value = async_value
 
 
 class _Signature:
@@ -264,6 +271,7 @@ class _Signature:
         'variadic_index',
         'variadic_type',
         'type_parameter_constraints',
+        'is_async',
     )
 
     def __init__(
@@ -282,6 +290,7 @@ class _Signature:
         variadic_index: int | None = None,
         variadic_type: str | None = None,
         type_parameter_constraints: dict[str, list[str]] | None = None,
+        is_async: bool = False,
     ):
         self.name = name
         self.parameter_names = parameter_names
@@ -297,6 +306,7 @@ class _Signature:
         self.variadic_index = variadic_index
         self.variadic_type = variadic_type
         self.type_parameter_constraints = type_parameter_constraints or {}
+        self.is_async = is_async
 
 
 class _TraitInfo:
@@ -373,6 +383,7 @@ class _TypeChecker:
         self.return_weak: bool = False
         self.return_allows_error: bool = False
         self.in_function: bool = False
+        self.in_async_function: bool = False
         self.this_type: Optional[str] = None
         self.type_parameters: set[str] = set()
         self.current_type_parameters: set[str] = set()
@@ -397,7 +408,14 @@ class _TypeChecker:
                 return scope[name]
         return None
 
-    def _bind(self, name: str, type_name: str, annotated: bool, weak: bool = False):
+    def _bind(
+        self,
+        name: str,
+        type_name: str,
+        annotated: bool,
+        weak: bool = False,
+        async_value: bool = False,
+    ):
         if not name:
             return
         if name in self.scopes[-1]:
@@ -406,7 +424,9 @@ class _TypeChecker:
                 ["choose a different name or assign to the existing variable with '='"],
                 where='variable declaration',
             )
-        self.scopes[-1][name] = _VariableInfo(type_name, annotated, weak)
+        self.scopes[-1][name] = _VariableInfo(
+            type_name, annotated, weak, async_value
+        )
 
     def _error(self, message: str, details: Optional[list[str]] = None, where: str = 'type checker'):
         error = powang_error_format(
@@ -1136,6 +1156,9 @@ class _TypeChecker:
         if node_type == ParserTokenType.SPAWN_EXPRESSION:
             return self._infer_spawn(value)
 
+        if node_type == ParserTokenType.AWAIT_EXPRESSION:
+            return self._infer_await(value)
+
         if node_type == ParserTokenType.MATCH_STATEMENT:
             return self._infer_match(value)
         if node_type == ParserTokenType.MATCH_EXPRESSION:
@@ -1497,6 +1520,13 @@ class _TypeChecker:
                 )
         self._check_trait_set_conflicts(actual_type, trait_names, where)
 
+    def _call_result(self, value: Any, signature: _Signature) -> str:
+        if signature.is_async:
+            if isinstance(value, dict):
+                value['async_result_type'] = signature.return_type
+            return TASK
+        return signature.return_type
+
     def _infer_call(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
@@ -1589,7 +1619,7 @@ class _TypeChecker:
                         [f"found {len(candidates)} overloads"],
                         where=f'function call: {callee_name}',
                     )
-                    return candidates[0].return_type if candidates else ANY
+                    return self._call_result(value, candidates[0]) if candidates else ANY
                 candidate = candidates[0]
                 explicit_mapping: dict[str, str] = {}
                 if type_argument_types:
@@ -1677,7 +1707,7 @@ class _TypeChecker:
                         constraint_mapping,
                         f'function call: {callee_name}',
                     )
-                return candidate.return_type
+                return self._call_result(value, candidate)
 
             explicit_mapping: dict[str, str] = {}
             if type_argument_types:
@@ -1707,7 +1737,7 @@ class _TypeChecker:
                     mapping,
                     f'function call: {callee_name}',
                 )
-                return selected.return_type
+                return self._call_result(value, selected)
             self._error(
                 f"No overload of '{callee_name}' accepts the given arguments",
                 [
@@ -1716,13 +1746,15 @@ class _TypeChecker:
                 ],
                 where=f'function call: {callee_name}',
             )
-            return candidates[0].return_type if candidates else ANY
+            return self._call_result(value, candidates[0]) if candidates else ANY
 
         variable = self._lookup(callee_name)
         if variable is not None and isinstance(variable.type, str) and variable.type.startswith('fun['):
             signature = self._signature_from_function_type(variable.type, callee_name)
             if signature is None:
                 return ANY
+            if getattr(variable, 'async_value', False):
+                signature.is_async = True
             mapping = self._infer_type_argument_mapping(signature, argument_types)
             if mapping:
                 signature = self._specialize_signature(signature, mapping)
@@ -1732,7 +1764,7 @@ class _TypeChecker:
                     ['pass the arguments positionally'],
                     where=f'function call: {callee_name}',
                 )
-                return signature.return_type
+                return self._call_result(value, signature)
             if signature.variadic:
                 fixed = signature.variadic_index if signature.variadic_index is not None else 0
                 if len(argument_types) < signature.min_argc:
@@ -1741,7 +1773,7 @@ class _TypeChecker:
                         [f"expected at least {signature.min_argc}"],
                         where=f'function call: {callee_name}',
                     )
-                    return signature.return_type
+                    return self._call_result(value, signature)
                 for index in range(min(fixed, len(argument_types))):
                     if not self._assignable(
                         signature.parameter_types[index],
@@ -1766,7 +1798,7 @@ class _TypeChecker:
                                 argument_types[index],
                             )
                             break
-                return signature.return_type
+                return self._call_result(value, signature)
             if len(argument_types) > len(signature.parameter_types):
                 self._error(
                     f"Function value '{callee_name}' received too many arguments",
@@ -1786,7 +1818,7 @@ class _TypeChecker:
                         expected,
                         actual,
                     )
-            return signature.return_type
+            return self._call_result(value, signature)
 
         # Unknown callees are skipped, never rejected.
         return ANY
@@ -1795,8 +1827,46 @@ class _TypeChecker:
         ## The enclosed call is still checked (arity, known signatures), but
         ## the expression's static type is always the opaque `task` handle.
         if isinstance(value, dict):
-            self._infer(value.get('call'))
+            call = value.get('call')
+            call_type = self._infer(call)
+            async_result = None
+            if isinstance(call, dict):
+                async_result = call.get('async_result_type')
+                if async_result is None and isinstance(call.get('value'), dict):
+                    async_result = call['value'].get('async_result_type')
+            if async_result is not None:
+                value['async_result_type'] = async_result
+            elif call_type != TASK:
+                value['async_result_type'] = call_type
         return TASK
+
+    def _await_result_type(self, operand: Any) -> Optional[str]:
+        if not isinstance(operand, dict):
+            return None
+        result = operand.get('async_result_type')
+        if result is not None:
+            return result
+        inner = operand.get('value')
+        if isinstance(inner, dict):
+            return inner.get('async_result_type')
+        return None
+
+    def _infer_await(self, value: Any) -> str:
+        if self.in_function and not self.in_async_function:
+            self._error(
+                "'await' is only valid inside an async function",
+                ['mark the enclosing function as async'],
+                where='await expression',
+            )
+        operand_type = self._infer(value)
+        if operand_type not in (TASK, ANY):
+            self._error(
+                "'await' expects a task value",
+                [f"but {operand_type} was encountered"],
+                where='await expression',
+            )
+            return ANY
+        return self._await_result_type(value) or ANY
 
     @staticmethod
     def _substitute_type_parameters(type_text: str, mapping: dict[str, str]) -> str:
@@ -1843,6 +1913,7 @@ class _TypeChecker:
             signature.variadic_index,
             variadic_type,
             signature.type_parameter_constraints,
+            signature.is_async,
         )
 
     def _infer_type_argument_mapping(
@@ -1991,6 +2062,7 @@ class _TypeChecker:
                         if isinstance(trait_name, str)
                     ]
         variadic = bool(value.get('variadic'))
+        is_async = bool(value.get('is_async'))
         variadic_index = value.get('variadic_index')
         if not isinstance(variadic_index, int):
             variadic_index = None
@@ -2050,6 +2122,7 @@ class _TypeChecker:
             variadic_index,
             variadic_type,
             type_parameter_constraints,
+            is_async,
         )
         previous = (
             self.return_type,
@@ -2059,6 +2132,7 @@ class _TypeChecker:
             self.this_type,
             self.current_type_parameters,
             self.current_type_parameter_constraints,
+            self.in_async_function,
         )
         self.return_type = return_type
         self.return_weak = return_weak
@@ -2066,6 +2140,7 @@ class _TypeChecker:
         self.in_function = True
         self.current_type_parameters = set(type_parameters)
         self.current_type_parameter_constraints = dict(type_parameter_constraints)
+        self.in_async_function = is_async
         self._scope_push()
         try:
             for index, parameter_name in enumerate(parameter_names):
@@ -2097,6 +2172,7 @@ class _TypeChecker:
                 self.this_type,
                 self.current_type_parameters,
                 self.current_type_parameter_constraints,
+                self.in_async_function,
             ) = previous
         return signature.function_type or FUNCTION
 
@@ -2189,9 +2265,9 @@ class _TypeChecker:
                 [f"argument types: {', '.join(method_argument_types)}"],
                 where='trait-qualified call',
             )
-            return signatures[0].return_type
+            return self._call_result(value, signatures[0])
         value['resolved_trait'] = trait_name
-        return matches[0].return_type
+        return self._call_result(value, matches[0])
 
     def _infer_trait_value_method(
         self,
@@ -2221,9 +2297,9 @@ class _TypeChecker:
                 [f"argument types: {', '.join(argument_types)}"],
                 where='method call',
             )
-            return signatures[0].return_type
+            return self._call_result(value, signatures[0])
         value['resolved_trait'] = trait_name
-        return matches[0].return_type
+        return self._call_result(value, matches[0])
 
     def _infer_constrained_method_call(
         self,
@@ -2271,9 +2347,9 @@ class _TypeChecker:
                 [f"argument types: {', '.join(argument_types)}"],
                 where='method call',
             )
-            return signatures[0].return_type
+            return self._call_result(value, signatures[0])
         value['resolved_trait'] = trait_name
-        return matches[0].return_type
+        return self._call_result(value, matches[0])
 
     def _infer_concrete_trait_method(
         self,
@@ -2319,9 +2395,9 @@ class _TypeChecker:
                     [f"argument types: {', '.join(argument_types)}"],
                     where='method call',
                 )
-                return signatures[0].return_type
+                return self._call_result(value, signatures[0])
             value['resolved_trait'] = trait_name
-            return matches[0].return_type
+            return self._call_result(value, matches[0])
         defaults: list[tuple[str, list[_Signature]]] = []
         for trait in self.traits.values():
             if method_name not in trait.default_methods:
@@ -2360,9 +2436,9 @@ class _TypeChecker:
                     [f"argument types: {', '.join(argument_types)}"],
                     where='method call',
                 )
-                return signatures[0].return_type
+                return self._call_result(value, signatures[0])
             value['resolved_trait'] = trait_name
-            return matches[0].return_type
+            return self._call_result(value, matches[0])
         return None
 
     def _infer_module_method(
@@ -2371,6 +2447,7 @@ class _TypeChecker:
         info: _ModuleTypeInfo,
         method_name: str,
         argument_types: list[str],
+        call_node: Any = None,
     ) -> str:
         signatures = info.functions.get(method_name)
         if not signatures:
@@ -2407,7 +2484,7 @@ class _TypeChecker:
             self._check_type_parameter_constraints(
                 selected, mapping, f'function call: {label}'
             )
-            return selected.return_type
+            return self._call_result(call_node, selected)
         candidate = candidates[0]
         if candidate.variadic:
             if len(argument_types) < candidate.min_argc:
@@ -2444,7 +2521,7 @@ class _TypeChecker:
                         argument_type,
                     )
                     break
-        return candidate.return_type
+        return self._call_result(call_node, candidate)
 
     def _infer_method_call(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -2474,7 +2551,7 @@ class _TypeChecker:
             info = self.module_values.get(module_name)
             if info is not None and method_name is not None:
                 return self._infer_module_method(
-                    module_name, info, method_name, argument_types
+                    module_name, info, method_name, argument_types, value
                 )
         if isinstance(owner_type, str):
             owner_trait = self._trait_name(owner_type)
@@ -2498,9 +2575,11 @@ class _TypeChecker:
                     for node in argument_nodes
                 )
                 if has_named:
-                    return static_methods[0].return_type
+                    return self._call_result(value, static_methods[0])
                 matches = [signature for signature in static_methods if self._signature_matches(signature, argument_types)]
-                return matches[0].return_type if matches else static_methods[0].return_type
+                return self._call_result(
+                    value, matches[0] if matches else static_methods[0]
+                )
             self._error(
                 f"'{owner_name}' has no static method named '{method_name}'",
                 [f"available static methods: {', '.join(sorted(static_info.get('static_methods', {}).keys()))}"],
@@ -2519,7 +2598,7 @@ class _TypeChecker:
             if info is not None:
                 methods = info.get('methods', {}).get(method_name)
                 if methods:
-                    return methods[0].return_type
+                    return self._call_result(value, methods[0])
                 trait_result = self._infer_concrete_trait_method(
                     value, object_name, method_name, argument_types
                 )
@@ -3216,6 +3295,26 @@ class _TypeChecker:
         self._bind(name or '', declared_type, True, self._annotation_weak(type_node))
         return declared_type
 
+    def _expression_is_async_function_value(self, expression: Any) -> bool:
+        if not isinstance(expression, dict):
+            return False
+        if expression.get('type') == ParserTokenType.FUN_EXPRESSION:
+            expression_value = expression.get('value')
+            return isinstance(expression_value, dict) and bool(
+                expression_value.get('is_async')
+            )
+        if expression.get('type') == LexerTokenType.IDENTIFIER:
+            name = self._identifier_name(expression)
+            if name is None:
+                return False
+            variable = self._lookup(name)
+            if variable is not None:
+                return bool(getattr(variable, 'async_value', False))
+            signatures = self.functions.get(name)
+            if signatures:
+                return any(signature.is_async for signature in signatures)
+        return False
+
     def _infer_declaration_typed(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
@@ -3223,7 +3322,9 @@ class _TypeChecker:
         type_node = value.get('type')
         declared_type = self._annotation_type(type_node)
         weak = self._annotation_weak(type_node)
-        source_type = self._infer(value.get('expression'))
+        expression = value.get('expression')
+        source_type = self._infer(expression)
+        async_value = self._expression_is_async_function_value(expression)
         if isinstance(source_type, str) and source_type.startswith('&'):
             self._error(
                 'references cannot be stored',
@@ -3239,14 +3340,16 @@ class _TypeChecker:
                 declared_type,
                 source_type,
             )
-        self._bind(name or '', declared_type, True, weak)
+        self._bind(name or '', declared_type, True, weak, async_value)
         return declared_type
 
     def _infer_declaration_interpret(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
         name = self._identifier_name(value.get('identifier'))
-        source_type = self._infer(value.get('expression'))
+        expression = value.get('expression')
+        source_type = self._infer(expression)
+        async_value = self._expression_is_async_function_value(expression)
         if isinstance(source_type, str) and source_type.startswith('&'):
             self._error(
                 'references cannot be stored',
@@ -3257,7 +3360,7 @@ class _TypeChecker:
                 where='variable declaration',
             )
         inferred_type = source_type if source_type else ANY
-        self._bind(name or '', inferred_type, False, False)
+        self._bind(name or '', inferred_type, False, False, async_value)
         return inferred_type
 
     def _infer_destructure_declaration(self, value: Any) -> str:
@@ -3338,6 +3441,10 @@ class _TypeChecker:
         if target_type == LexerTokenType.IDENTIFIER:
             name = self._identifier_name(target)
             variable = self._lookup(name) if name is not None else None
+            if variable is not None:
+                variable.async_value = self._expression_is_async_function_value(
+                    value.get('expression')
+                )
             if variable is not None and variable.annotated:
                 if not self._assignable(variable.type, source_type, variable.weak):
                     self._assign_error(
@@ -4277,6 +4384,7 @@ class _TypeChecker:
             variadic_index,
             variadic_type,
             type_parameter_constraints,
+            bool(value.get('is_async')),
         )
 
     def _check_function(self, function_node: Any, this_type: Optional[str] = None, register: bool = True) -> Optional[_Signature]:
@@ -4312,6 +4420,7 @@ class _TypeChecker:
             self.loop_break_flags,
             self.current_type_parameters,
             self.current_type_parameter_constraints,
+            self.in_async_function,
         )
         self.return_type = signature.return_type
         self.return_weak = signature.return_weak
@@ -4324,6 +4433,7 @@ class _TypeChecker:
         self.current_type_parameter_constraints = dict(
             signature.type_parameter_constraints
         )
+        self.in_async_function = signature.is_async
 
         self._scope_push()
         try:
@@ -4388,6 +4498,7 @@ class _TypeChecker:
                 self.loop_break_flags,
                 self.current_type_parameters,
                 self.current_type_parameter_constraints,
+                self.in_async_function,
             ) = previous
 
     # ---------------------------------------------------------------- modules
@@ -4717,6 +4828,7 @@ class _TypeChecker:
             self._qualify_type_text(signature.variadic_type, info, alias)
             if signature.variadic_type is not None else None,
             constraints,
+            signature.is_async,
         )
 
     def _module_callee(

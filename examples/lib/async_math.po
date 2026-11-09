@@ -1,0 +1,3 @@
+module async_math;
+
+export async fun double(value: int): int >> value * 2;
