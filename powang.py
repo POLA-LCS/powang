@@ -4,6 +4,8 @@ from src.builtins.tasks import shutdown_state_tasks
 from src.stdlib.stdlib_http_server import shutdown_state_servers
 from src.stdlib.stdlib_env import set_argv
 from src.config import load_config, load_project_config
+from src.pkg.cli import package_main
+from src.pkg.installer import load_package_config, require_packages_ready
 from src.module_loader import find_entry_module
 from src.typecheck import check_source
 from sys import argv, exit as sys_exit, stdin
@@ -19,6 +21,7 @@ def print_usage():
     print('    powang                  Runs the REPL.')
     print('    powang (--help | -h)    Display this message.')
     print('    powang input.po         Interprets an input.')
+    print('    powang pkg <command>    Manages project packages.')
     print('FLAGS:')
     print('    --ast output.json       Dumps the ast tree into a json.')
     print('    --check                 Parse and type-check only, do not execute.')
@@ -134,6 +137,8 @@ def run_project() -> int:
         raise powang_throw(powang_error_format(
             'USAGE', 'run', 'project.po is required for powang run',
         ))
+    load_package_config(state, root)
+    require_packages_ready(state)
     entry = find_entry_module(root)
     set_state(state)
     set_argv([])
@@ -143,6 +148,8 @@ def run_project() -> int:
 
 
 def main(args: list[str]):
+    if args and args[0] in {'pkg', 'package'}:
+        return package_main(args[1:])
     if args and args[0] == 'run':
         if len(args) != 1:
             raise powang_throw(powang_error_format(
@@ -161,6 +168,7 @@ def main(args: list[str]):
             load_project_config(repl_state, None)
             if repl_state.project_value is None:
                 load_config(repl_state, None)
+            load_package_config(repl_state, None)
             set_state(repl_state)
             set_argv([])
             return initialize_repl(repl_state)
@@ -192,6 +200,8 @@ def main(args: list[str]):
     run_state.warnings_enabled = not no_warnings
     if not load_project_config(run_state, input_file):
         load_config(run_state, input_file)
+    load_package_config(run_state, input_file)
+    require_packages_ready(run_state)
     run_state.paths['ABSOLUTE'] = INTERPRETER_PATH
     if input_file:
         run_state.paths['RELATIVE'] = Path(input_file).resolve()

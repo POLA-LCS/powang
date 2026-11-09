@@ -9,8 +9,7 @@ from typing import Any
 
 from .error import powang_error_format, powang_throw
 from .lexer.token import LexerTokenType, ParserTokenType
-from .error import powang_error_format, powang_throw
-from .parser import Parser, ParserTokenType
+from .parser import Parser
 from .powang_types import PowangProject, BUILTIN_OBJECT_TYPES
 
 try:
@@ -312,41 +311,3 @@ def load_project_config(state: Any, base_path: Path | str | None = None) -> bool
         config["allowSystem"],
     )
     return True
-    """Load extern and path configuration into interpreter state."""
-    state.allowed_extern_modules = set(_DEFAULT_EXTERNAL_MODULES)
-    state.module_search_paths = []
-    state.host_callbacks = {}
-
-    config_path = None
-    env_config = os.environ.get("POWANG_CONFIG")
-    if env_config:
-        config_path = Path(env_config)
-    else:
-        root = Path(base_path).resolve().parent if base_path else Path.cwd()
-        candidate = root / "powang.toml"
-        if candidate.exists():
-            config_path = candidate
-
-    if config_path is not None and config_path.exists() and tomllib is not None:
-        with config_path.open("rb") as file:
-            data = tomllib.load(file)
-        extern = data.get("extern", {})
-        paths = data.get("paths", {})
-        host = data.get("host", {})
-        state.allowed_extern_modules.update(_split_list(extern.get("modules")))
-        for path in _split_list(paths.get("modules")):
-            state.module_search_paths.append(Path(path).resolve())
-        state.host_callbacks.update(host.get("callbacks", {}))
-
-    env_modules = os.environ.get("POWANG_EXTERN_MODULES")
-    if env_modules:
-        state.allowed_extern_modules.update(_split_list(env_modules))
-
-    env_paths = os.environ.get("POWANG_MODULE_PATH")
-    if env_paths:
-        for path in env_paths.split(os.pathsep):
-            if path.strip():
-                state.module_search_paths.append(Path(path).strip().resolve())
-
-    if not state.module_search_paths:
-        state.module_search_paths = [Path.cwd().resolve()]

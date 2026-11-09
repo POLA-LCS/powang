@@ -21,7 +21,7 @@ import os
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Optional
+from typing import IO, Any, Optional
 
 from .powang_types import *
 from .scopestack import ScopeType
@@ -444,6 +444,10 @@ class InterpreterState:
         self.extern_module_cache: dict[str, Any] = {}
         self.host_callbacks: dict[str, Any] = {}
         self.project_value: Optional[PowangProject] = None
+        self.package_manifest: Any = None
+        self.package_lock: Any = None
+        self.package_root: Optional[Path] = None
+        self.package_status: str = 'none'
         self.log_level: str = os.environ.get("POWANG_LOG_LEVEL", "info").lower()
         self.allow_system: bool = os.environ.get("POWANG_ALLOW_SYSTEM") == "1"
 
@@ -573,6 +577,14 @@ class InterpreterState:
         clone.paths = dict(self.paths)
         clone.script_argv = list(self.script_argv)
         clone.task_pool = self.task_pool
+        clone.allowed_extern_modules = set(self.allowed_extern_modules)
+        clone.module_search_paths = list(self.module_search_paths)
+        clone.host_callbacks = dict(self.host_callbacks)
+        clone.project_value = self.project_value
+        clone.package_manifest = self.package_manifest
+        clone.package_lock = self.package_lock
+        clone.package_root = self.package_root
+        clone.package_status = self.package_status
         clone.log_level = self.log_level
         clone.allow_system = self.allow_system
         clone.warnings_enabled = self.warnings_enabled

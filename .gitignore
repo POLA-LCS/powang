@@ -8,4 +8,5 @@ dist/
 .venv/
 .smoke-venv/
 .pytest_cache/
+.powang/
 *.ignore*

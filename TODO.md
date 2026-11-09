@@ -6,9 +6,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 3B: package registry and dependency resolver.
-  - Needs a manifest, lock file and cache design.
-  - Target versions: powang `0.16.0`, powang-lsp `0.22.0`.
+- [ ] Phase 3C: operator overloading through traits.
+  - Depends on the structural trait system.
+  - Target versions: powang `0.17.0`, powang-lsp `0.23.0`.
 
 ## Language features in order
 
@@ -72,8 +72,16 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] LSP keyword highlighting, completion, hover, indexing and diagnostics.
    - Plan: `docs/phase-3a-async-await/README.md`
 
-7. [ ] Package registry and dependency resolver.
-   - Needs a manifest, lock file and cache design.
+7. [x] Package registry and dependency resolver.
+   - [x] `powang.toml` manifest and `powang.lock` lock file.
+   - [x] Semver constraints and backtracking resolver.
+   - [x] Registry and path dependencies.
+   - [x] Local and HTTP registry clients with SHA-256 integrity checks.
+   - [x] Safe archive extraction and global cache.
+   - [x] `powang pkg` init, add, remove, install, update, list, tree, search and clean.
+   - [x] Runtime and checker module resolution for installed packages.
+   - [x] LSP diagnostics for package imports.
+   - Plan: `docs/phase-3b-package-registry/README.md`
 
 8. [ ] Operator overloading through traits.
    - Depends on traits.
@@ -100,7 +108,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [x] LSP-only `undef type` display for uninitialized typed variables.
 - [x] LSP trait completion that inserts the full trait method signature.
 - [ ] Debugger and debug adapter.
-- [ ] Package registry client.
+- [x] Package registry client.
 
 ### `undef` display convention
 

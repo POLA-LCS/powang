@@ -84,10 +84,17 @@ class ModuleLoader:
     def resolve(self, kind: str, name: str, base: Path | None = None) -> Path:
         if kind == 'name':
             for base_path in self.state.module_search_paths:
-                candidate = base_path / 'modules' / name
+                modules_root = base_path / 'modules'
+                candidate = modules_root / name
                 if candidate.exists():
                     return candidate.resolve()
-            candidate = self.interpreter_path.parent / 'modules' / name
+                file_candidate = modules_root / f'{name}.po'
+                if file_candidate.is_file():
+                    return file_candidate.resolve()
+            modules_root = self.interpreter_path.parent / 'modules'
+            candidate = modules_root / name
+            if not candidate.exists() and (modules_root / f'{name}.po').is_file():
+                candidate = modules_root / f'{name}.po'
         else:
             importing = base if base is not None else self.default_base()
             candidate = importing.parent / Path(name)

@@ -61,19 +61,23 @@ def run_command(
     cwd: Path | str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
     optimize: bool = False,
+    env: dict[str, str] | None = None,
 ) -> RunResult:
     """Run ``python powang.py <args>`` and capture decoded output."""
     command = [sys.executable]
     if optimize:
         command.append("-O")
     command.extend([str(POWANG), *args])
+    process_env = dict(_ENV)
+    if env:
+        process_env.update(env)
     completed = subprocess.run(
         command,
         input=input_text.encode("utf-8") if input_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=str(cwd if cwd is not None else ROOT),
-        env=_ENV,
+        env=process_env,
         timeout=timeout,
         check=False,
     )
@@ -91,12 +95,19 @@ def run_file(
     cwd: Path | str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
     optimize: bool = False,
+    env: dict[str, str] | None = None,
 ) -> RunResult:
     """Run one ``.po`` file by path. Relative paths resolve against the repo."""
     resolved = Path(path)
     if not resolved.is_absolute():
         resolved = ROOT / resolved
-    return run_command([str(resolved), *args], cwd=cwd, timeout=timeout, optimize=optimize)
+    return run_command(
+        [str(resolved), *args],
+        cwd=cwd,
+        timeout=timeout,
+        optimize=optimize,
+        env=env,
+    )
 
 
 def write_po(directory: Path | str, name: str, source: str) -> Path:
