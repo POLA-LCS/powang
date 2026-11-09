@@ -2,6 +2,22 @@
 
 All notable changes to powang are documented here.
 
+## 0.14.0
+
+### Added
+
+- Cross-module type checking for aliased and wildcard imports.
+- Imported functions, variables, object types and traits.
+- Module-qualified calls, type annotations and construction.
+- Qualified trait annotations.
+- Import cycle detection and imported module diagnostics at the import site.
+- LSP cross-module diagnostics.
+
+### Changed
+
+- The checker resolves modules with the same path rules as the runtime loader.
+- Imported signatures qualify exported type and trait names to the module alias.
+
 ## 0.13.3
 
 ### Changed

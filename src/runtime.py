@@ -314,6 +314,19 @@ def _evaluateDestructureDeclaration(where: str, expr_value: DictRepr) -> PowangA
     raise powang_throw(powang_error_type_match(where, 'array or object', source.type))
 
 
+def _module_object_type(type_name: str):
+    if not isinstance(type_name, str) or '.' not in type_name:
+        return None, None
+    alias, member = type_name.split('.', 1)
+    module_value = ScopeStack.get_variable(alias)
+    if module_value is None or module_value.type != PowangModule.type:
+        return None, None
+    member_value = module_value.getMember(member)
+    if not isinstance(member_value, PowangObjectType):
+        return None, None
+    return member_value, f'{alias}.{member}'
+
+
 def getUndefinedVariable(where: str, type_expression: DictRepr):
     state = get_state()
     active_type_parameters: set[str] = set()
@@ -324,13 +337,21 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
         undefined_right_value.any = PowangAnyType.type
         undefined_right_value.defined = False
         return undefined_right_value
-    if type_expression['value'] in getattr(state, 'traits', {}):
+    raw_type_name = type_expression['value']
+    trait_lookup = raw_type_name
+    if isinstance(raw_type_name, str) and '.' in raw_type_name:
+        member_type, _qualified = _module_object_type(raw_type_name)
+        trait_lookup = (
+            None if member_type is not None
+            else raw_type_name.split('.', 1)[1]
+        )
+    if trait_lookup is not None and trait_lookup in getattr(state, 'traits', {}):
         ## A trait annotation is a checker contract. At runtime it behaves like
         ## `obj`, keeping the concrete object payload and its methods.
         undefined_right_value = PowangObjectType()
         undefined_right_value.is_obj = True
         undefined_right_value.defined = False
-        undefined_right_value.type_name = type_expression['value']
+        undefined_right_value.type_name = trait_lookup
         return undefined_right_value
     type_alias = state.type_alias
     if type_expression['value'] in type_alias:
@@ -364,10 +385,15 @@ def getUndefinedVariable(where: str, type_expression: DictRepr):
         if type_expression['value'] == 'obj':
             undefined_right_value.is_obj = True
     else:
-        user_type = ScopeStack.get_ObjectType(type_expression['value'])
+        user_type = None
+        type_name = type_expression['value']
+        if isinstance(type_name, str) and '.' in type_name:
+            user_type, _qualified = _module_object_type(type_name)
+        if user_type is None:
+            user_type = ScopeStack.get_ObjectType(type_name)
         if user_type is None:
             raise powang_throw(powang_error_identifier_type(
-                where, type_expression['value']
+                where, type_name
             ))
         undefined_right_value = PowangCopyConstruct(user_type)
     undefined_right_value.defined = False
@@ -2130,9 +2156,15 @@ def evaluate_instantiation(where: str, value: DictRepr) -> PowangAny:
         return casted
 
     user_type = ScopeStack.get_ObjectType(type_name)
+    instance_type = None
+    if user_type is None and '.' in type_name:
+        user_type, _qualified = _module_object_type(type_name)
+        if user_type is not None:
+            instance_type = PowangCopyConstructObjectType(user_type)
     if user_type is None:
         raise powang_throw(powang_error_identifier_type(where, type_name))
-    instance_type = ScopeStack.get_existingObjectType(type_name)
+    if instance_type is None:
+        instance_type = ScopeStack.get_existingObjectType(type_name)
     constructors = instance_type.getConstructors()
     if named_form:
         if positional:
@@ -2147,7 +2179,8 @@ def evaluate_instantiation(where: str, value: DictRepr) -> PowangAny:
             ))
         candidate = getFunctionCandidate(constructors, positional)
         arguments = positional
-    return callMethod(where, instance_type, CONSTRUCTOR_METHOD_NAME, candidate, arguments)
+    result = callMethod(where, instance_type, CONSTRUCTOR_METHOD_NAME, candidate, arguments)
+    return result
 
 
 ## Evaluation depth guard. Recursive Powang calls would otherwise surface as a

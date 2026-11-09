@@ -6,12 +6,11 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 2D: cross-module type checking.
-  - Plan: `docs/phase-2d-cross-module-types/README.md` (to be written)
-  - Check imported and exported types across files.
-  - Report errors at the importing call site.
-  - Preserve module boundaries for traits and object types.
-  - Target versions: powang `0.14.0`, powang-lsp `0.20.0`.
+- [ ] Phase 3A: async and await.
+  - Plan: `docs/phase-3a-async-await/README.md` (to be written)
+  - Scheduler and suspension design.
+  - `spawn` remains the parallel task primitive.
+  - Target versions: powang `0.15.0`, powang-lsp `0.21.0`.
 
 ## Language features in order
 
@@ -58,9 +57,13 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - Range patterns are implemented in Phase 2B3 with an inclusive lower bound and an exclusive upper bound.
    - Loop ranges remain sugar for C-style `for`.
 
-5. [ ] Cross-module type checking.
-   - Check imports and exports across files.
-   - Report errors at the importing call site.
+5. [x] Cross-module type checking.
+   - [x] Check imports and exports across files.
+   - [x] Report errors at the importing call site.
+   - [x] Preserve module boundaries for traits and object types.
+   - [x] Qualified type annotations and construction.
+   - [x] Import cycle detection.
+   - Plan: `docs/phase-2d-cross-module-types/README.md`
 
 6. [ ] Async and await.
    - Needs a scheduler and suspension design.
@@ -154,6 +157,7 @@ Open questions:
 - [x] Phase 2C structural traits, default methods, generic constraints and trait-qualified dispatch.
 - [x] `Project` built-in object type, `project.po` member access and documentation.
 - [x] Project runtime templates, implicit module import and LSP user-type highlighting.
+- [x] Phase 2D cross-module type checking, qualified types and imported traits.
 - [x] LSP `0.16.1` hover syntax highlighting with `powang` fenced code blocks.
 - [x] Plain-text hover prose with no markdown bold or inline code spans.
 - [x] Examples for all Phase 2A, Phase 2B1 and Phase 2B2 features.

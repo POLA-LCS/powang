@@ -1,0 +1,16 @@
+## Cross-module type checking.
+
+use "./lib/geometry.po" as geo;
+use "./lib/geometry.po" as *;
+
+a: geo.Point = geo.Point.[0, 0];
+b: geo.Point = geo.Point.[3, 4];
+println(geo.distance(a, b));
+
+p: Point = Point.[2, 3];
+println(p.x + p.y);
+println(distance(Point.[0, 0], Point.[1, 1]));
+
+use "./lib/shapes.po" as shapes;
+person: shapes.Named = shapes.Person.["Ada"];
+println(shapes.render(person));

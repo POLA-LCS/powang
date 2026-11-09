@@ -615,6 +615,46 @@ use url;
 use crypto;
 ```
 
+### Cross-module type checking
+
+Imported modules are parsed and checked before the importing file. Aliased and wildcard imports carry functions, variables, object types and traits across module boundaries.
+
+```po
+## lib/geometry.po
+module geometry;
+
+export type Point[+] {
+    | x: int;
+    | y: int;
+}
+
+export fun distance(a: Point, b: Point): int {
+    dx: int = a.x - b.x;
+    dy: int = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+```
+
+```po
+## main.po
+use "./lib/geometry.po" as g;
+
+a: g.Point = g.Point.[0, 0];
+b: g.Point = g.Point.[3, 4];
+print(g.distance(a, b));
+```
+
+Wildcard imports expose exported names directly.
+
+```po
+use "./lib/geometry.po" as *;
+
+p: Point = Point.[2, 3];
+print(distance(p, Point.[0, 0]));
+```
+
+Wrong arguments, missing members and arity errors are reported in the importing file. Errors inside an imported module are reported at the import statement. Cyclic imports are detected without running the module.
+
 ### Collections
 
 Arrays, maps and strings. Trailing commas are allowed in arrays, maps, calls and parameters.

@@ -1,0 +1,14 @@
+module shapes;
+
+export trait Named {
+    | name: str;
+    fun label(): str;
+    fun describe(): str >> this.label();
+}
+
+export type Person[+] {
+    | name: str;
+    fun this.label(): str >> this.name;
+}
+
+export fun render(value: Named): str >> value.describe();

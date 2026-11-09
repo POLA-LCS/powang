@@ -15,6 +15,7 @@ what makes the typing gradual: unannotated programs keep running exactly as
 before.
 """
 
+import copy
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -22,6 +23,7 @@ from typing import Any, Optional
 from .parser import Parser, NATI_TYPES, PATHS
 from .simplify import simplify_program
 from .state import get_state
+from .module_loader import ModuleLoader
 from .powang_types import (
     PowangArray,
     PowangHandle,
@@ -314,8 +316,43 @@ class _TraitInfo:
         self.default_methods: set[str] = set()
 
 
+class _ModuleTypeInfo:
+    __slots__ = (
+        'name',
+        'path',
+        'functions',
+        'variables',
+        'object_types',
+        'traits',
+        'all_object_types',
+        'all_traits',
+        'exports',
+        'errors',
+        'legacy',
+        'loading',
+    )
+
+    def __init__(self, name: str, path: Path):
+        self.name = name
+        self.path = path
+        self.functions: dict[str, list[_Signature]] = {}
+        self.variables: dict[str, str] = {}
+        self.object_types: dict[str, dict] = {}
+        self.traits: dict[str, _TraitInfo] = {}
+        self.all_object_types: dict[str, dict] = {}
+        self.all_traits: dict[str, _TraitInfo] = {}
+        self.exports: dict[str, str] = {}
+        self.errors: list[PowangError] = []
+        self.legacy = False
+        self.loading = False
+
+
 class _TypeChecker:
-    def __init__(self, path: Optional[str] = None):
+    def __init__(
+        self,
+        path: Optional[str] = None,
+        module_cache: Optional[dict[str, _ModuleTypeInfo]] = None,
+    ):
         self.path = path
         ## Aliases belong to the run being checked, which is the active state
         ## at type_check time. A previous run's aliases are never visible.
@@ -324,6 +361,12 @@ class _TypeChecker:
         self.functions: dict[str, list[_Signature]] = {}
         self.object_types: dict[str, dict[str, Any]] = {}
         self.scopes: list[dict[str, _VariableInfo]] = [{}]
+        self.module_cache: dict[str, _ModuleTypeInfo] = (
+            module_cache if module_cache is not None else {}
+        )
+        self.imported_modules: dict[str, _ModuleTypeInfo] = {}
+        self.module_values: dict[str, _ModuleTypeInfo] = {}
+        self.type_owners: dict[str, tuple[_ModuleTypeInfo, str]] = {}
 
         # Current function context. ``None`` means top level.
         self.return_type: Optional[str] = None
@@ -707,7 +750,7 @@ class _TypeChecker:
                 return None
             signatures = trait.methods.get(method_name)
             return signatures[0] if signatures else None
-        info = self.object_types.get(normalized)
+        info = self._object_type_info(normalized)
         if info is None:
             return None
         qualified = info.get('trait_methods', {}).get(
@@ -759,7 +802,7 @@ class _TypeChecker:
             return True
         if normalized in self.traits:
             return self._trait_satisfies_trait(normalized, trait_name)
-        info = self.object_types.get(normalized)
+        info = self._object_type_info(normalized)
         if info is None:
             return False
         props = info.get('props', {})
@@ -798,7 +841,7 @@ class _TypeChecker:
             if self._trait_satisfies_trait(normalized, trait_name):
                 return None
             return f"trait {normalized} does not satisfy {trait_name}"
-        info = self.object_types.get(normalized)
+        info = self._object_type_info(normalized)
         if info is None:
             return f"type {normalized} is not a declared object type"
         props = info.get('props', {})
@@ -1013,7 +1056,7 @@ class _TypeChecker:
             column = value.get('column')
             if isinstance(line, int) and isinstance(column, int):
                 return line, column
-            for key in ('identifier', 'callee', 'target', 'type', 'expression', 'property'):
+            for key in ('identifier', 'callee', 'target', 'type', 'expression', 'property', 'owner', 'method'):
                 child = value.get(key)
                 if isinstance(child, dict):
                     position = _TypeChecker._node_position(child)
@@ -1136,6 +1179,9 @@ class _TypeChecker:
         if node_type == ParserTokenType.EXTERN_REFERENCE:
             return self._infer_extern(value)
 
+        if node_type == ParserTokenType.USE_EXPRESSION:
+            return self._infer_use(value)
+
         if node_type == ParserTokenType.MODULE_DECLARATION:
             return ANY
 
@@ -1163,6 +1209,8 @@ class _TypeChecker:
             return self.this_type if self.this_type is not None else ANY
         if name == 'Project':
             return PROJECT
+        if name in self.module_values:
+            return f'module:{name}'
         variable = self._lookup(name)
         if variable is not None:
             return variable.type
@@ -1365,7 +1413,7 @@ class _TypeChecker:
         if len(trait_names) < 2:
             return
         normalized = self._normalized_object_name(type_name)
-        info = self.object_types.get(normalized) if normalized is not None else None
+        info = self._object_type_info(normalized) if normalized is not None else None
         display = self._display_type_name(type_name)
         for index, first_name in enumerate(trait_names):
             first_trait = self.traits.get(first_name)
@@ -1469,11 +1517,30 @@ class _TypeChecker:
             self._annotation_type(type_node)
             for type_node in (type_arguments if isinstance(type_arguments, list) else [])
         ]
-        callee_name = self._identifier_name(callee)
-        if callee_name is None:
-            # Still walk the callee expression so nested checks are not lost.
-            self._infer(callee)
-            return ANY
+        module_callee = self._module_callee(callee)
+        if module_callee is not None:
+            info, member_name, label = module_callee
+            signatures = info.functions.get(member_name)
+            if not signatures:
+                self._error(
+                    f"module '{info.name}' has no function named '{member_name}'",
+                    [f"exports: {', '.join(sorted(info.exports))}"],
+                    where='function call',
+                )
+                return ANY
+            alias = label.split('.', 1)[0]
+            if label not in self.functions:
+                self.functions[label] = [
+                    self._qualify_signature(signature, info, alias)
+                    for signature in signatures
+                ]
+            callee_name = label
+        else:
+            callee_name = self._identifier_name(callee)
+            if callee_name is None:
+                # Still walk the callee expression so nested checks are not lost.
+                self._infer(callee)
+                return ANY
 
         builtins = self._builtins()
         if callee_name in builtins:
@@ -2215,7 +2282,7 @@ class _TypeChecker:
         method_name: str,
         argument_types: list[str],
     ) -> Optional[str]:
-        info = self.object_types.get(object_name)
+        info = self._object_type_info(object_name)
         if info is None:
             return None
         qualified: list[tuple[str, list[_Signature]]] = []
@@ -2298,6 +2365,87 @@ class _TypeChecker:
             return matches[0].return_type
         return None
 
+    def _infer_module_method(
+        self,
+        alias: str,
+        info: _ModuleTypeInfo,
+        method_name: str,
+        argument_types: list[str],
+    ) -> str:
+        signatures = info.functions.get(method_name)
+        if not signatures:
+            variable_type = info.variables.get(method_name)
+            if isinstance(variable_type, str) and variable_type.startswith('fun['):
+                signature = self._signature_from_function_type(variable_type, method_name)
+                if signature is not None:
+                    signatures = [signature]
+        if not signatures:
+            self._error(
+                f"module '{info.name}' has no function named '{method_name}'",
+                [f"exports: {', '.join(sorted(info.exports))}"],
+                where='function call',
+            )
+            return ANY
+        label = f'{alias}.{method_name}'
+        if label not in self.functions:
+            self.functions[label] = [
+                self._qualify_signature(signature, info, alias)
+                for signature in signatures
+            ]
+        candidates = self.functions[label]
+        matches = [
+            candidate for candidate in candidates
+            if self._signature_matches(candidate, argument_types)
+        ]
+        if matches:
+            selected = matches[0]
+            mapping = self._infer_type_argument_mapping(
+                selected, argument_types
+            )
+            if mapping:
+                selected = self._specialize_signature(selected, mapping)
+            self._check_type_parameter_constraints(
+                selected, mapping, f'function call: {label}'
+            )
+            return selected.return_type
+        candidate = candidates[0]
+        if candidate.variadic:
+            if len(argument_types) < candidate.min_argc:
+                self._error(
+                    f"Function '{label}' received too few arguments",
+                    [f"expected at least {candidate.min_argc}"],
+                    where=f'function call: {label}',
+                )
+        elif len(argument_types) > len(candidate.parameter_types):
+            self._error(
+                f"Function '{label}' received too many arguments",
+                [f"expected at most {len(candidate.parameter_types)}"],
+                where=f'function call: {label}',
+            )
+        elif len(argument_types) < candidate.min_argc:
+            self._error(
+                f"Function '{label}' received too few arguments",
+                [f"expected at least {candidate.min_argc}"],
+                where=f'function call: {label}',
+            )
+        else:
+            for index, argument_type in enumerate(argument_types):
+                expected = candidate.parameter_types[index]
+                if argument_type == ANY:
+                    continue
+                if not self._assignable(
+                    expected,
+                    argument_type,
+                    candidate.parameter_weak[index],
+                ):
+                    self._assign_error(
+                        f'function call: {label}',
+                        expected,
+                        argument_type,
+                    )
+                    break
+        return candidate.return_type
+
     def _infer_method_call(self, value: Any) -> str:
         if not isinstance(value, dict):
             return ANY
@@ -2321,6 +2469,13 @@ class _TypeChecker:
                 return ANY
             return self._infer_native_method(owner_name, method_name, argument_types, argument_nodes)
         owner_type = self._infer(owner_node)
+        if isinstance(owner_type, str) and owner_type.startswith('module:'):
+            module_name = owner_type.split(':', 1)[1]
+            info = self.module_values.get(module_name)
+            if info is not None and method_name is not None:
+                return self._infer_module_method(
+                    module_name, info, method_name, argument_types
+                )
         if isinstance(owner_type, str):
             owner_trait = self._trait_name(owner_type)
             if owner_trait is not None and method_name is not None:
@@ -2360,7 +2515,7 @@ class _TypeChecker:
                 return self._infer_native_method(owner_head, method_name, argument_types)
         if method_name is not None and isinstance(owner_type, str) and owner_type.startswith(f'{OBJECT}:'):
             object_name = owner_type.split(':', 1)[1]
-            info = self.object_types.get(object_name)
+            info = self._object_type_info(object_name)
             if info is not None:
                 methods = info.get('methods', {}).get(method_name)
                 if methods:
@@ -2532,6 +2687,31 @@ class _TypeChecker:
         property_name = self._identifier_name(value.get('property'))
         if property_name is None:
             return ANY
+        if isinstance(target_type, str) and target_type.startswith('module:'):
+            module_name = target_type.split(':', 1)[1]
+            info = self.module_values.get(module_name)
+            if info is not None:
+                if property_name in info.functions:
+                    signatures = info.functions[property_name]
+                    if len(signatures) == 1 and signatures[0].function_type:
+                        return self._qualify_signature(
+                            signatures[0], info, module_name
+                        ).function_type or FUNCTION
+                    return FUNCTION
+                if property_name in info.variables:
+                    return self._qualify_type_text(
+                        info.variables[property_name], info, module_name
+                    )
+                if property_name in info.object_types:
+                    return f'{OBJECT}:{module_name}.{property_name}'
+                if property_name in info.traits:
+                    return f'{OBJECT}:{module_name}.{property_name}'
+                self._error(
+                    f"module '{module_name}' has no member named '{property_name}'",
+                    [f"exports: {', '.join(sorted(info.exports))}"],
+                    where='member access',
+                )
+                return ANY
         if target_type == OBJ:
             self._error(
                 "member access on 'obj' requires a cast or trait",
@@ -2572,7 +2752,7 @@ class _TypeChecker:
                     where='member access',
                 )
                 return ANY
-            info = self.object_types.get(object_name)
+            info = self._object_type_info(object_name)
             if info is not None:
                 props = info.get('props', {})
                 if property_name in props:
@@ -2826,7 +3006,7 @@ class _TypeChecker:
                 return 'tup[' + ', '.join(argument_types) + ']'
             return ANY
         object_name = name
-        info = self.object_types.get(object_name)
+        info = self._object_type_info(object_name)
         if info is None:
             return f'{OBJECT}:{object_name}'
         constructors: list[_Signature] = info.get('methods', {}).get('constructor', [])
@@ -3100,7 +3280,7 @@ class _TypeChecker:
         object_props: Optional[dict] = None
         if isinstance(source_type, str) and source_type.startswith(f'{OBJECT}:'):
             object_name = source_type.split(':', 1)[1]
-            info = self.object_types.get(object_name)
+            info = self._object_type_info(object_name)
             if info is not None:
                 object_props = info.get('props', {})
 
@@ -3364,7 +3544,7 @@ class _TypeChecker:
             return
         if kind == 'object':
             type_name = pattern.get('type_name')
-            info = self.object_types.get(type_name)
+            info = self._object_type_info(type_name)
             if info is None:
                 self._error(
                     f"unknown object type '{type_name}' in match pattern",
@@ -3495,7 +3675,7 @@ class _TypeChecker:
         name = subject_type
         if isinstance(name, str) and name.startswith(OBJECT + ':'):
             name = name[len(OBJECT) + 1:]
-        info = self.object_types.get(name) if isinstance(name, str) else None
+        info = self._object_type_info(name) if isinstance(name, str) else None
         if info is not None and info.get('is_enum'):
             variants = [v for v in info.get('variants', []) if isinstance(v, str)]
             covered = {
@@ -4209,6 +4389,364 @@ class _TypeChecker:
                 self.current_type_parameters,
                 self.current_type_parameter_constraints,
             ) = previous
+
+    # ---------------------------------------------------------------- modules
+    def _infer_use(self, value: Any) -> str:
+        if not isinstance(value, dict):
+            return ANY
+        info = self._load_import(value)
+        if info is None:
+            return ANY
+        if info.errors:
+            details = []
+            for error in info.errors[:3]:
+                text = str(error).replace('\r', '').strip()
+                if not text:
+                    continue
+                compact = " ".join(
+                    part.strip()
+                    for part in text.splitlines()
+                    if part.strip()
+                )
+                details.append(compact[:500])
+            self._error(
+                f"module '{info.name}' has type errors",
+                details,
+                where='import',
+            )
+        if value.get('wildcard'):
+            self._import_wildcard(info)
+        else:
+            alias = value.get('alias') or info.name
+            self._bind_module_alias(alias, info)
+        return ANY
+
+    def _load_import(self, value: dict) -> Optional[_ModuleTypeInfo]:
+        kind = value.get('kind', 'name')
+        name = value.get('name', '')
+        base_value = value.get('base')
+        base = Path(base_value) if isinstance(base_value, str) and base_value else None
+        try:
+            loader = ModuleLoader(state=get_state())
+            path = loader.resolve(kind, name, base)
+        except Exception as error:
+            self._error(
+                f"cannot resolve module '{name}'",
+                [str(error)],
+                where='import',
+            )
+            return None
+        return self._load_module_info(path)
+
+    def _load_module_info(self, path: Path) -> Optional[_ModuleTypeInfo]:
+        resolved = path.resolve()
+        key = str(resolved)
+        cached = self.module_cache.get(key)
+        if cached is not None:
+            if cached.loading:
+                self._error(
+                    f"cyclic module import involving '{cached.name}'",
+                    ['modules cannot import each other in a cycle'],
+                    where='import',
+                )
+            return cached
+        if not resolved.exists():
+            self._error(
+                f"cannot find module '{resolved.stem}'",
+                [f"looked for {resolved}"],
+                where='import',
+            )
+            return None
+        if resolved.is_dir():
+            sources = sorted(resolved.glob('*.po'))
+            module_name = resolved.name
+        else:
+            sources = [resolved]
+            module_name = resolved.stem
+        if not sources:
+            self._error(
+                f"module directory '{resolved}' is empty",
+                ['add at least one .po file'],
+                where='import',
+            )
+            return None
+
+        info = _ModuleTypeInfo(module_name, resolved)
+        info.loading = True
+        self.module_cache[key] = info
+        state = get_state()
+        saved_alias = state.type_alias
+        saved_user_types = state.user_types
+        state.type_alias = {}
+        state.user_types = set()
+        try:
+            program_ast: list[Any] = []
+            for source in sources:
+                try:
+                    content = source.read_text(encoding='utf-8')
+                except OSError as error:
+                    info.errors.append(powang_error_format(
+                        'MODULE', f'module: {source}',
+                        'cannot read module file', [str(error)],
+                    ))
+                    continue
+                try:
+                    parser = Parser(content, source_path=source)
+                    program_ast.extend(parser.parse())
+                except PowangError as error:
+                    info.errors.append(error)
+                except Exception as error:
+                    info.errors.append(powang_error_format(
+                        'MODULE', f'module: {source}',
+                        'module parse failed', [str(error)],
+                    ))
+            if program_ast:
+                child = _TypeChecker(
+                    str(sources[0]),
+                    module_cache=self.module_cache,
+                )
+                child.run(program_ast)
+                info.errors.extend(child.errors)
+                info.all_object_types = dict(child.object_types)
+                info.all_traits = dict(child.traits)
+                self._collect_module_exports(info, child, program_ast)
+        finally:
+            state.type_alias = saved_alias
+            state.user_types = saved_user_types
+            info.loading = False
+        return info
+
+    @staticmethod
+    def _exported_statement_name(statement: dict) -> Optional[str]:
+        statement_type = statement.get('type')
+        value = statement.get('value')
+        if not isinstance(value, dict):
+            return None
+        if statement_type in {
+            ParserTokenType.DECLARATION_FUN,
+            ParserTokenType.TYPE_DECLARATION,
+            ParserTokenType.TRAIT_DECLARATION,
+            ParserTokenType.DECLARATION_UNDEFINED,
+            ParserTokenType.DECLARATION_TYPED_VAR,
+            ParserTokenType.DECLARATION_INTERPRET,
+            ParserTokenType.CONST_DECLARATION,
+        }:
+            identifier = value.get('identifier')
+            if isinstance(identifier, dict):
+                return identifier.get('value')
+        if statement_type == ParserTokenType.EXTERN_REFERENCE:
+            powang = value.get('powang')
+            if isinstance(powang, dict):
+                powang_value = powang.get('value')
+                if isinstance(powang_value, dict):
+                    identifier = powang_value.get('identifier')
+                    if isinstance(identifier, dict):
+                        return identifier.get('value')
+        return None
+
+    @staticmethod
+    def _exported_statement_kind(statement: dict) -> str:
+        statement_type = statement.get('type')
+        if statement_type in {
+            ParserTokenType.DECLARATION_FUN,
+            ParserTokenType.EXTERN_REFERENCE,
+        }:
+            return 'function'
+        if statement_type == ParserTokenType.TYPE_DECLARATION:
+            return 'type'
+        if statement_type == ParserTokenType.TRAIT_DECLARATION:
+            return 'trait'
+        return 'variable'
+
+    def _collect_module_exports(
+        self,
+        info: _ModuleTypeInfo,
+        child: '_TypeChecker',
+        program_ast: list[Any],
+    ) -> None:
+        exported: dict[str, str] = {}
+        has_exports = False
+        for statement in program_ast:
+            if not isinstance(statement, dict) or not statement.get('exported'):
+                continue
+            has_exports = True
+            name = self._exported_statement_name(statement)
+            if name is None:
+                continue
+            exported[name] = self._exported_statement_kind(statement)
+        if not has_exports:
+            info.legacy = True
+            for name in child.functions:
+                exported.setdefault(name, 'function')
+            for name in child.object_types:
+                if name == PROJECT:
+                    continue
+                exported.setdefault(name, 'type')
+            for name in child.traits:
+                exported.setdefault(name, 'trait')
+            for name, variable in child.scopes[0].items():
+                if name == 'project':
+                    continue
+                if isinstance(variable.type, str) and \
+                        variable.type.startswith('module:'):
+                    continue
+                exported.setdefault(name, 'variable')
+        info.exports = exported
+        for name, kind in exported.items():
+            if kind == 'function':
+                info.functions[name] = list(child.functions.get(name, []))
+            elif kind == 'type':
+                type_info = child.object_types.get(name)
+                if type_info is not None:
+                    info.object_types[name] = type_info
+            elif kind == 'trait':
+                trait_info = child.traits.get(name)
+                if trait_info is not None:
+                    info.traits[name] = trait_info
+            elif kind == 'variable':
+                variable = child.scopes[0].get(name)
+                if variable is not None:
+                    info.variables[name] = variable.type
+
+    def _import_wildcard(self, info: _ModuleTypeInfo) -> None:
+        for name, signatures in info.functions.items():
+            if name in self.functions:
+                self._error(
+                    f"wildcard import collides with function '{name}'",
+                    [f"module '{info.name}' exports '{name}'"],
+                    where='import',
+                )
+                continue
+            self.functions[name] = list(signatures)
+        for name, type_info in info.object_types.items():
+            if name in self.object_types:
+                self._error(
+                    f"wildcard import collides with type '{name}'",
+                    [f"module '{info.name}' exports '{name}'"],
+                    where='import',
+                )
+                continue
+            self.object_types[name] = copy.deepcopy(type_info)
+        for name, trait_info in info.traits.items():
+            if name in self.traits:
+                self._error(
+                    f"wildcard import collides with trait '{name}'",
+                    [f"module '{info.name}' exports '{name}'"],
+                    where='import',
+                )
+                continue
+            self.traits[name] = copy.deepcopy(trait_info)
+        for name, type_name in info.variables.items():
+            if name in self.scopes[-1]:
+                self._error(
+                    f"wildcard import collides with variable '{name}'",
+                    [f"module '{info.name}' exports '{name}'"],
+                    where='import',
+                )
+                continue
+            self.scopes[-1][name] = _VariableInfo(
+                self._qualify_type_text(type_name, info, info.name),
+                True,
+                False,
+            )
+
+    def _bind_module_alias(self, alias: str, info: _ModuleTypeInfo) -> None:
+        if alias in self.scopes[-1]:
+            self._error(
+                f"module alias '{alias}' is already declared",
+                ['choose a different alias'],
+                where='import',
+            )
+            return
+        self.scopes[-1][alias] = _VariableInfo(f'module:{alias}', True, False)
+        self.module_values[alias] = info
+        self.imported_modules[alias] = info
+        for name, type_info in info.object_types.items():
+            qualified = f'{alias}.{name}'
+            self.object_types[qualified] = copy.deepcopy(type_info)
+            self.type_owners[qualified] = (info, name)
+        for name, trait_info in info.traits.items():
+            qualified = f'{alias}.{name}'
+            self.traits[qualified] = copy.deepcopy(trait_info)
+
+    @staticmethod
+    def _qualify_type_text(
+        text: str,
+        info: _ModuleTypeInfo,
+        alias: str,
+    ) -> str:
+        if not isinstance(text, str):
+            return text
+        for name, kind in info.exports.items():
+            if kind in {'type', 'trait'}:
+                text = re.sub(
+                    rf'\bobject:{re.escape(name)}\b',
+                    f'object:{alias}.{name}',
+                    text,
+                )
+        return text
+
+    def _qualify_signature(
+        self,
+        signature: _Signature,
+        info: _ModuleTypeInfo,
+        alias: str,
+    ) -> _Signature:
+        constraints: dict[str, list[str]] = {}
+        for parameter_name, trait_names in signature.type_parameter_constraints.items():
+            constraints[parameter_name] = [
+                f'{alias}.{trait_name}' if trait_name in info.traits else trait_name
+                for trait_name in trait_names
+            ]
+        return _Signature(
+            signature.name,
+            list(signature.parameter_names),
+            [
+                self._qualify_type_text(type_text, info, alias)
+                for type_text in signature.parameter_types
+            ],
+            list(signature.parameter_weak),
+            signature.min_argc,
+            self._qualify_type_text(signature.return_type, info, alias),
+            signature.return_weak,
+            signature.allows_error,
+            self._qualify_type_text(signature.function_type or '', info, alias),
+            list(signature.type_parameters),
+            signature.variadic,
+            signature.variadic_index,
+            self._qualify_type_text(signature.variadic_type, info, alias)
+            if signature.variadic_type is not None else None,
+            constraints,
+        )
+
+    def _module_callee(
+        self,
+        callee: Any,
+    ) -> Optional[tuple[_ModuleTypeInfo, str, str]]:
+        if not isinstance(callee, dict) or \
+                callee.get('type') != ParserTokenType.ACCESS_EXPRESSION:
+            return None
+        access = callee.get('value')
+        if not isinstance(access, dict):
+            return None
+        alias = self._identifier_name(access.get('target'))
+        member_name = self._identifier_name(access.get('property'))
+        if alias is None or member_name is None:
+            return None
+        info = self.module_values.get(alias)
+        if info is None:
+            return None
+        return info, member_name, f'{alias}.{member_name}'
+
+    def _object_type_info(self, object_name: str) -> Optional[dict]:
+        info = self.object_types.get(object_name)
+        if info is not None:
+            return info
+        owner = self.type_owners.get(object_name)
+        if owner is not None:
+            module_info, original_name = owner
+            return module_info.all_object_types.get(original_name)
+        return None
 
     # ----------------------------------------------------------------- extern
     def _infer_extern(self, value: Any) -> str:

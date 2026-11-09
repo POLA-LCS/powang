@@ -182,6 +182,9 @@ class NewFeatureExampleTests(unittest.TestCase):
             "qualified",
         )
 
+    def test_cross_module_example(self) -> None:
+        self.check("cross-module.po", "25\n5\n2\nAda\n")
+
 
 class AllExamplesTests(unittest.TestCase):
     """Every example is a runnable showcase, not just the three original ones."""

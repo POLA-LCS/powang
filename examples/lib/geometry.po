@@ -1,0 +1,12 @@
+module geometry;
+
+export type Point[+] {
+    | x: int;
+    | y: int;
+}
+
+export fun distance(a: Point, b: Point): int {
+    dx: int = a.x - b.x;
+    dy: int = a.y - b.y;
+    return dx * dx + dy * dy;
+}

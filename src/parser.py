@@ -235,6 +235,8 @@ class Parser:
         }).toDict()
 
     def helper_UseModule(self):
+        line = self.next.line if self.next is not None else None
+        column = self.next.column if self.next is not None else None
         if self.next.type == LexerTokenType.IDENTIFIER:
             module_kind = 'name'
             module_spec = self.Identifier()['value']
@@ -275,6 +277,8 @@ class Parser:
             'alias': alias,
             'wildcard': wildcard,
             'base': str(self.source_path) if self.source_path is not None else None,
+            'line': line,
+            'column': column,
         }).toDict()
 
     def helper_TypeObjectDeclaration(self, identifier: DictRepr, is_signature: bool = False):
@@ -1892,6 +1896,7 @@ class Parser:
                 if expr.get('type') in {
                     LexerTokenType.IDENTIFIER,
                     ParserTokenType.TYPE_REFERENCE,
+                    ParserTokenType.ACCESS_EXPRESSION,
                 } and self._dot_starts_instantiation():
                     expr = self.InstantiationExpression(expr)
                     continue
@@ -2016,6 +2021,21 @@ class Parser:
     def InstantiationExpression(self, target: DictRepr) -> DictRepr:
         if target.get('type') == ParserTokenType.TYPE_REFERENCE:
             type_reference = copy.deepcopy(target['value'])
+        elif target.get('type') == ParserTokenType.ACCESS_EXPRESSION:
+            access = target.get('value')
+            target_name = None
+            member_name = None
+            if isinstance(access, dict):
+                target_node = access.get('target')
+                property_node = access.get('property')
+                target_name = target_node.get('value') if isinstance(target_node, dict) else None
+                member_name = property_node.get('value') if isinstance(property_node, dict) else None
+            type_reference = {
+                'name': f'{target_name}.{member_name}'
+                if isinstance(target_name, str) and isinstance(member_name, str)
+                else '',
+                'type_parameters': [],
+            }
         else:
             type_reference = {'name': target['value'], 'type_parameters': []}
         type_name = type_reference['name']
@@ -2484,6 +2504,13 @@ class Parser:
             start_token = self.next
             type_identifier: str = self.Identifier()['value']
             original_identifier = type_identifier
+            if self.next.type == LexerTokenType.DOT:
+                state = self._saveParserState()
+                self.advance('qualified type name')
+                if self.next.type == LexerTokenType.IDENTIFIER:
+                    type_identifier = f"{type_identifier}.{self.Identifier()['value']}"
+                else:
+                    self._restoreParserState(state)
             generics: list = []
             variadic: bool = False
             element_type: Optional[DictRepr] = None
