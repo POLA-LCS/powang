@@ -232,6 +232,24 @@ class OperatorDiagnosticTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("built-in operator trait", result.combined)
 
+    def test_reserved_operator_trait_name_for_types(self) -> None:
+        result = run_source(
+            "type Add[+] {\n"
+            "    | x: int;\n"
+            "}\n",
+            args=("--check",),
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("reserved for operator overloading", result.combined)
+        runtime = run_source(
+            "type Add[+] {\n"
+            "    | x: int;\n"
+            "}\n",
+            args=("--no-check",),
+        )
+        self.assertEqual(runtime.returncode, 1)
+        self.assertIn("built-in operator trait", runtime.combined)
+
     def test_compare_must_return_int_at_check_time(self) -> None:
         result = run_source(
             "type Bad[+] {\n"

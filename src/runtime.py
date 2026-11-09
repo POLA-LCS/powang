@@ -3487,6 +3487,13 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.TYPE_DECLARATION:
             identifier = getValidIdentifier(where, expr_value['identifier'])
+            if identifier in OPERATOR_TRAIT_NAMES:
+                raise powang_throw(powang_error_format(
+                    'TYPE',
+                    where,
+                    f"'{identifier}' is a built-in operator trait",
+                    ['choose a different type name'],
+                ))
             
             ## Enum declaration: a finite set of named constant instances.
             if expr_value.get('is_enum'):

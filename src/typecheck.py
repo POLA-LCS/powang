@@ -4479,6 +4479,13 @@ class _TypeChecker:
         name = self._identifier_name(value.get('identifier'))
         if name is None:
             return ANY
+        if name in OPERATOR_TRAIT_NAMES:
+            self._error(
+                f"type name '{name}' is reserved for operator overloading",
+                ['choose a different type name'],
+                where='type declaration',
+            )
+            return ANY
         info = {
             'props': {},
             'methods': {},
