@@ -188,6 +188,18 @@ class NewFeatureExampleTests(unittest.TestCase):
     def test_async_example(self) -> None:
         self.check("async.po", "10\n15\n12\npending\n14\ndone\n")
 
+    def test_operator_overloading_example(self) -> None:
+        self.check(
+            "operator-overloading.po",
+            "sum=(4,6)",
+            "difference=(-2,-2)",
+            "scaled=(3,6)",
+            "negated=(-1,-2)",
+            "less=true",
+            "equal=false",
+            "compound=(4,6)",
+        )
+
 
 class AllExamplesTests(unittest.TestCase):
     """Every example is a runnable showcase, not just the three original ones."""

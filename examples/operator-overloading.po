@@ -1,0 +1,43 @@
+## Operator overloading uses the built-in Add, Subtract, Multiply, Negate
+## and Compare traits. A type overloads an operator by declaring the matching
+## instance method.
+
+type Vector[+] {
+    | x: int;
+    | y: int;
+
+    fun this.add(other: Vector): Vector >> Vector.[this.x + other.x, this.y + other.y];
+    fun this.subtract(other: Vector): Vector >> Vector.[this.x - other.x, this.y - other.y];
+    fun this.multiply(scale: int): Vector >> Vector.[this.x * scale, this.y * scale];
+    fun this.negate(): Vector >> Vector.[-this.x, -this.y];
+    fun this.compare(other: Vector): int {
+        if this.x < other.x {
+            return -1;
+        }
+        if this.x > other.x {
+            return 1;
+        }
+        return this.y - other.y;
+    }
+}
+
+left := Vector.[1, 2];
+right := Vector.[3, 4];
+
+sum := left + right;
+print($"sum=({sum.x},{sum.y})"); print("\n");
+
+difference := left - right;
+print($"difference=({difference.x},{difference.y})"); print("\n");
+
+scaled := left * 3;
+print($"scaled=({scaled.x},{scaled.y})"); print("\n");
+
+negated := -left;
+print($"negated=({negated.x},{negated.y})"); print("\n");
+
+print($"less={left < right}"); print("\n");
+print($"equal={left == right}"); print("\n");
+
+left += right;
+print($"compound=({left.x},{left.y})"); print("\n");

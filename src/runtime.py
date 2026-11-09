@@ -9,6 +9,14 @@ from .lexer import *
 from .typecheck import type_check
 from .simplify import simplify_program
 from .module_loader import get_module_loader
+from .operator_traits import (
+    BINARY_OPERATOR_TRAITS,
+    COMPARISON_OPERATOR_TRAIT,
+    COMPARISON_OPERATORS,
+    OPERATOR_TRAIT_NAMES,
+    UNARY_OPERATOR_TRAITS,
+    trait_method,
+)
 from . import typespec as _typespec
 
 import math
@@ -558,7 +566,114 @@ def assignWithChecks(where: str, target_value: PowangAny, right_value: PowangAny
     target_value.weak.has_value = right_value.weak.has_value
     return target_value
 
-def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bool) -> PowangAny:
+def _operator_candidate(
+    where: str,
+    receiver: PowangObjectType,
+    trait_name: str | None,
+    method_name: str,
+    arguments: list[PowangAny],
+) -> Optional[PowangFunction]:
+    if trait_name is not None:
+        methods = receiver.getTraitMethods(trait_name, method_name)
+        if methods is None:
+            methods = receiver.getMethods(method_name, True)
+    else:
+        methods = receiver.getMethods(method_name, True)
+        if methods is None:
+            qualified = receiver.getAllTraitMethods(method_name)
+            if len(qualified) > 1:
+                raise powang_throw(powang_error_format(
+                    'OPERATION',
+                    where,
+                    f"operator method '{method_name}' is ambiguous",
+                    [
+                        'the type qualifies the method under multiple traits',
+                        'annotate the value with the intended trait',
+                    ],
+                ))
+            methods = qualified or None
+    if methods is None:
+        return None
+    candidate = getFunctionCandidate(methods, arguments)
+    if getattr(candidate, 'is_async', False):
+        raise powang_throw(powang_error_format(
+            'OPERATION',
+            where,
+            'operator methods cannot be async',
+            ['remove async from the operator method'],
+        ))
+    return candidate
+
+
+def _call_operator_method(
+    where: str,
+    receiver: PowangObjectType,
+    trait_name: str | None,
+    method_name: str,
+    arguments: list[PowangAny],
+    position: tuple[int, int] | None = None,
+) -> Optional[PowangAny]:
+    candidate = _operator_candidate(
+        where, receiver, trait_name, method_name, arguments
+    )
+    if candidate is None:
+        return None
+    return callMethod(
+        where,
+        receiver,
+        method_name,
+        candidate,
+        arguments,
+        position=position,
+    )
+
+
+def _call_comparison_operator(
+    operator: str,
+    receiver: PowangObjectType,
+    right: PowangAny,
+    position: tuple[int, int] | None = None,
+    trait_name: str | None = None,
+) -> Optional[PowangBoolean]:
+    where = f'operator {operator}'
+    result = _call_operator_method(
+        where,
+        receiver,
+        trait_name,
+        trait_method(COMPARISON_OPERATOR_TRAIT),
+        [right],
+        position,
+    )
+    if result is None:
+        return None
+    require(result.type == PowangInteger.type, lambda: powang_error_format(
+        'OPERATION',
+        where,
+        'compare must return int',
+        [f"but {result.type} was encountered"],
+    ))
+    comparison = result.data
+    if operator == '==':
+        return PowangBoolean(comparison == 0)
+    if operator == '!=':
+        return PowangBoolean(comparison != 0)
+    if operator == '<':
+        return PowangBoolean(comparison < 0)
+    if operator == '<=':
+        return PowangBoolean(comparison <= 0)
+    if operator == '>':
+        return PowangBoolean(comparison > 0)
+    return PowangBoolean(comparison >= 0)
+
+
+def performOperation(
+    operator: str,
+    left: PowangAny,
+    right: PowangAny,
+    typed: bool,
+    position: tuple[int, int] | None = None,
+    trait_name: str | None = None,
+) -> PowangAny:
     if left.type == PowangAnyType.type:
         left = unwrap_any_value(left)
     if right.type == PowangAnyType.type:
@@ -568,6 +683,26 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
             'operation', f'nova weak {left.type}', operator, right.type))
         require(right.type != PowangNova.type and right.weak.has_value, lambda: powang_error_unsupported_operation(
             'operation', left.type, operator, f'nova weak {right.type}'))
+    if left.type == PowangObjectType.type:
+        if operator in COMPARISON_OPERATORS:
+            comparison = _call_comparison_operator(
+                operator, left, right, position, trait_name
+            )
+            if comparison is not None:
+                return comparison
+        else:
+            default_trait_name = BINARY_OPERATOR_TRAITS.get(operator)
+            if default_trait_name is not None:
+                overloaded = _call_operator_method(
+                    f'operator {operator}',
+                    left,
+                    trait_name,
+                    trait_method(default_trait_name),
+                    [right],
+                    position,
+                )
+                if overloaded is not None:
+                    return overloaded
     result: PowangAny | None = None
     match operator:
         case '+' : result = left + right
@@ -589,7 +724,9 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
                     return result
                 casted = PowangTypeCast(left.type, right)
                 require(casted is not None, lambda: powang_error_unsupported_operation('comparisson', left.type, operator, right.type))
-                return performOperation(operator, left, casted, False)
+                return performOperation(
+                    operator, left, casted, False, position, trait_name
+                )
             try:
                 match operator:
                     case '==':
@@ -613,11 +750,15 @@ def performOperation(operator: str, left: PowangAny, right: PowangAny, typed: bo
         if typed:
             casted = PowangTypeCast(right.type, left)
             require(casted is not None, lambda: powang_error_unsupported_operation('implicit typed operation', left.type, operator, right.type))
-            return performOperation(operator, casted, right, False)
+            return performOperation(
+                operator, casted, right, False, position, trait_name
+            )
         else:
             casted = PowangTypeCast(left.type, right)
             require(casted is not None, lambda: powang_error_unsupported_operation('implicit operation', left.type, operator, right.type))
-        return performOperation(operator, left, casted, typed)
+        return performOperation(
+            operator, left, casted, typed, position, trait_name
+        )
     return result
 
 def getIndexedValue(where: str, expression: DictRepr, subscript_check: bool):
@@ -2470,6 +2611,17 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                     if unary_right.type == PowangArray.type:
                         return PowangArray(unary_right.data[::-1])
                 case '-':
+                    if unary_right.type == PowangObjectType.type:
+                        overloaded = _call_operator_method(
+                            'operator -',
+                            unary_right,
+                            expr_value.get('resolved_operator_trait'),
+                            trait_method(UNARY_OPERATOR_TRAITS['-']),
+                            [],
+                            _node_position(expr_value.get('operator')),
+                        )
+                        if overloaded is not None:
+                            return overloaded
                     if unary_right.type == PowangInteger.type:
                         return PowangInteger(-unary_right.data)
                     if unary_right.type == PowangNumber.type:
@@ -2622,7 +2774,14 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
                 return PowangBoolean.cast(evaluateAstExpression(expr_value['right']))
 
             binary_right = evaluateAstExpression(expr_value['right'])
-            return performOperation(binary_operator, binary_left, binary_right, expr_value['typed'])
+            return performOperation(
+                binary_operator,
+                binary_left,
+                binary_right,
+                expr_value['typed'],
+                _node_position(expr_value.get('operator')),
+                expr_value.get('resolved_operator_trait'),
+            )
 
         case ParserTokenType.DECLARATION_UNDEFINED:
             undefined_identifier = getValidIdentifier(where, expr_value['identifier'])
@@ -3290,6 +3449,13 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case ParserTokenType.TRAIT_DECLARATION:
             trait_name = getValidIdentifier(where, expr_value['identifier'])
+            if trait_name in OPERATOR_TRAIT_NAMES:
+                raise powang_throw(powang_error_format(
+                    'TRAIT',
+                    where,
+                    f"'{trait_name}' is a built-in operator trait",
+                    ['choose a different trait name'],
+                ))
             trait = TraitRuntimeInfo(trait_name)
             for prop in expr_value.get('properties', []):
                 prop_value = prop.get('value') if isinstance(prop, dict) else None

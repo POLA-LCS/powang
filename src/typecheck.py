@@ -50,6 +50,15 @@ from .error import (
 )
 from .lexer.token import LexerTokenType, ParserTokenType
 from .builtins.native_methods import NATIVE_METHOD_TYPES, NATIVE_METHOD_NAMES
+from .operator_traits import (
+    BINARY_OPERATOR_TRAITS,
+    COMPARISON_OPERATOR_TRAIT,
+    OPERATOR_TRAITS,
+    OPERATOR_TRAIT_NAMES,
+    UNARY_OPERATOR_TRAITS,
+    trait_method,
+    trait_return_type,
+)
 HANDLE = PowangHandle.type
 PROJECT = PowangProject.type
 ANY = PowangAnyType.type
@@ -390,9 +399,37 @@ class _TypeChecker:
         self.traits: dict[str, _TraitInfo] = {}
         self.current_type_parameter_constraints: dict[str, list[str]] = {}
         self.in_trait_body: Optional[tuple[str, str]] = None
+        self._install_operator_traits()
         self.loop_labels: list[Optional[str]] = []
         self.loop_break_flags: list[bool] = []
         self._position: Optional[tuple[int, int]] = None
+
+    def _install_operator_traits(self) -> None:
+        for trait_name, spec in OPERATOR_TRAITS.items():
+            trait = _TraitInfo(trait_name)
+            method_name = trait_method(trait_name)
+            parameter_types = [
+                str(parameter) for parameter in spec.get('parameters', ())
+            ]
+            return_type = trait_return_type(trait_name)
+            signature = _Signature(
+                name=method_name,
+                parameter_names=[
+                    f'arg{index}' for index in range(len(parameter_types))
+                ],
+                parameter_types=parameter_types,
+                parameter_weak=[False for _ in parameter_types],
+                min_argc=len(parameter_types),
+                return_type=return_type,
+                return_weak=False,
+                allows_error=False,
+                function_type='fun[' + ', '.join(
+                    [*parameter_types, return_type]
+                ) + ']',
+            )
+            trait.methods[method_name] = [signature]
+            trait.required_methods.add(method_name)
+            self.traits[trait_name] = trait
 
     # ------------------------------------------------------------------ utils
     def _scope_push(self):
@@ -1258,6 +1295,11 @@ class _TypeChecker:
         operator = value.get('operator')
         operator_name = operator.get('value') if isinstance(operator, dict) else None
         right_type = self._infer(value.get('right'))
+        overload = self._infer_unary_operator_overload(
+            value, operator_name, right_type
+        )
+        if overload is not None:
+            return overload
         if operator_name == '!':
             return BOOLEAN
         if operator_name == '-':
@@ -1267,6 +1309,258 @@ class _TypeChecker:
         if operator_name == '+':
             return right_type
         return ANY
+
+    def _operator_method_signatures(
+        self,
+        type_name: str,
+        trait_name: str,
+        method_name: str,
+        where: str,
+    ) -> list[tuple[str, _Signature]]:
+        trait = self.traits.get(trait_name)
+        if trait is None or method_name not in trait.methods:
+            return []
+        normalized = self._normalized_object_name(type_name)
+        if normalized is not None and normalized in self.traits:
+            return [
+                (normalized, signature)
+                for signature in self.traits[normalized].methods.get(
+                    method_name, []
+                )
+            ]
+        if normalized is not None:
+            info = self._object_type_info(normalized)
+            if info is None:
+                return []
+            qualified = info.get('trait_methods', {}).get(
+                trait_name, {}
+            ).get(method_name)
+            if qualified:
+                return [(trait_name, signature) for signature in qualified]
+            methods = info.get('methods', {}).get(method_name, [])
+            if methods:
+                return [(trait_name, signature) for signature in methods]
+            found: list[tuple[str, _Signature]] = []
+            for qualifier, members in info.get('trait_methods', {}).items():
+                signatures = members.get(method_name, [])
+                found.extend(
+                    (qualifier, signature) for signature in signatures
+                )
+            return found
+        constraints = self.current_type_parameter_constraints.get(type_name)
+        if constraints:
+            available = self._trait_signatures_for_method(
+                constraints, method_name
+            )
+            signatures: list[tuple[str, _Signature]] = []
+            for constraint_name, trait_signatures in available:
+                signatures.extend(
+                    (constraint_name, signature)
+                    for signature in trait_signatures
+                )
+            return signatures
+        return []
+
+    def _operator_operand_assignable(self, target: str, source: str) -> bool:
+        if target in (ANY, UNDEF) or source in (ANY, UNDEF):
+            return True
+        target_branches = _split_union(target)
+        if len(target_branches) > 1:
+            return any(
+                self._operator_operand_assignable(branch, source)
+                for branch in target_branches
+            )
+        source_branches = _split_union(source)
+        if len(source_branches) > 1:
+            return all(
+                self._operator_operand_assignable(target, branch)
+                for branch in source_branches
+            )
+        if self._trait_name(target) is not None:
+            return self._assignable(target, source)
+        if target == OBJ:
+            return source == OBJ or source.startswith(f'{OBJECT}:') or \
+                source in BUILTIN_OBJECT_TYPES
+        if target.startswith(f'{OBJECT}:'):
+            return source == target
+        return self._assignable(target, source)
+
+    def _operator_signature_score(
+        self,
+        signature: _Signature,
+        right_type: str,
+    ) -> int:
+        parameter = signature.parameter_types[0]
+        if parameter == right_type:
+            return 4
+        if self._trait_name(parameter) is not None:
+            return 3
+        if parameter == OBJ:
+            return 2
+        if parameter in (ANY, UNDEF):
+            return 1
+        return 2
+
+    def _infer_operator_overload(
+        self,
+        value: Any,
+        operator_name: Optional[str],
+        left_type: str,
+        right_type: str,
+    ) -> Optional[str]:
+        if operator_name is None:
+            return None
+        if operator_name in COMPARISON_OPERATORS:
+            trait_name = COMPARISON_OPERATOR_TRAIT
+        else:
+            trait_name = BINARY_OPERATOR_TRAITS.get(operator_name)
+        if trait_name is None:
+            return None
+        method_name = trait_method(trait_name)
+        where = f'operator {operator_name}'
+        signatures = self._operator_method_signatures(
+            left_type, trait_name, method_name, where
+        )
+        if not signatures:
+            return None
+        required = self.traits[trait_name].methods[method_name][0]
+        valid: list[tuple[str, _Signature]] = []
+        invalid: list[tuple[str, _Signature]] = []
+        async_found = False
+        for source_trait, signature in signatures:
+            if signature.is_async:
+                async_found = True
+                continue
+            if len(signature.parameter_types) != 1 or \
+                    not self._method_signature_compatible(required, signature):
+                invalid.append((source_trait, signature))
+                continue
+            if not self._operator_operand_assignable(
+                signature.parameter_types[0], right_type
+            ):
+                invalid.append((source_trait, signature))
+                continue
+            valid.append((source_trait, signature))
+        if not valid:
+            if invalid:
+                _, signature = invalid[0]
+                if not self._method_signature_compatible(required, signature):
+                    self._error(
+                        f"operator method '{method_name}' does not satisfy {trait_name}.{method_name}",
+                        [
+                            f"required: {required.function_type}",
+                            f"found: {signature.function_type}",
+                        ],
+                        where=where,
+                    )
+                elif len(signature.parameter_types) != 1:
+                    self._error(
+                        f"operator method '{method_name}' must accept exactly one operand",
+                        [f"found: {signature.function_type}"],
+                        where=where,
+                    )
+                else:
+                    self._assign_error(
+                        where, signature.parameter_types[0], right_type
+                    )
+                return ANY
+            if async_found:
+                self._error(
+                    f"operator method '{method_name}' cannot be async",
+                    ['remove async from the operator method'],
+                    where=where,
+                )
+            return ANY
+        best_score = max(
+            self._operator_signature_score(signature, right_type)
+            for _, signature in valid
+        )
+        best = [
+            (source_trait, signature)
+            for source_trait, signature in valid
+            if self._operator_signature_score(signature, right_type) == best_score
+        ]
+        if len(best) > 1:
+            first = best[0][1]
+            for _, other in best[1:]:
+                if not self._signatures_equivalent(first, other):
+                    self._error(
+                        'operator is ambiguous between multiple overloads',
+                        [
+                            f"candidate: {signature.function_type}"
+                            for _, signature in best
+                        ],
+                        where=where,
+                    )
+                    return ANY
+        source_trait, signature = best[0]
+        if isinstance(value, dict):
+            value['resolved_operator_trait'] = source_trait
+        if operator_name in COMPARISON_OPERATORS:
+            return BOOLEAN
+        return signature.return_type
+
+    def _infer_unary_operator_overload(
+        self,
+        value: Any,
+        operator_name: Optional[str],
+        right_type: str,
+    ) -> Optional[str]:
+        if operator_name is None:
+            return None
+        trait_name = UNARY_OPERATOR_TRAITS.get(operator_name)
+        if trait_name is None:
+            return None
+        method_name = trait_method(trait_name)
+        where = f'operator {operator_name}'
+        signatures = self._operator_method_signatures(
+            right_type, trait_name, method_name, where
+        )
+        if not signatures:
+            return None
+        required = self.traits[trait_name].methods[method_name][0]
+        valid: list[tuple[str, _Signature]] = []
+        invalid: list[tuple[str, _Signature]] = []
+        async_found = False
+        for source_trait, signature in signatures:
+            if signature.is_async:
+                async_found = True
+                continue
+            if signature.parameter_types or \
+                    not self._method_signature_compatible(required, signature):
+                invalid.append((source_trait, signature))
+                continue
+            valid.append((source_trait, signature))
+        if not valid:
+            if invalid:
+                _, signature = invalid[0]
+                if not self._method_signature_compatible(required, signature):
+                    self._error(
+                        f"operator method '{method_name}' does not satisfy {trait_name}.{method_name}",
+                        [
+                            f"required: {required.function_type}",
+                            f"found: {signature.function_type}",
+                        ],
+                        where=where,
+                    )
+                else:
+                    self._error(
+                        f"operator method '{method_name}' must not accept operands",
+                        [f"found: {signature.function_type}"],
+                        where=where,
+                    )
+                return ANY
+            if async_found:
+                self._error(
+                    f"operator method '{method_name}' cannot be async",
+                    ['remove async from the operator method'],
+                    where=where,
+                )
+            return ANY
+        source_trait, signature = valid[0]
+        if isinstance(value, dict):
+            value['resolved_operator_trait'] = source_trait
+        return signature.return_type
 
     def _infer_binary(self, value: Any) -> str:
         if not isinstance(value, dict):
@@ -1355,6 +1649,11 @@ class _TypeChecker:
 
         left_type = self._infer(left_node)
         right_type = self._infer(right_node)
+        overload = self._infer_operator_overload(
+            value, operator_name, left_type, right_type
+        )
+        if overload is not None:
+            return overload
 
         if operator_name in LOGICAL_OPERATORS or operator_name in COMPARISON_OPERATORS:
             return BOOLEAN
@@ -4100,6 +4399,13 @@ class _TypeChecker:
             return ANY
         name = self._identifier_name(value.get('identifier'))
         if name is None:
+            return ANY
+        if name in OPERATOR_TRAIT_NAMES:
+            self._error(
+                f"trait '{name}' is reserved for operator overloading",
+                ['choose a different trait name'],
+                where='trait declaration',
+            )
             return ANY
         if name in self.traits:
             self._error(

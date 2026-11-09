@@ -6,9 +6,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Next step
 
-- [ ] Phase 3C: operator overloading through traits.
-  - Depends on the structural trait system.
-  - Target versions: powang `0.17.0`, powang-lsp `0.23.0`.
+- [ ] Phase 4A: debugger and debug adapter.
+  - Depends on stable source spans and a debug adapter design.
+  - Target versions: powang `0.18.0`, powang-lsp `0.24.0`.
 
 ## Language features in order
 
@@ -83,8 +83,15 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] LSP diagnostics for package imports.
    - Plan: `docs/phase-3b-package-registry/README.md`
 
-8. [ ] Operator overloading through traits.
-   - Depends on traits.
+8. [x] Operator overloading through traits.
+   - [x] Built-in `Add`, `Subtract`, `Multiply`, `Divide`, `Remainder`, `Negate` and `Compare` traits.
+   - [x] Arithmetic, unary minus and comparison operators.
+   - [x] Trait-qualified implementations and custom trait-qualified methods.
+   - [x] Trait annotations and generic constraints.
+   - [x] Right-operand overload selection.
+   - [x] Checker diagnostics and runtime ambiguity detection.
+   - [x] LSP completion, hover, semantic tokens and diagnostics.
+   - Plan: `docs/phase-3c-operator-overloading/README.md`
 
 9. [ ] Debugger.
    - Depends on stable source spans and a debug adapter design.

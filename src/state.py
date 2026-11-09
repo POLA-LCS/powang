@@ -25,6 +25,7 @@ from typing import IO, Any, Optional
 
 from .powang_types import *
 from .scopestack import ScopeType
+from .operator_traits import OPERATOR_TRAITS, trait_method
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,17 @@ def builtin_object_templates() -> dict[str, PowangObjectType]:
         for field_name, field_type in fields.items():
             template.data[field_name] = _builtin_field_placeholder(field_type)
         templates[type_name] = template
+    return templates
+
+
+def builtin_trait_templates() -> dict[str, TraitRuntimeInfo]:
+    templates: dict[str, TraitRuntimeInfo] = {}
+    for trait_name in OPERATOR_TRAITS:
+        trait = TraitRuntimeInfo(trait_name)
+        method_name = trait_method(trait_name)
+        trait.declared_methods.add(method_name)
+        trait.required_methods.add(method_name)
+        templates[trait_name] = trait
     return templates
 
 
@@ -458,7 +470,7 @@ class InterpreterState:
         self.warnings_enabled: bool = True
         self.call_frames: list[Frame] = []
         self.type_parameter_stack: list[set[str]] = []
-        self.traits: dict[str, TraitRuntimeInfo] = {}
+        self.traits: dict[str, TraitRuntimeInfo] = builtin_trait_templates()
 
     def register_handle(self, obj: Any) -> int:
         handle_id = self.next_handle_id
