@@ -62,12 +62,16 @@ def run_command(
     timeout: int = DEFAULT_TIMEOUT,
     optimize: bool = False,
     env: dict[str, str] | None = None,
+    engine: str | None = None,
 ) -> RunResult:
     """Run ``python powang.py <args>`` and capture decoded output."""
     command = [sys.executable]
     if optimize:
         command.append("-O")
-    command.extend([str(POWANG), *args])
+    command.append(str(POWANG))
+    if engine is not None:
+        command.append(f"--engine={engine}")
+    command.extend(args)
     process_env = dict(_ENV)
     if env:
         process_env.update(env)
@@ -96,6 +100,7 @@ def run_file(
     timeout: int = DEFAULT_TIMEOUT,
     optimize: bool = False,
     env: dict[str, str] | None = None,
+    engine: str | None = None,
 ) -> RunResult:
     """Run one ``.po`` file by path. Relative paths resolve against the repo."""
     resolved = Path(path)
@@ -107,6 +112,7 @@ def run_file(
         timeout=timeout,
         optimize=optimize,
         env=env,
+        engine=engine,
     )
 
 
@@ -125,11 +131,16 @@ def run_source(
     timeout: int = DEFAULT_TIMEOUT,
     optimize: bool = False,
     args: tuple[str, ...] = (),
+    engine: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> RunResult:
     """Write ``source`` to a temporary ``.po`` file and run it."""
     with tempfile.TemporaryDirectory(prefix="powang-test-") as directory:
         path = write_po(directory, name, source)
-        return run_file(path, *args, timeout=timeout, optimize=optimize)
+        return run_file(
+            path, *args, timeout=timeout, optimize=optimize, engine=engine,
+            env=env,
+        )
 
 
 def run_source_with_input(

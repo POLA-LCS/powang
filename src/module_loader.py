@@ -211,7 +211,11 @@ class ModuleLoader:
         self.base_stack.append(closure_base)
         try:
             from .runtime import evaluate_module_ast
+            engine = getattr(self.state, 'engine', 'tree')
             try:
+                if engine == 'vm':
+                    from .vm.modules import evaluate_module_ast_vm
+                    return evaluate_module_ast_vm(ast, module_name, path, self)
                 return evaluate_module_ast(ast, module_name, path, self)
             except AssertionError as evaluation_error:
                 converted = powang_error_from_exception(evaluation_error)

@@ -1168,6 +1168,14 @@ def callFunction(where: str, callee: str, candidate: PowangFunction,
                  call_parameters: list[PowangAny],
                  position: tuple[int, int] | None = None,
                  frame_name: str | None = None):
+    ## A function compiled by the bytecode VM carries a code object. When the
+    ## active engine is the VM, run its bytecode instead of walking its AST.
+    if getattr(candidate, 'code', None) is not None and \
+            getattr(get_state(), 'engine', 'tree') == 'vm':
+        from .vm.dispatch import call_function_bridge
+        return call_function_bridge(
+            candidate, call_parameters, where, position, frame_name,
+        )
     call_parameters = resolveNamedArguments(where, candidate, call_parameters, [])
     ## Error-union functions (`: type?`) may return an error VALUE in place of
     ## the declared type. Raised errors (`error(...)`) still propagate as

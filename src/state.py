@@ -472,6 +472,10 @@ class InterpreterState:
         self.type_parameter_stack: list[set[str]] = []
         self.traits: dict[str, TraitRuntimeInfo] = builtin_trait_templates()
 
+        ## Which execution backend owns this run. ``tree`` is the reference
+        ## engine and the default until the VM reaches parity.
+        self.engine: str = "tree"
+
     def register_handle(self, obj: Any) -> int:
         handle_id = self.next_handle_id
         self.next_handle_id += 1
@@ -556,7 +560,13 @@ class InterpreterState:
             }
 
         global_variables = source_scope.variables[0] if source_scope.variables else {}
+        vm_globals = getattr(self, 'vm_globals', None)
         for name, value in global_variables.items():
+            ## A VM module frame keeps block locals in the same slot store as
+            ## module globals. Only names the compiler recorded as module
+            ## declarations are real globals for task isolation.
+            if vm_globals is not None and name not in vm_globals:
+                continue
             if value.type in {PowangTask.type, PowangFileStream.type, PowangHandle.type}:
                 raise powang_throw(powang_error_format(
                     'TASK',
@@ -599,6 +609,9 @@ class InterpreterState:
         clone.package_status = self.package_status
         clone.log_level = self.log_level
         clone.allow_system = self.allow_system
+        clone.engine = getattr(self, 'engine', 'tree')
+        if hasattr(self, 'vm_globals'):
+            clone.vm_globals = set(self.vm_globals)
         clone.warnings_enabled = self.warnings_enabled
         clone.traits = dict(self.traits)
         return clone

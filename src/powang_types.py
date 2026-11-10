@@ -1144,6 +1144,14 @@ def PowangCopyConstruct(any: PowangAny, _memo: Optional[dict[int, PowangAny]] = 
             value.variadic = any.variadic
         if hasattr(any, 'variadic_index'):
             value.variadic_index = any.variadic_index
+        ## A function compiled by the bytecode VM keeps its immutable code
+        ## object and image across copies. The module scope of a task copy is
+        ## replaced by the task helper after the copy.
+        for vm_attribute in (
+            'code', 'vm_image', 'vm_name', 'vm_defaults', 'vm_module_scope',
+        ):
+            if hasattr(any, vm_attribute):
+                setattr(value, vm_attribute, getattr(any, vm_attribute))
         return _copy_common(any, value)
 
     value = PowangTypeMap(any.type)(any.data)

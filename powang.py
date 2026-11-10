@@ -9,6 +9,7 @@ from src.pkg.installer import load_package_config, require_packages_ready
 from src.module_loader import find_entry_module
 from src.typecheck import check_source
 from sys import argv, exit as sys_exit, stdin
+import os
 import sys as _sys
 import pathlib
 from pathlib import Path
@@ -29,10 +30,11 @@ def print_usage():
     print('    --no-warnings           Do not print non-fatal warnings.')
     print('    --debug                 Print a full traceback for internal errors.')
     print('    --allow-system          Allow system() while an HTTP server is running.')
+    print('    --engine=tree|vm        Select the execution engine. Default: tree.')
     ## `--help` intentionally exits with status 1, as documented above.
     return 1
 
-def initialize_repl(state=None):
+def initialize_repl(state=None, engine: str = 'tree'):
     ## The REPL owns one state for the whole session so variables declared on
     ## one line stay visible on the next. File runs never pass a state and
     ## therefore start fresh on every invocation.
@@ -59,7 +61,13 @@ def initialize_repl(state=None):
         if not line.strip():
             continue
         try:
-            result = interpret_program(line, None, state=repl_state)
+            if engine == 'vm':
+                session = repl_state.vm_session
+                result = session.run_cell(line)
+            else:
+                result = interpret_program(line, None, state=repl_state)
+            if result is None:
+                continue
             if isinstance(result, PowangNova) or not result.weak.has_value:
                 continue
             casted_result = explicitCastString(result)
@@ -107,6 +115,8 @@ def arguments_handler(args: list[str]):
                 debug = True
             elif arg == 'allow-system':
                 allow_system = True
+            elif arg.startswith('engine='):
+                pass
             else:
                 raise powang_throw(powang_error_format('USAGE', None, 'Invalid flag for powang file', [
                     f"invalid flag: {arg}"
@@ -127,9 +137,10 @@ def arguments_handler(args: list[str]):
         ]))
     return input_file, ast_output, debug, check_only, no_check, no_warnings, script_args, allow_system
 
-def run_project() -> int:
+def run_project(engine: str = 'tree') -> int:
     root = Path.cwd()
     state = fresh_state()
+    state.engine = engine
     state.paths['ABSOLUTE'] = INTERPRETER_PATH
     state.paths['RELATIVE'] = root
     state.warnings_enabled = True
@@ -143,19 +154,27 @@ def run_project() -> int:
     set_state(state)
     set_argv([])
     content = get_file_content(str(entry))
-    interpret_program(content, None, check=True, state=state)
+    if engine == 'vm':
+        from src.vm.interpreter import run_program
+        run_program(content, path=str(entry), check=True, state=state)
+    else:
+        interpret_program(content, None, check=True, state=state)
     return 0
 
 
 def main(args: list[str]):
     if args and args[0] in {'pkg', 'package'}:
         return package_main(args[1:])
+    if args and args[0] == 'vm':
+        from src.vm.cli import vm_main
+        return vm_main(args[1:])
+    engine = resolve_engine(args)
     if args and args[0] == 'run':
         if len(args) != 1:
             raise powang_throw(powang_error_format(
                 'USAGE', 'run', 'powang run does not accept flags or arguments',
             ))
-        return run_project()
+        return run_project(engine)
     result = arguments_handler(args)
     if isinstance(result, int):
         if result == 0:
@@ -165,13 +184,17 @@ def main(args: list[str]):
             repl_state.paths['RELATIVE'] = INTERPRETER_PATH
             repl_state.warnings_enabled = '--no-warnings' not in args
             repl_state.allow_system = allow_system if 'allow_system' in locals() else repl_state.allow_system
+            repl_state.engine = engine
+            if engine == 'vm':
+                from src.vm.modules import VMSession
+                repl_state.vm_session = VMSession(repl_state)
             load_project_config(repl_state, None)
             if repl_state.project_value is None:
                 load_config(repl_state, None)
             load_package_config(repl_state, None)
             set_state(repl_state)
             set_argv([])
-            return initialize_repl(repl_state)
+            return initialize_repl(repl_state, engine)
         elif result == 1:
             return print_usage()
 
@@ -183,9 +206,13 @@ def main(args: list[str]):
         repl_state.paths['RELATIVE'] = INTERPRETER_PATH
         repl_state.warnings_enabled = not no_warnings
         repl_state.allow_system = allow_system
+        repl_state.engine = engine
+        if engine == 'vm':
+            from src.vm.modules import VMSession
+            repl_state.vm_session = VMSession(repl_state)
         set_state(repl_state)
         set_argv([])
-        return initialize_repl(repl_state)
+        return initialize_repl(repl_state, engine)
 
     if check_only and input_file is None:
         raise powang_throw(powang_error_format('USAGE', None, '--check requires an input file', [
@@ -196,6 +223,7 @@ def main(args: list[str]):
     ## makes both `args` and `PATHS` refer to that state, never to a previous
     ## run in the same process.
     run_state = fresh_state()
+    run_state.engine = engine
     run_state.allow_system = allow_system
     run_state.warnings_enabled = not no_warnings
     if not load_project_config(run_state, input_file):
@@ -220,8 +248,39 @@ def main(args: list[str]):
                     print(str(type_error))
                 return 1
             return 0
-        interpret_program(content, ast_output, check=not no_check, state=run_state)
+        if engine == 'vm':
+            if ast_output:
+                raise powang_throw(powang_error_format(
+                    'USAGE', None, '--ast is not supported with --engine=vm',
+                ))
+            from src.vm.interpreter import run_program
+            run_program(
+                content, path=input_file, check=not no_check,
+                state=run_state,
+            )
+        else:
+            interpret_program(content, ast_output, check=not no_check, state=run_state)
     return 0
+
+def resolve_engine(args: list[str]) -> str:
+    """Return the engine name from the flag, the environment or the default."""
+    engine = None
+    for argument in args:
+        if argument.startswith('--engine='):
+            engine = argument.split('=', 1)[1]
+    if engine is None:
+        engine = os.environ.get('POWANG_ENGINE') or None
+    if engine is None:
+        engine = 'tree'
+    engine = engine.strip().lower()
+    if engine not in {'tree', 'vm'}:
+        raise powang_throw(powang_error_format(
+            'USAGE', None, 'Invalid engine', [
+                f"engine: {engine}",
+                "expected tree or vm",
+            ]))
+    return engine
+
 
 def run_cli() -> int:
     import sys as _sys
