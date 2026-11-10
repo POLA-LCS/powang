@@ -93,6 +93,22 @@ def _inner_to_type_node(inner: Any) -> dict:
     return {"type": ParserTokenType.TYPE, "value": inner if isinstance(inner, dict) else {}}
 
 
+def _any_type_node() -> dict:
+    """Return a complete gradual any TYPE node."""
+    return _inner_to_type_node({
+        "value": PowangAnyType.type,
+        "weak": False,
+        "const": False,
+        "error_union": False,
+        "reference": False,
+        "element_type": None,
+        "generics": [],
+        "variadic": False,
+        "alternatives": [],
+        "auto": False,
+    })
+
+
 def _replace_type_parameters(node: Any, parameters: set[str]) -> Any:
     """Copy of the tree walker helper so descriptors match its type rules."""
     if isinstance(node, list):
@@ -127,12 +143,13 @@ def _replace_type_parameters(node: Any, parameters: set[str]) -> Any:
 
 
 class _Scope:
-    __slots__ = ("kind", "entries", "display")
+    __slots__ = ("kind", "entries", "display", "keys")
 
     def __init__(self, kind: str):
         self.kind = kind
         self.entries: dict[str, int] = {}
         self.display: dict[str, str] = {}
+        self.keys: dict[str, str] = {}
 
 
 @dataclass
@@ -142,6 +159,8 @@ class _Loop:
     continue_label: Label
     finally_depth: int = 0
     try_depth: int = 0
+    runtime_depth: int = 0
+    continue_depth: int = 0
 
 
 @dataclass
@@ -331,7 +350,9 @@ class FunctionCompiler:
         self.try_stack: list[bool] = []
         self.in_finally: int = 0
         self.local_keys: dict[str, int] = {}
+        self.slot_keys: list[str] = []
         self.display_names: list[str] = []
+        self.runtime_depth: int = 0
         self.pending_exceptions: list[_PendingException] = []
         self.span_cache: dict[tuple[Any, ...], int] = {}
         self.parameter_names: list[str] = []
@@ -359,6 +380,7 @@ class FunctionCompiler:
         self.local_keys[display_name] = count + 1
         key = display_name if count == 0 else f"{display_name}~{count}"
         slot = self.b.declare_local(key)
+        self.slot_keys.append(key)
         self.display_names.append(display_name)
         return slot
 
@@ -367,6 +389,7 @@ class FunctionCompiler:
         self.local_keys[hint] = count + 1
         key = hint if count == 0 else f"{hint}~{count}"
         slot = self.b.declare_local(key)
+        self.slot_keys.append(key)
         self.display_names.append(hint)
         return slot
 
@@ -378,7 +401,19 @@ class FunctionCompiler:
         slot = self._allocate_slot(name)
         current.entries[name] = slot
         current.display[name] = name
+        current.keys[name] = self.slot_keys[slot]
         return slot
+
+    def check_redeclare(self, name: str, allow_shadow: bool,
+                        where: str) -> None:
+        if allow_shadow:
+            return
+        if self.resolve_local(name) is not None:
+            raise powang_throw(powang_error_format(
+                'REDEFINE', where, "Cannot redefine variables", [
+                    f"redefined: {name}",
+                ],
+            ))
 
     def resolve_local(self, name: str) -> Optional[int]:
         for scope in reversed(self.scopes):
@@ -469,7 +504,10 @@ class FunctionCompiler:
             self.compile_loop_control(node_type, value, node)
             return
         if node_type == ParserTokenType.BLOCK_STATEMENT:
-            self.compile_block(value, want_value=False)
+            ## A bare block in statement position comes from the boolean
+            ## simplifier. The tree walker evaluates it without pushing a
+            ## scope, so a declaration inside it stays in the enclosing scope.
+            self.compile_bare_block(value, want_value=False)
             return
         if node_type == ParserTokenType.IF_STATEMENT:
             self.compile_if(value, node)
@@ -521,6 +559,8 @@ class FunctionCompiler:
                 self.emit("LOAD_NOVA")
             return
         self.push_scope("block")
+        self.emit("SCOPE_PUSH")
+        self.runtime_depth += 1
         try:
             for index, statement in enumerate(statements):
                 last = index == len(statements) - 1
@@ -528,10 +568,26 @@ class FunctionCompiler:
                     self.compile_expression(statement)
                 else:
                     self.compile_statement(statement)
+            self.emit("SCOPE_POP")
+            self.runtime_depth -= 1
         finally:
             self.pop_scope()
         if not want_value:
             return
+
+    def compile_bare_block(self, statements: Any, want_value: bool = False) -> None:
+        if not isinstance(statements, list):
+            statements = []
+        if not statements:
+            if want_value:
+                self.emit("LOAD_NOVA")
+            return
+        for index, statement in enumerate(statements):
+            last = index == len(statements) - 1
+            if last and want_value:
+                self.compile_expression(statement)
+            else:
+                self.compile_statement(statement)
 
     # ------------------------------------------------------------- statements
     def compile_return(self, value: Any, node: Any) -> None:
@@ -581,6 +637,13 @@ class FunctionCompiler:
             target = target_loop.continue_label
         if self.in_finally:
             self.emit("ABANDON_FINALLY", node=node)
+        scope_depth = (
+            target_loop.runtime_depth
+            if node_type == ParserTokenType.BREAK_STATEMENT
+            else target_loop.continue_depth
+        )
+        for _ in range(max(0, self.runtime_depth - scope_depth)):
+            self.emit("SCOPE_POP", node=node)
         for index in range(len(self.try_stack) - 1, target_loop.try_depth - 1, -1):
             if not self.try_stack[index]:
                 self.emit("TRY_END", node=node)
@@ -596,12 +659,22 @@ class FunctionCompiler:
         else_block = value.get("else")
         else_label = self.label()
         end_label = self.label()
-        self.compile_condition(condition)
-        self.emit_jump("JUMP_IF_FALSE", else_label, node)
-        if isinstance(block, dict):
-            self.compile_block(block.get("value"), want_value=False)
-        self.emit_jump("JUMP", end_label, node)
-        self.place(else_label)
+        self.push_scope("if")
+        self.emit("SCOPE_PUSH")
+        self.runtime_depth += 1
+        try:
+            self.compile_condition(condition)
+            self.emit_jump("JUMP_IF_FALSE", else_label, node)
+            if isinstance(block, dict):
+                self.compile_block(block.get("value"), want_value=False)
+            self.emit("SCOPE_POP")
+            self.runtime_depth -= 1
+            self.emit_jump("JUMP", end_label, node)
+            self.place(else_label)
+            self.emit("SCOPE_POP")
+            self.runtime_depth -= 1
+        finally:
+            self.pop_scope()
         if isinstance(else_block, dict):
             self.compile_block(else_block.get("value"), want_value=False)
         self.place(end_label)
@@ -618,7 +691,7 @@ class FunctionCompiler:
         if condition is not None:
             self.compile_condition(condition)
             self.emit_jump("JUMP_IF_FALSE", end_label, node)
-        self.loops.append(_Loop(loop_label, end_label, continue_label, len(self.finally_stack), len(self.try_stack)))
+        self.loops.append(_Loop(loop_label, end_label, continue_label, len(self.finally_stack), len(self.try_stack), self.runtime_depth, self.runtime_depth))
         try:
             if isinstance(block, dict):
                 self.compile_block(block.get("value"), want_value=False)
@@ -638,17 +711,26 @@ class FunctionCompiler:
             middle_expression = start_expression
             start_expression = None
         self.push_scope("loop")
+        self.emit("SCOPE_PUSH")
+        self.runtime_depth += 1
+        outer_depth = self.runtime_depth - 1
+        continue_depth = self.runtime_depth
         try:
             if start_expression is not None:
                 self.compile_statement(start_expression)
             condition_label = self.label()
             continue_label = self.label()
             end_label = self.label()
+            break_label = self.label()
             self.place(condition_label)
             self.emit("CHECK_CANCEL", node=node)
             self.compile_condition(middle_expression)
             self.emit_jump("JUMP_IF_FALSE", end_label, node)
-            self.loops.append(_Loop(loop_label, end_label, continue_label, len(self.finally_stack), len(self.try_stack)))
+            self.loops.append(_Loop(
+                loop_label, break_label, continue_label,
+                len(self.finally_stack), len(self.try_stack),
+                outer_depth, continue_depth,
+            ))
             try:
                 if isinstance(block, dict):
                     self.compile_block(block.get("value"), want_value=False)
@@ -659,6 +741,9 @@ class FunctionCompiler:
                 self.compile_statement(last_expression)
             self.emit_jump("JUMP", condition_label, node)
             self.place(end_label)
+            self.emit("SCOPE_POP")
+            self.runtime_depth -= 1
+            self.place(break_label)
         finally:
             self.pop_scope()
 
@@ -669,6 +754,10 @@ class FunctionCompiler:
         block = value.get("block")
         condition = value.get("if_expression")
         self.push_scope("loop")
+        self.emit("SCOPE_PUSH")
+        self.runtime_depth += 1
+        outer_depth = self.runtime_depth - 1
+        continue_depth = self.runtime_depth
         try:
             iterator_slot = -1
             if isinstance(iterator, dict) and iterator.get("type") == ParserTokenType.DECLARATION_UNDEFINED:
@@ -679,7 +768,7 @@ class FunctionCompiler:
                     raise CompileError("Invalid for-each iterator", "compile")
                 type_node = iterator_value.get("type")
                 if not isinstance(type_node, dict):
-                    type_node = _inner_to_type_node({"value": PowangAnyType.type})
+                    type_node = _any_type_node()
                 iterator_slot = self.declare(name, allow_shadow=self.in_nested_block())
                 self.emit("DECLARE_LOCAL", iterator_slot, self.spec(type_node), 1, node=node)
                 self.emit("POP", node=node)
@@ -698,6 +787,7 @@ class FunctionCompiler:
             continue_label = self.label()
             break_label = self.label()
             end_label = self.label()
+            break_done_label = self.label()
             self.place(start_label)
             self.emit("CHECK_CANCEL", node=node)
             self.emit_jump("ITER_NEXT", end_label, node)
@@ -710,7 +800,11 @@ class FunctionCompiler:
             if condition is not None:
                 self.compile_condition(condition)
                 self.emit_jump("JUMP_IF_FALSE", continue_label, node)
-            self.loops.append(_Loop(loop_label, break_label, continue_label, len(self.finally_stack), len(self.try_stack)))
+            self.loops.append(_Loop(
+                loop_label, break_label, continue_label,
+                len(self.finally_stack), len(self.try_stack),
+                outer_depth, continue_depth,
+            ))
             try:
                 if isinstance(block, dict):
                     self.compile_block(block.get("value"), want_value=False)
@@ -720,8 +814,11 @@ class FunctionCompiler:
             self.emit_jump("JUMP", start_label, node)
             self.place(break_label)
             self.emit("POP", node=node)
-            self.emit_jump("JUMP", end_label, node)
+            self.emit_jump("JUMP", break_done_label, node)
             self.place(end_label)
+            self.emit("SCOPE_POP")
+            self.runtime_depth -= 1
+            self.place(break_done_label)
         finally:
             self.pop_scope()
 
@@ -763,6 +860,8 @@ class FunctionCompiler:
             self.emit_jump("JUMP", finally_label if has_finally else end_label, node)
             self.place(catch_label)
             self.push_scope("catch")
+            self.emit("SCOPE_PUSH")
+            self.runtime_depth += 1
             self.try_stack.append(has_finally)
             if has_finally:
                 self.finally_stack.append(finally_label)
@@ -771,6 +870,8 @@ class FunctionCompiler:
                 catch_name = catch.get("name") if isinstance(catch, dict) else None
                 if isinstance(catch_name, dict) and isinstance(catch_name.get("value"), str):
                     slot = self.declare(catch_name["value"], allow_shadow=True)
+                    self.emit("DECLARE_LOCAL", slot, self.spec(_any_type_node()), 1, node=node)
+                    self.emit("POP", node=node)
                     self.emit("STORE_LOCAL", slot, node=node)
                 else:
                     self.emit("POP", node=node)
@@ -781,6 +882,8 @@ class FunctionCompiler:
                 if has_finally:
                     self.finally_stack.pop()
                 self.try_stack.pop()
+                self.emit("SCOPE_POP")
+                self.runtime_depth -= 1
                 self.pop_scope()
             self.emit_jump("JUMP", finally_label if has_finally else end_label, node)
         if finally_label is not None:
@@ -833,6 +936,8 @@ class FunctionCompiler:
                 continue
             next_case = self.label()
             self.push_scope("case")
+            self.emit("SCOPE_PUSH")
+            self.runtime_depth += 1
             try:
                 pattern = case.get("pattern")
                 descriptor, _bindings = self.compile_pattern(pattern)
@@ -856,10 +961,14 @@ class FunctionCompiler:
                             self.emit("STORE_RAW", result_slot)
                         else:
                             self.compile_block(block.get("value"), want_value=False)
+                self.emit("SCOPE_POP")
+                self.runtime_depth -= 1
                 self.emit_jump("JUMP", end_label, node)
             finally:
                 self.pop_scope()
             self.place(next_case)
+            self.emit("SCOPE_POP")
+            self.runtime_depth -= 1
         self.place(end_label)
         if want_value:
             self.emit("LOAD_LOCAL", result_slot, node=node)
@@ -1725,8 +1834,9 @@ class FunctionCompiler:
             raise CompileError("Invalid declaration", "compile")
         type_node = value.get("type")
         if not isinstance(type_node, dict):
-            type_node = _inner_to_type_node({"value": PowangAnyType.type})
+            type_node = _any_type_node()
         allow_shadow = self.in_nested_block() and self.resolve_local(name) is not None
+        self.check_redeclare(name, allow_shadow, 'declaration undefined')
         is_global, slot, name_const = self._declare_target(name, allow_shadow=allow_shadow)
         shadow_flag = 1 if allow_shadow else 0
         if is_global:
@@ -1741,8 +1851,9 @@ class FunctionCompiler:
             raise CompileError("Invalid declaration", "compile")
         type_node = value.get("type")
         if not isinstance(type_node, dict):
-            type_node = _inner_to_type_node({"value": PowangAnyType.type})
+            type_node = _any_type_node()
         allow_shadow = self.in_nested_block() and self.resolve_local(name) is not None
+        self.check_redeclare(name, allow_shadow, 'declaration typed var')
         self.compile_expression(value.get("expression"))
         is_global, slot, name_const = self._declare_target(name, allow_shadow=allow_shadow)
         if is_global:
@@ -1756,6 +1867,7 @@ class FunctionCompiler:
         if not isinstance(name, str):
             raise CompileError("Invalid declaration", "compile")
         allow_shadow = self.in_nested_block() and self.resolve_local(name) is not None
+        self.check_redeclare(name, allow_shadow, 'declaration interpret')
         self.compile_expression(value.get("expression"))
         is_global, slot, name_const = self._declare_target(name, allow_shadow=allow_shadow)
         if is_global:
@@ -1783,6 +1895,7 @@ class FunctionCompiler:
             if not isinstance(name, str):
                 continue
             allow_shadow = self.in_nested_block() and self.resolve_local(name) is not None
+            self.check_redeclare(name, allow_shadow, 'destructure declaration')
             if self.repl:
                 descriptor_entries.append({
                     "name": name, "slot": -1, "type": entry.get("type") or group_type,
@@ -2268,7 +2381,11 @@ def compile_ast(
     compiler.emit("STORE_LOCAL", compiler._result_slot)
     for statement in program_ast:
         compiler.emit("CHECK_CANCEL", node=statement)
-        compiler.compile_expression(statement)
+        if isinstance(statement, dict) and \
+                statement.get("type") == ParserTokenType.BLOCK_STATEMENT:
+            compiler.compile_bare_block(statement.get("value"), want_value=True)
+        else:
+            compiler.compile_expression(statement)
         compiler.emit("STORE_RAW", compiler._result_slot, node=statement)
     compiler.emit("LOAD_LOCAL", compiler._result_slot)
     compiler.emit("RETURN")

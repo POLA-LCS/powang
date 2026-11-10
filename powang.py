@@ -30,7 +30,7 @@ def print_usage():
     print('    --no-warnings           Do not print non-fatal warnings.')
     print('    --debug                 Print a full traceback for internal errors.')
     print('    --allow-system          Allow system() while an HTTP server is running.')
-    print('    --engine=tree|vm        Select the execution engine. Default: tree.')
+    print('    --engine=tree|vm        Select the execution engine. Default: vm.')
     ## `--help` intentionally exits with status 1, as documented above.
     return 1
 
@@ -137,10 +137,9 @@ def arguments_handler(args: list[str]):
         ]))
     return input_file, ast_output, debug, check_only, no_check, no_warnings, script_args, allow_system
 
-def run_project(engine: str = 'tree') -> int:
+def run_project(engine_args: list[str] | None = None) -> int:
     root = Path.cwd()
     state = fresh_state()
-    state.engine = engine
     state.paths['ABSOLUTE'] = INTERPRETER_PATH
     state.paths['RELATIVE'] = root
     state.warnings_enabled = True
@@ -148,6 +147,8 @@ def run_project(engine: str = 'tree') -> int:
         raise powang_throw(powang_error_format(
             'USAGE', 'run', 'project.po is required for powang run',
         ))
+    engine = resolve_engine(engine_args or [], state.project_value)
+    state.engine = engine
     load_package_config(state, root)
     require_packages_ready(state)
     entry = find_entry_module(root)
@@ -168,13 +169,13 @@ def main(args: list[str]):
     if args and args[0] == 'vm':
         from src.vm.cli import vm_main
         return vm_main(args[1:])
-    engine = resolve_engine(args)
     if args and args[0] == 'run':
-        if len(args) != 1:
+        engine_args = [argument for argument in args[1:] if argument.startswith('--engine=')]
+        if len(args) - 1 != len(engine_args):
             raise powang_throw(powang_error_format(
-                'USAGE', 'run', 'powang run does not accept flags or arguments',
+                'USAGE', 'run', 'powang run accepts only --engine=tree or --engine=vm',
             ))
-        return run_project(engine)
+        return run_project(engine_args)
     result = arguments_handler(args)
     if isinstance(result, int):
         if result == 0:
@@ -184,13 +185,14 @@ def main(args: list[str]):
             repl_state.paths['RELATIVE'] = INTERPRETER_PATH
             repl_state.warnings_enabled = '--no-warnings' not in args
             repl_state.allow_system = allow_system if 'allow_system' in locals() else repl_state.allow_system
+            load_project_config(repl_state, None)
+            if repl_state.project_value is None:
+                load_config(repl_state, None)
+            engine = resolve_engine(args, repl_state.project_value)
             repl_state.engine = engine
             if engine == 'vm':
                 from src.vm.modules import VMSession
                 repl_state.vm_session = VMSession(repl_state)
-            load_project_config(repl_state, None)
-            if repl_state.project_value is None:
-                load_config(repl_state, None)
             load_package_config(repl_state, None)
             set_state(repl_state)
             set_argv([])
@@ -206,6 +208,7 @@ def main(args: list[str]):
         repl_state.paths['RELATIVE'] = INTERPRETER_PATH
         repl_state.warnings_enabled = not no_warnings
         repl_state.allow_system = allow_system
+        engine = resolve_engine(args, None)
         repl_state.engine = engine
         if engine == 'vm':
             from src.vm.modules import VMSession
@@ -223,11 +226,12 @@ def main(args: list[str]):
     ## makes both `args` and `PATHS` refer to that state, never to a previous
     ## run in the same process.
     run_state = fresh_state()
-    run_state.engine = engine
     run_state.allow_system = allow_system
     run_state.warnings_enabled = not no_warnings
     if not load_project_config(run_state, input_file):
         load_config(run_state, input_file)
+    engine = resolve_engine(args, run_state.project_value)
+    run_state.engine = engine
     load_package_config(run_state, input_file)
     require_packages_ready(run_state)
     run_state.paths['ABSOLUTE'] = INTERPRETER_PATH
@@ -250,9 +254,16 @@ def main(args: list[str]):
             return 0
         if engine == 'vm':
             if ast_output:
-                raise powang_throw(powang_error_format(
-                    'USAGE', None, '--ast is not supported with --engine=vm',
-                ))
+                import json
+                from src.parser import Parser as _AstParser
+                from src.simplify import simplify_program as _simplify
+                from src.runtime import ast_to_json as _ast_to_json
+                _parser = _AstParser(content, source_path=Path(input_file))
+                _ast = _simplify(_parser.parse(), run_state.warn)
+                with open(ast_output, 'w', encoding='utf-8') as _handle:
+                    _handle.write(json.dumps(
+                        _ast_to_json(_ast), indent=4, ensure_ascii=False,
+                    ))
             from src.vm.interpreter import run_program
             run_program(
                 content, path=input_file, check=not no_check,
@@ -262,8 +273,21 @@ def main(args: list[str]):
             interpret_program(content, ast_output, check=not no_check, state=run_state)
     return 0
 
-def resolve_engine(args: list[str]) -> str:
-    """Return the engine name from the flag, the environment or the default."""
+def _project_engine(project_value) -> str | None:
+    """Read the engine field from a loaded Project value."""
+    if project_value is None:
+        return None
+    data = getattr(project_value, 'data', None)
+    if not isinstance(data, dict):
+        return None
+    value = data.get('engine')
+    if value is None or getattr(value, 'type', None) != 'str':
+        return None
+    return value.data
+
+
+def resolve_engine(args: list[str], project_value=None) -> str:
+    """Return the engine from the flag, the environment, the project or the default."""
     engine = None
     for argument in args:
         if argument.startswith('--engine='):
@@ -271,7 +295,9 @@ def resolve_engine(args: list[str]) -> str:
     if engine is None:
         engine = os.environ.get('POWANG_ENGINE') or None
     if engine is None:
-        engine = 'tree'
+        engine = _project_engine(project_value)
+    if engine is None:
+        engine = 'vm'
     engine = engine.strip().lower()
     if engine not in {'tree', 'vm'}:
         raise powang_throw(powang_error_format(

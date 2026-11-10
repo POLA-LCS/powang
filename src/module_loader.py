@@ -185,6 +185,7 @@ class ModuleLoader:
             raise self._make_error(path, f"Module directory is empty: {path}")
 
         ast: list[Any] = []
+        source_texts: list[tuple[str, str]] = []
         for source_path in sources:
             try:
                 content = _read_source(source_path)
@@ -194,6 +195,7 @@ class ModuleLoader:
                     f"Can't read module file: {source_path}",
                     [str(file_error)],
                 ) from None
+            source_texts.append((str(source_path), content))
             parser = Parser(content, source_path=source_path)
             try:
                 ast.extend(parser.parse())
@@ -214,8 +216,31 @@ class ModuleLoader:
             engine = getattr(self.state, 'engine', 'tree')
             try:
                 if engine == 'vm':
-                    from .vm.modules import evaluate_module_ast_vm
-                    return evaluate_module_ast_vm(ast, module_name, path, self)
+                    from .vm.modules import (
+                        compile_module_image,
+                        evaluate_module_ast_vm,
+                        run_module_image_vm,
+                    )
+                    cache = getattr(self.state, 'bytecode_cache', None)
+                    if cache is None:
+                        return evaluate_module_ast_vm(ast, module_name, path, self)
+                    dependencies = self._dependency_sources(ast, closure_base)
+                    key = cache.key_for_sources(source_texts, path, dependencies)
+                    image = cache.load(key)
+                    if image is not None:
+                        from .vm.compiler import collect_program_globals
+                        image.entry_ast = ast
+                        image.vm_globals = collect_program_globals(ast)
+                        return run_module_image_vm(
+                            image, ast, module_name, path, self,
+                        )
+                    image = compile_module_image(
+                        ast, module_name, path, self.state,
+                    )
+                    cache.store(key, image)
+                    return run_module_image_vm(
+                        image, ast, module_name, path, self,
+                    )
                 return evaluate_module_ast(ast, module_name, path, self)
             except AssertionError as evaluation_error:
                 converted = powang_error_from_exception(evaluation_error)
@@ -224,6 +249,59 @@ class ModuleLoader:
                 raise self._wrap(path, converted) from None
         finally:
             self.base_stack.pop()
+
+    def _dependency_sources(self, ast: list[Any], base: Path,
+                            visited: set[str] | None = None,
+                            depth: int = 0) -> list[tuple[str, str]]:
+        """Collect source texts of imported modules for the cache key.
+
+        The walk is recursive so a change in a transitive dependency
+        invalidates the cached parent module. Import cycles are detected by the
+        loader itself, and the visited set stops this key walk early.
+        """
+        if visited is None:
+            visited = set()
+        if depth > 32:
+            return []
+        dependencies: list[tuple[str, str]] = []
+        for statement in ast:
+            if not isinstance(statement, dict):
+                continue
+            if statement.get('type') != ParserTokenType.USE_EXPRESSION:
+                continue
+            use = statement.get('value')
+            if not isinstance(use, dict):
+                continue
+            try:
+                dependency = self.resolve(
+                    use.get('kind', 'name'),
+                    use.get('name', ''),
+                    base,
+                    use.get('level', 0),
+                )
+            except Exception:
+                continue
+            try:
+                if not dependency.is_file():
+                    continue
+                resolved = str(dependency.resolve())
+                if resolved in visited:
+                    continue
+                visited.add(resolved)
+                content = _read_source(dependency)
+            except OSError:
+                continue
+            dependencies.append((resolved, content))
+            try:
+                dependency_ast = Parser(
+                    content, source_path=dependency,
+                ).parse()
+            except Exception:
+                continue
+            dependencies.extend(self._dependency_sources(
+                dependency_ast, dependency, visited, depth + 1,
+            ))
+        return dependencies
 
     # ----------------------------------------------------------------- errors
     @staticmethod

@@ -570,12 +570,14 @@ class PowangProject(PowangTypeBase):
         paths: Optional[list[str]] = None,
         log_level: str = "info",
         allow_system: bool = False,
+        engine: str = "tree",
     ):
         public_props = {
             'modules': PowangArray([PowangString(item) for item in (modules or [])]),
             'paths': PowangArray([PowangString(item) for item in (paths or [])]),
             'logLevel': PowangString(log_level),
             'allowSystem': PowangBoolean(bool(allow_system)),
+            'engine': PowangString(engine),
         }
         super().__init__(public_props)
         self.private_props = {}
@@ -598,6 +600,7 @@ BUILTIN_OBJECT_TYPES: dict[str, dict[str, str]] = {
         "paths": "arr[str]",
         "logLevel": "str",
         "allowSystem": "bool",
+        "engine": "str",
     },
 }
 

@@ -810,6 +810,7 @@ def performOperation(
     typed: bool,
     position: tuple[int, int] | None = None,
     trait_name: str | None = None,
+    _seen: set[tuple[str, str, bool]] | None = None,
 ) -> PowangAny:
     if left.type == PowangAnyType.type:
         left = unwrap_any_value(left)
@@ -846,6 +847,14 @@ def performOperation(
                 )
                 if overloaded is not None:
                     return overloaded
+    if _seen is None:
+        _seen = set()
+    operation_key = (left.type, right.type, typed)
+    if operation_key in _seen:
+        raise powang_throw(powang_error_unsupported_operation(
+            'implicit operation', left.type, operator, right.type,
+        ))
+    _seen.add(operation_key)
     result: PowangAny | None = None
     match operator:
         case '+' : result = left + right
@@ -868,7 +877,8 @@ def performOperation(
                 casted = PowangTypeCast(left.type, right)
                 require(casted is not None, lambda: powang_error_unsupported_operation('comparisson', left.type, operator, right.type))
                 return performOperation(
-                    operator, left, casted, False, position, trait_name
+                    operator, left, casted, False, position, trait_name,
+                    _seen,
                 )
             try:
                 match operator:
@@ -894,13 +904,14 @@ def performOperation(
             casted = PowangTypeCast(right.type, left)
             require(casted is not None, lambda: powang_error_unsupported_operation('implicit typed operation', left.type, operator, right.type))
             return performOperation(
-                operator, casted, right, False, position, trait_name
+                operator, casted, right, False, position, trait_name,
+                _seen,
             )
         else:
             casted = PowangTypeCast(left.type, right)
             require(casted is not None, lambda: powang_error_unsupported_operation('implicit operation', left.type, operator, right.type))
         return performOperation(
-            operator, left, casted, typed, position, trait_name
+            operator, left, casted, typed, position, trait_name, _seen,
         )
     return result
 
@@ -2411,6 +2422,7 @@ def _construct_project(where: str, positional: list[PowangAny], named: list[tupl
     paths_value = values["paths"]
     log_level_value = values["logLevel"]
     allow_system_value = values["allowSystem"]
+    engine_value = values.get("engine")
 
     modules: list[str] = []
     if modules_value is not None:
@@ -2448,7 +2460,18 @@ def _construct_project(where: str, positional: list[PowangAny], named: list[tupl
             raise powang_throw(powang_error_type_match(where, 'bool', concrete.type))
         allow_system = concrete.data
 
-    return PowangProject(modules, paths_list, log_level, allow_system)
+    engine = "tree"
+    if engine_value is not None:
+        concrete = unwrap_any_value(engine_value)
+        if concrete.type != PowangString.type:
+            raise powang_throw(powang_error_type_match(where, 'str', concrete.type))
+        engine = concrete.data
+        if engine not in {"tree", "vm"}:
+            raise powang_throw(powang_error_format(
+                'VALUE', where, "Project.engine must be 'tree' or 'vm'",
+            ))
+
+    return PowangProject(modules, paths_list, log_level, allow_system, engine)
 
 
 def evaluate_instantiation(where: str, value: DictRepr) -> PowangAny:
@@ -2629,13 +2652,13 @@ def evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) -> 
                 "check for unbounded or deeply nested recursion",
             ])
         return _evaluateAstExpression(expression, is_identifier)
-    except RecursionError as e:
-        import traceback
-        traceback.print_exc()
-        raise PowangError('RECURSION', 'Python recursion limit reached', [
-            f"depth: {_evaluation_depth.get()}",
-            "check for unbounded or deeply nested recursion",
-        ]) from None
+    except RecursionError:
+        raise PowangError(
+            'RECURSION', 'Maximum evaluation depth exceeded', [
+                f"depth limit: {MAX_EVALUATION_DEPTH}",
+                "check for unbounded or deeply nested recursion",
+            ],
+        ) from None
     finally:
         _evaluation_depth.reset(depth_token)
 
@@ -4208,6 +4231,23 @@ def _has_project_declaration(program_ast: Any) -> bool:
     return False
 
 
+def ast_to_json(program_ast):
+    """Convert a parsed AST into the JSON shape used by ``--ast``."""
+    def make_json_serializable(raw_ast):
+        if isinstance(raw_ast, dict):
+            return {
+                key: make_json_serializable(value)
+                for key, value in raw_ast.items()
+            }
+        if isinstance(raw_ast, (LexerTokenType, ParserTokenType)):
+            return TokenToString(raw_ast).upper()
+        if isinstance(raw_ast, (list, tuple)):
+            return [make_json_serializable(item) for item in raw_ast]
+        return raw_ast
+
+    return make_json_serializable(program_ast)
+
+
 import json
 
 _interpret_depth: ContextVar[int] = ContextVar("powang_interpret_depth", default=0)
@@ -4263,21 +4303,7 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
             ScopeStack.new_variable('project', get_state().project_value)
         result = PowangNova()
         if ast_output:
-            def make_json_serializable(raw_ast):
-                if isinstance(raw_ast, dict):
-                    return {
-                        key: make_json_serializable(value)
-                        for key, value in raw_ast.items()
-                    }
-                elif isinstance(raw_ast, (LexerTokenType, ParserTokenType)):
-                    return TokenToString(raw_ast).upper()
-                elif isinstance(raw_ast, (list, tuple)):
-                    return [make_json_serializable(item) for item in raw_ast]
-                else:
-                    return raw_ast
-
-            ast_dict = make_json_serializable(program_raw_ast)
-
+            ast_dict = ast_to_json(program_raw_ast)
             with open(ast_output, 'w', encoding='utf-8') as json_ast:
                 json_ast.write(json.dumps(ast_dict, indent=4, ensure_ascii=False))
         for statement in program_raw_ast:
@@ -4291,6 +4317,13 @@ def interpret_program(content: str, ast_output: str | None, check: bool = False,
             raise ass from None
         error_line = program_parser.tokenizer.row + 1 if program_parser is not None else None
         raise ass.with_line(error_line) from None
+    except RecursionError:
+        raise PowangError(
+            'RECURSION', 'Maximum evaluation depth exceeded', [
+                f"depth limit: {MAX_EVALUATION_DEPTH}",
+                "check for unbounded and deeply nested recursion",
+            ],
+        ) from None
     except AssertionError as ass:
         converted_error = powang_error_from_exception(ass)
         if converted_error is None:

@@ -1,10 +1,9 @@
 """Foundation package for the Phase 4B Powang bytecode virtual machine.
 
 This package exports the opcode registry, program image codec, builder,
-verifier, value helpers, frames, disassembler, trace types and error helpers.
-It intentionally does not import the compiler, interpreter, dispatch,
-declarations, modules, tasks, host, differential, bench or CLI modules so the
-foundation can be tested before the execution layer exists.
+verifier, value helpers, frames, disassembler, trace types, error helpers,
+compiler, interpreter and module session. The VM is the default engine and the
+tree walker remains the reference engine and the fallback.
 """
 
 from __future__ import annotations
@@ -88,7 +87,7 @@ from .verifier import VerificationError, verify_code, verify_image
 ENGINE_TREE = "tree"
 ENGINE_VM = "vm"
 ENGINES: tuple[str, ...] = (ENGINE_TREE, ENGINE_VM)
-DEFAULT_ENGINE = ENGINE_TREE
+DEFAULT_ENGINE = ENGINE_VM
 
 
 __all__ = [

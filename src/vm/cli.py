@@ -37,6 +37,7 @@ def _usage() -> int:
     print("    powang vm run [--trace] [--vm-cache] <file.po> [args...]")
     print("    powang vm diff <file.po>")
     print("    powang vm bench [--runs N] [name...]")
+    print("    powang vm abi [--json]")
     return 2
 
 
@@ -167,6 +168,12 @@ def _bench(args: list[str]) -> int:
     return 0
 
 
+def _abi(args: list[str]) -> int:
+    from .native_abi import render_c_header, render_json_contract
+    print(render_json_contract() if '--json' in args else render_c_header(), end='')
+    return 0
+
+
 def vm_main(args: list[str]) -> int:
     if not args or args[0] in {'--help', '-h', 'help'}:
         return _usage()
@@ -181,6 +188,8 @@ def vm_main(args: list[str]) -> int:
             return _diff(rest)
         if command == 'bench':
             return _bench(rest)
+        if command == 'abi':
+            return _abi(rest)
     except VerificationError as error:
         print(powang_error_format('COMPILE', 'verifier', str(error)))
         return 1

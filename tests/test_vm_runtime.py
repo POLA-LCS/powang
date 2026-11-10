@@ -535,5 +535,87 @@ class ExceptionEdgeTests(unittest.TestCase):
         self.assertIn("Maximum evaluation depth exceeded", vm.stdout)
 
 
+class BlockScopeTests(unittest.TestCase):
+    def test_try_local_is_hidden_in_catch(self) -> None:
+        source = (
+            "try { hidden := 1; error(\"x\"); }\n"
+            "catch problem { print(hidden); }\n"
+        )
+        tree = run_source(source, engine="tree")
+        vm = run_source(source, engine="vm")
+        self.assertEqual(tree.returncode, 1)
+        self.assertEqual(vm.returncode, 1)
+        self.assertIn("IDENTIFIER ERROR", vm.stdout)
+
+    def test_catch_binding_is_hidden_after_catch(self) -> None:
+        source = "try { } catch problem { inner := 5; }\nprint(inner);\n"
+        tree = run_source(source, engine="tree")
+        vm = run_source(source, engine="vm")
+        self.assertEqual(tree.returncode, 1)
+        self.assertEqual(vm.returncode, 1)
+        self.assertIn("IDENTIFIER ERROR", vm.stdout)
+
+    def test_loop_variable_is_hidden_after_loop(self) -> None:
+        source = "for index >> 0 >> 2 { print(index); }\nprint(index);\n"
+        tree = run_source(source, engine="tree")
+        vm = run_source(source, engine="vm")
+        self.assertEqual(tree.returncode, 1)
+        self.assertEqual(vm.returncode, 1)
+        self.assertIn("IDENTIFIER ERROR", vm.stdout)
+
+    def test_match_binding_is_hidden_after_case(self) -> None:
+        source = "match [1] { case [value] >> print(value); }\nprint(value);\n"
+        tree = run_source(source, engine="tree")
+        vm = run_source(source, engine="vm")
+        self.assertEqual(tree.returncode, 1)
+        self.assertEqual(vm.returncode, 1)
+        self.assertIn("IDENTIFIER ERROR", vm.stdout)
+
+    def test_top_level_redeclare_is_an_error(self) -> None:
+        source = "value := 1;\nvalue := 2;\n"
+        tree = run_source(source, engine="tree", args=("--no-check",))
+        vm = run_source(source, engine="vm", args=("--no-check",))
+        self.assertEqual(tree.returncode, 1)
+        self.assertEqual(vm.returncode, 1)
+        self.assertIn("REDEFINE ERROR", vm.stdout)
+
+    def test_break_and_continue_clean_up_block_scopes(self) -> None:
+        source = (
+            "for index >> 0 >> 3 {\n"
+            "    if index == 1 { marker := 5; break; }\n"
+            "    if index == 2 { marker := 6; continue; }\n"
+            "    print(index);\n"
+            "}\n"
+            "print(\"done\\n\");\n"
+        )
+        out, _ = run_both(self, source)
+        self.assertEqual(out, "0done\n")
+
+    def test_catch_scope_restores_on_error(self) -> None:
+        source = (
+            "outer := 1;\n"
+            "try {\n"
+            "    inner := 2;\n"
+            "    error(\"x\");\n"
+            "} catch problem {\n"
+            "    print(outer); print(\" \"); print(problem.kind); print(\"\\n\");\n"
+            "}\n"
+        )
+        out, _ = run_both(self, source)
+        self.assertEqual(out, "1 USER\n")
+
+    def test_if_declaration_does_not_leak(self) -> None:
+        source = (
+            "maybe: @str = nova;\n"
+            "if name := maybe { print(\"yes\"); } else { print(\"no\"); }\n"
+            "print(\"\\n\");\n"
+            "if name := maybe { print(\"yes\"); } else { print(\"no\"); }\n"
+            "print(\"\\n\");\n"
+        )
+        out, _ = run_both(self, source)
+        self.assertEqual(out, "no\nno\n")
+
+
 if __name__ == "__main__":
     unittest.main()
+

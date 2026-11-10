@@ -153,13 +153,6 @@ def run_fuzz(seed: int, count: int, *, fail_directory: Path | str | None = None,
         result = compare_source(source, name=f"fuzz_{seed}_{index}.po")
         if result.equal:
             continue
-        ## An oracle crash is not a semantic reference. Skip programs that make
-        ## the tree walker raise a Python traceback or report an internal error.
-        if result.tree.returncode == 3 or \
-                "Traceback (most recent call last)" in result.tree.stderr or \
-                "RecursionError" in result.tree.stderr:
-            report.skipped += 1
-            continue
         saved = None
         if output_directory is not None:
             saved = output_directory / f"fuzz_{seed}_{index}.po"

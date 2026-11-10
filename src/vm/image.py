@@ -19,7 +19,7 @@ from .values import decode_constant_json, encode_constant_json
 
 FORMAT_MAGIC = b"PWB1"
 FORMAT_VERSION = 1
-LANGUAGE_VERSION = "0.21.0"
+LANGUAGE_VERSION = "0.22.0"
 
 FLAG_ASYNC = 0x01
 FLAG_VARIADIC = 0x02

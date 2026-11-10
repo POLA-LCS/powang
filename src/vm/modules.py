@@ -102,25 +102,30 @@ def evaluate_program_image(image: ProgramImage, state, options: VMRunOptions) ->
     return vm.run()
 
 
-def evaluate_module_ast_vm(program_ast: list[DictRepr], module_name: str,
-                           module_path: Any, loader: Any) -> PowangModule:
-    """Compile and run one imported module on the VM."""
+def compile_module_image(program_ast: list[DictRepr], module_name: str,
+                         module_path: Any, state) -> ProgramImage:
+    """Compile and verify one module body without running it."""
     from .compiler import compile_ast
+    from .verifier import verify_image
 
+    image = compile_ast(
+        program_ast,
+        path=module_path,
+        module_name=module_name,
+        state=state,
+    )
+    verify_image(image)
+    return image
+
+
+def run_module_image_vm(image: ProgramImage, program_ast: list[DictRepr],
+                        module_name: str, module_path: Any,
+                        loader: Any) -> PowangModule:
+    """Run a compiled module image and build its export table."""
     saved_scopes = ScopeStack.save_scopes()
     ScopeStack.reset_scopes()
     ScopeStack.push(ScopeType.GLOBAL)
     try:
-        image = compile_ast(
-            program_ast,
-            path=module_path,
-            module_name=module_name,
-            state=get_state(),
-        )
-        options = VMRunOptions()
-        if options.verify and not options.trusted:
-            from .verifier import verify_image
-            verify_image(image)
         module = image.module_info(image.entry_module)
         scope = _module_scope_for(image, image.entry_module, module_name, str(module_path))
         scope.global_names = set(getattr(image, 'vm_globals', ()))
@@ -190,7 +195,14 @@ def evaluate_module_ast_vm(program_ast: list[DictRepr], module_name: str,
         ScopeStack.restore_scopes(saved_scopes)
 
 
-COMPILER_VERSION = "0.21.0"
+def evaluate_module_ast_vm(program_ast: list[DictRepr], module_name: str,
+                           module_path: Any, loader: Any) -> PowangModule:
+    """Compile and run one imported module on the VM."""
+    image = compile_module_image(program_ast, module_name, module_path, get_state())
+    return run_module_image_vm(image, program_ast, module_name, module_path, loader)
+
+
+COMPILER_VERSION = "0.22.0"
 
 
 class BytecodeCache:
@@ -206,15 +218,28 @@ class BytecodeCache:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def key(self, source: str, path: str | Path) -> str:
+        return self.key_for_sources([(str(path), source)], path)
+
+    def key_for_sources(self, sources: list[tuple[str, str]],
+                        path: str | Path,
+                        dependencies: list[tuple[str, str]] | None = None) -> str:
         import hashlib
         digest = hashlib.sha256()
-        digest.update(source.encode("utf-8"))
-        digest.update(b"\0")
+        for source_path, content in sorted(sources):
+            digest.update(str(Path(source_path).resolve()).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(content.encode("utf-8"))
+            digest.update(b"\0")
         digest.update(str(Path(path).resolve()).encode("utf-8"))
         digest.update(b"\0")
-        digest.update(str(getattr(ProgramImage, "language_version", "0.21.0")).encode("utf-8"))
+        for dependency_path, content in sorted(dependencies or []):
+            digest.update(str(Path(dependency_path).resolve()).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(content.encode("utf-8"))
+            digest.update(b"\0")
+        digest.update(b"language=" + str(getattr(ProgramImage, "language_version", "0.22.0")).encode("utf-8"))
         digest.update(b"\0")
-        digest.update(COMPILER_VERSION.encode("utf-8"))
+        digest.update(b"compiler=" + COMPILER_VERSION.encode("utf-8"))
         return digest.hexdigest()
 
     def load(self, key: str) -> Optional[ProgramImage]:

@@ -84,7 +84,13 @@ from ..builtins.tasks import (
 )
 from ..lexer.token import LexerTokenType, ParserTokenType, TokenToString, DictRepr
 
-from .frames import HandlerEntry, LocalStore, VMFrame
+from .frames import (
+    HandlerEntry,
+    LocalStore,
+    VMFrame,
+    publish_local,
+    sync_local,
+)
 from .image import CodeObject, ExceptionEntry, ProgramImage
 from .values import (
     SpreadValue,
@@ -438,6 +444,8 @@ class VM:
                 continue
             if not (handler.start_ip <= fault_ip < handler.end_ip):
                 continue
+            while len(ScopeStack.variables) > handler.scope_depth:
+                _pop_block_scope(frame)
             if handler.catch_ip >= 0 and handler.state == "active":
                 del frame.handlers[index + 1:]
                 frame.stack[:] = frame.stack[:handler.stack_depth]
@@ -588,6 +596,7 @@ class VM:
                     ]))
             value = getUndefinedVariable('declaration undefined', type_inner or {})
             frame.locals.set_at(slot, value)
+            publish_local(frame, slot, value)
             stack.append(value)
             return _NO_RETURN
         if name == "DECLARE_GLOBAL":
@@ -625,6 +634,7 @@ class VM:
             target = getUndefinedVariable('declaration typed var', type_inner or {})
             typed_value = assignWithChecks('declaration typed var', target, value, False)
             frame.locals.set_at(slot, typed_value)
+            publish_local(frame, slot, typed_value)
             stack.append(typed_value)
             return _NO_RETURN
         if name == "DECLARE_INFER":
@@ -632,6 +642,7 @@ class VM:
             value = stack.pop()
             inferred = _infer_declaration(value, 'declaration interpret')
             frame.locals.set_at(slot, inferred)
+            publish_local(frame, slot, inferred)
             stack.append(inferred)
             return _NO_RETURN
         if name == "DECLARE_TYPED_GLOBAL":
@@ -723,16 +734,21 @@ class VM:
             return _NO_RETURN
         if name == "STORE_LOCAL":
             slot = int(operands["slot"])
-            frame.locals.set_at(slot, copy_value(stack.pop()))
+            stored = copy_value(stack.pop())
+            frame.locals.set_at(slot, stored)
+            sync_local(frame, slot, stored)
             return _NO_RETURN
         if name == "STORE_RAW":
             slot = int(operands["slot"])
-            frame.locals.set_at(slot, stack.pop())
+            stored = stack.pop()
+            frame.locals.set_at(slot, stored)
+            sync_local(frame, slot, stored)
             return _NO_RETURN
         if name == "ASSIGN_LOCAL":
             slot = int(operands["slot"])
             value = stack.pop()
             _assign_slot(frame, slot, value, where)
+            sync_local(frame, slot, frame.locals.value_at(slot))
             return _NO_RETURN
         if name == "LOAD_GLOBAL":
             global_name = image.global_names[int(operands["name"])]
@@ -750,6 +766,12 @@ class VM:
         if name == "LOAD_FREE":
             global_name = image.global_names[int(operands["name"])]
             stack.append(_load_free(global_name, where, frame))
+            return _NO_RETURN
+        if name == "SCOPE_PUSH":
+            ScopeStack.push()
+            return _NO_RETURN
+        if name == "SCOPE_POP":
+            _pop_block_scope(frame)
             return _NO_RETURN
         if name == "STORE_NAME":
             global_name = image.global_names[int(operands["name"])]
@@ -1088,12 +1110,14 @@ class VM:
             return _NO_RETURN
         if name == "SET_RETURN":
             value = stack.pop()
+            _restore_scopes_for_transfer(frame, current.offset)
             frame.pending_return = copy_value(value)
             frame.pending_error = None
             frame.transfer = ("return", -1)
             return _NO_RETURN
         if name == "SET_TRANSFER":
             kind = int(operands["kind"])
+            _restore_scopes_for_transfer(frame, current.offset)
             frame.transfer = ("jump", int(operands["target"])) if kind == 0 else ("return", -1)
             frame.pending_error = None
             frame.pending_return = None
@@ -1273,6 +1297,7 @@ class VM:
                 stack_depth=len(stack),
                 local_watermark=entry.local_watermark,
                 kind=entry.kind,
+                scope_depth=len(ScopeStack.variables),
             ))
             return _NO_RETURN
         if name == "TRY_END":
@@ -1393,6 +1418,31 @@ class VM:
             return _NO_RETURN
 
         raise VMError(f"unhandled opcode {name}")
+
+
+def _restore_scopes_for_transfer(frame: VMFrame, fault_ip: int) -> None:
+    for handler in reversed(frame.handlers):
+        if handler.state == "finally":
+            continue
+        if handler.finally_ip < 0:
+            continue
+        if handler.start_ip <= fault_ip < handler.end_ip:
+            while len(ScopeStack.variables) > handler.scope_depth:
+                _pop_block_scope(frame)
+            return
+
+
+def _pop_block_scope(frame: VMFrame) -> None:
+    """Pop one runtime block scope and hide its locals from the frame store."""
+    if len(ScopeStack.variables) <= 1:
+        return
+    top = ScopeStack.variables[-1]
+    if top is frame.locals:
+        return
+    ScopeStack.pop()
+    slots = frame.block_slots.pop(id(top), {})
+    if slots:
+        frame.locals.hide_names(list(slots.values()))
 
 
 _NO_RETURN = object()
@@ -1595,11 +1645,18 @@ def _load_name(name: str, where: str, frame: VMFrame) -> PowangAny:
 
 
 def _load_free(name: str, where: str, frame: VMFrame) -> PowangAny:
-    scopes = list(ScopeStack.variables[:-1])
+    try:
+        frame_index = next(
+            index for index, scope in enumerate(ScopeStack.variables)
+            if scope is frame.locals
+        )
+    except StopIteration:
+        frame_index = len(ScopeStack.variables)
+    scopes = list(ScopeStack.variables[:frame_index])
     value = _lookup_variable_in_scope(name, where, frame, scopes, filter_module=False)
     if value is not None:
         return value
-    for functions in reversed(ScopeStack.functions[:-1]):
+    for functions in reversed(ScopeStack.functions[:frame_index]):
         if name in functions:
             return functions[name][-1]
     raise powang_throw(powang_error_identifier_not_found(None, name))
@@ -1992,7 +2049,9 @@ def _match_descriptor(vm: VM, frame: VMFrame, descriptor, subject: PowangAny) ->
     if kind == "binding":
         for _name, slot in descriptor.bindings:
             if slot >= 0:
-                frame.locals.set_at(slot, copy_value(subject))
+                bound = copy_value(subject)
+                frame.locals.set_at(slot, bound)
+                publish_local(frame, slot, bound)
         return True
     if kind == "literal":
         literal = evaluateAstExpression(descriptor.literal)
@@ -2036,6 +2095,7 @@ def _match_descriptor(vm: VM, frame: VMFrame, descriptor, subject: PowangAny) ->
             else:
                 rest_value = PowangArray([copy_value(item) for item in tail])
             frame.locals.set_at(rest_slot, rest_value)
+            publish_local(frame, rest_slot, rest_value)
         return True
     if kind == "object":
         if subject.type != PowangObjectType.type:
@@ -2155,6 +2215,7 @@ def run_program(source: str, *, path: str | Path, check: bool = True,
     active_state = state if state is not None else get_state()
     options = engine_options or VMRunOptions(trace=trace)
     previous_vm = getattr(active_state, 'vm_instance', None)
+    previous_cache = getattr(active_state, 'bytecode_cache', None)
     try:
         image = None
         cache = None
@@ -2164,6 +2225,7 @@ def run_program(source: str, *, path: str | Path, check: bool = True,
             from ..parser import Parser
             from .compiler import collect_program_globals
             cache = BytecodeCache(options.cache_dir)
+            active_state.bytecode_cache = cache
             cache_key = cache.key(source, path)
             image = cache.load(cache_key)
             if image is not None:
@@ -2189,5 +2251,6 @@ def run_program(source: str, *, path: str | Path, check: bool = True,
         raise
     finally:
         active_state.vm_instance = previous_vm
+        active_state.bytecode_cache = previous_cache
         active_state.emit_warnings()
     return result

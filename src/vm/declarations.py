@@ -52,6 +52,7 @@ from .dispatch import (
     make_function,
 )
 from .values import SpreadValue, unwrap
+from .frames import publish_local
 
 
 def declare_type(vm, frame, type_index: int) -> PowangAny:
@@ -277,6 +278,7 @@ def _store_binding(frame, entry: dict, descriptor: dict, value: PowangAny) -> No
     slot = entry.get("slot", -1)
     if isinstance(slot, int) and slot >= 0:
         frame.locals.set_at(slot, value)
+        publish_local(frame, slot, value)
         return
     name = entry.get("name")
     if isinstance(name, str):

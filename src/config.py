@@ -206,6 +206,7 @@ def _extract_project_config(program_ast: Any) -> dict[str, Any]:
     paths = values["paths"] if values["paths"] is not None else []
     log_level = values["logLevel"] if values["logLevel"] is not None else "info"
     allow_system = values["allowSystem"] if values["allowSystem"] is not None else False
+    engine = values["engine"] if values["engine"] is not None else "tree"
 
     if not isinstance(modules, list) or any(not isinstance(item, str) for item in modules):
         raise powang_throw(powang_error_format(
@@ -223,12 +224,17 @@ def _extract_project_config(program_ast: Any) -> dict[str, Any]:
         raise powang_throw(powang_error_format(
             'USAGE', 'project', "Project.allowSystem must be a boolean",
         ))
+    if not isinstance(engine, str) or engine not in {"tree", "vm"}:
+        raise powang_throw(powang_error_format(
+            'USAGE', 'project', "Project.engine must be 'tree' or 'vm'",
+        ))
 
     return {
         "modules": modules,
         "paths": paths,
         "logLevel": log_level,
         "allowSystem": allow_system,
+        "engine": engine,
     }
 
 
@@ -306,5 +312,6 @@ def load_project_config(state: Any, base_path: Path | str | None = None) -> bool
         config["paths"],
         config["logLevel"],
         config["allowSystem"],
+        config["engine"],
     )
     return True

@@ -472,9 +472,9 @@ class InterpreterState:
         self.type_parameter_stack: list[set[str]] = []
         self.traits: dict[str, TraitRuntimeInfo] = builtin_trait_templates()
 
-        ## Which execution backend owns this run. ``tree`` is the reference
-        ## engine and the default until the VM reaches parity.
-        self.engine: str = "tree"
+        ## Which execution backend owns this run. The VM is the default.
+        ## The tree walker remains the reference engine and the fallback.
+        self.engine: str = "vm"
 
     def register_handle(self, obj: Any) -> int:
         handle_id = self.next_handle_id

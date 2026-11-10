@@ -21,7 +21,7 @@ from src.vm.opcodes import OPCODES
 from src.vm.trace import TextTraceSink
 from src.vm.verifier import verify_code, verify_image
 
-from tests.helpers import ROOT, run_command, run_source
+from tests.helpers import ROOT, run_command, run_source, write_po
 
 
 class EngineFlagTests(unittest.TestCase):
@@ -41,6 +41,22 @@ class EngineFlagTests(unittest.TestCase):
         result = run_source('print("x");\n', engine="nope")
         self.assertEqual(result.returncode, 2)
         self.assertIn("Invalid engine", result.combined)
+
+    def test_ast_dump_with_vm(self) -> None:
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="powang-ast-") as directory:
+            root = Path(directory)
+            source = write_po(root, "program.po", 'print("x");\n')
+            output = root / "ast.json"
+            result = run_command(
+                ["--engine=vm", "--ast", str(output), str(source)]
+            )
+            self.assertEqual(result.returncode, 0, result.combined)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertIsInstance(payload, list)
+            self.assertTrue(payload)
 
     def test_tree_and_vm_outputs_match(self) -> None:
         source = (
@@ -107,6 +123,29 @@ class CommandLineTests(unittest.TestCase):
         cache = ROOT / ".powang" / "cache" / "bytecode"
         self.assertTrue(cache.is_dir())
 
+    def test_vm_abi_header(self) -> None:
+        from src.vm.native_abi import (
+            render_c_header,
+            render_json_contract,
+        )
+        import json
+
+        header = render_c_header()
+        self.assertIn("PWB_OPCODE_COUNT", header)
+        self.assertIn("PWB_OP_LOAD_NOVA", header)
+        self.assertIn("PWB_TAG_OBJ", header)
+        contract = json.loads(render_json_contract())
+        self.assertEqual(contract["format_version"], 1)
+        self.assertGreater(len(contract["opcodes"]), 120)
+        self.assertEqual(len(contract["tags"]), 20)
+
+    def test_vm_abi_command(self) -> None:
+        result = run_command(["vm", "abi", "--json"])
+        self.assertEqual(result.returncode, 0, result.combined)
+        import json
+        payload = json.loads(result.stdout)
+        self.assertIn("opcodes", payload)
+
     def test_seeded_fuzzer(self) -> None:
         from src.vm.fuzz import run_fuzz
 
@@ -158,6 +197,48 @@ class TraceTests(unittest.TestCase):
         self.assertIn("instruction", output)
         self.assertIn("LOAD_LOCAL", output)
         self.assertIn("RETURN", output)
+
+
+class ProjectEngineTests(unittest.TestCase):
+    def test_project_engine_and_cli_override(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="powang-engine-") as directory:
+            root = Path(directory)
+            write_po(
+                root,
+                "project.po",
+                "module project;\n"
+                "export project: Project = Project.[\n"
+                "    engine >> \"vm\"\n"
+                "];\n",
+            )
+            write_po(root, "main.po", "module main;\n")
+            for args in (
+                ["run"],
+                ["run", "--engine=vm"],
+                ["run", "--engine=tree"],
+            ):
+                result = run_command(args, cwd=root)
+                self.assertEqual(result.returncode, 0, result.combined)
+
+    def test_invalid_project_engine_is_rejected(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="powang-engine-") as directory:
+            root = Path(directory)
+            write_po(
+                root,
+                "project.po",
+                "module project;\n"
+                "export project: Project = Project.[\n"
+                "    engine >> \"nope\"\n"
+                "];\n",
+            )
+            write_po(root, "main.po", "module main;\n")
+            result = run_command(["run"], cwd=root)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Project.engine", result.combined)
 
 
 class ReplTests(unittest.TestCase):

@@ -82,6 +82,35 @@ def check_cancellation() -> None:
     raise error
 
 
+def _resolve_task_handle(task: PowangTask) -> PowangTask:
+    """Return the live task object behind a copied task handle.
+
+    A typed task declaration copies the handle fields into a placeholder, so
+    the placeholder has the same task id and future but does not receive the
+    worker updates. The pool owns the live object, so every operation resolves
+    the handle first.
+    """
+    if task is None:
+        return task
+    pool = getattr(get_state(), 'task_pool', None)
+    if pool is None:
+        return task
+    tasks = getattr(pool, 'tasks', None)
+    if not tasks:
+        return task
+    for candidate in tasks:
+        if candidate is task:
+            return task
+        if candidate.task_id == task.task_id:
+            return candidate
+    future = getattr(task, 'future', None)
+    if future is not None:
+        for candidate in tasks:
+            if getattr(candidate, 'future', None) is future:
+                return candidate
+    return task
+
+
 def _require_task(where: str, value: PowangAny) -> PowangTask:
     if value.type == PowangAnyType.type:
         value = PowangUnwrapAny(value)
@@ -336,6 +365,7 @@ def shutdown_state_tasks(state) -> None:
 # --------------------------------------------------------------------- builtins
 def run_lazy_task(task: PowangTask) -> PowangAny:
     """Run or collect a lazy async task on the current thread."""
+    task = _resolve_task_handle(task)
     if task.lazy_pool is not None:
         task.lazy_pool._release_lazy(task)
     with task.lock:
@@ -448,6 +478,7 @@ def builtin_wait(task: PowangAny, timeout: PowangAny | None = None) -> PowangAny
     whose details include the original error text.
     """
     task = _require_task('wait', task)
+    task = _resolve_task_handle(task)
     if task.lazy_pool is not None:
         return run_lazy_task(task)
 

@@ -344,6 +344,8 @@ def _specs() -> list[tuple[str, tuple[Operand, ...], int, int, str]]:
         ("APPLY_TRANSFER", (), 0, 0, "control"),
         ("ABANDON_FINALLY", (), 0, 0, "control"),
         ("LOAD_FREE", (_op("name", "u32", "name"),), 0, 1, "slot"),
+        ("SCOPE_PUSH", (), 0, 0, "control"),
+        ("SCOPE_POP", (), 0, 0, "control"),
     ]
 
 

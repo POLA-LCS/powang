@@ -99,6 +99,16 @@ class LocalStore(MutableMapping[str, PowangAny]):
             raise KeyError(name)
         return value
 
+    def hide_names(self, names: list[str]) -> None:
+        """Remove names from the name map without discarding their values.
+
+        Block scopes call this when they end. The slot values stay reachable by
+        slot index until the frame ends, and no later instruction addresses
+        them.
+        """
+        for name in names:
+            self._slots.pop(name, None)
+
     def set_at(self, slot: int, value: PowangAny) -> None:
         """Write `value` into `slot`."""
         if slot < 0:
@@ -108,6 +118,9 @@ class LocalStore(MutableMapping[str, PowangAny]):
         if slot >= len(self._names):
             self._names.extend("" for _ in range(slot + 1 - len(self._names)))
         self._values[slot] = value
+        name = self._names[slot]
+        if name and self._slots.get(name) != slot:
+            self._slots[name] = slot
 
     def __getitem__(self, name: str) -> PowangAny:
         slot = self.slot(name)
@@ -132,6 +145,8 @@ class LocalStore(MutableMapping[str, PowangAny]):
         seen: set[str] = set()
         for slot, name in enumerate(self._names):
             if not name or name in seen:
+                continue
+            if self._slots.get(name) != slot:
                 continue
             if slot >= len(self._values) or self._values[slot] is _ABSENT:
                 continue
@@ -163,6 +178,46 @@ class LocalStore(MutableMapping[str, PowangAny]):
         return repr({name: self[name] for name in self})
 
 
+def _local_display(code, slot: int) -> str | None:
+    if slot < 0 or slot >= len(code.local_names):
+        return None
+    key = code.local_names[slot]
+    if not key or key.startswith("#"):
+        return None
+    return key.split("~", 1)[0]
+
+
+def publish_local(frame, slot: int, value: PowangAny) -> None:
+    """Expose a slot value in the active runtime block scope."""
+    from ..scopestack import ScopeStack
+
+    if not ScopeStack.variables:
+        return
+    top = ScopeStack.variables[-1]
+    if top is frame.locals or not isinstance(top, dict):
+        return
+    display = _local_display(frame.code, slot)
+    if display is None:
+        return
+    top[display] = value
+    slots = frame.block_slots.setdefault(id(top), {})
+    slots[display] = frame.code.local_names[slot]
+
+
+def sync_local(frame, slot: int, value: PowangAny) -> None:
+    """Update the block scope value after a store or assignment."""
+    from ..scopestack import ScopeStack
+
+    if not ScopeStack.variables:
+        return
+    top = ScopeStack.variables[-1]
+    if top is frame.locals or not isinstance(top, dict):
+        return
+    display = _local_display(frame.code, slot)
+    if display is not None and display in top:
+        top[display] = value
+
+
 @dataclass
 class HandlerEntry:
     """One active exception handler in a frame."""
@@ -177,6 +232,7 @@ class HandlerEntry:
     kind: str
     pending_error: BaseException | None = None
     pending_return: PowangAny | None = None
+    scope_depth: int = 0
     state: str = "active"
 
 
@@ -221,6 +277,7 @@ class VMFrame:
         self.pending_return: PowangAny | None = None
         self.transfer: tuple[str, int] | None = None
         self.captures: list[PowangAny] = []
+        self.block_slots: dict[int, dict[str, str]] = {}
 
     def push(self, value: PowangAny) -> None:
         """Push one value on the operand stack."""
