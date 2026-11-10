@@ -10,7 +10,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
   - Depends on stable source spans and a debug adapter design.
   - Target versions: powang `0.20.0`, powang-lsp `0.26.0`.
   - The `char` type shipped in powang `0.19.1` and powang-lsp `0.25.1`.
-  - The bytecode VM plan is defined in `docs/phase-4b-bytecode-vm/README.md`.
+  - The bytecode VM is implemented and opt in. Plan: `docs/phase-4b-bytecode-vm/README.md`.
 
 ## Language features in order
 
@@ -116,12 +116,19 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 12. [ ] FFI handles and `extern type`.
     - The `handle` type exists. The registry and host callback design still need work.
 
-13. [ ] Performance work and bytecode VM.
-    - Profile the tree-walker first.
+13. [x] Performance work and bytecode VM.
+    - [x] Opcode registry, program image codec, builder, verifier and disassembler.
+    - [x] AST compiler for every implemented language construct.
+    - [x] Python reference VM with frames, heap values and explicit unwinding.
+    - [x] Engine flag, environment default and the `powang vm` command line surface.
+    - [x] Differential harness over the example suite and an inline corpus.
+    - [x] Trace mode, benchmark corpus and image round trip tests.
+    - [x] The full test suite passes with `POWANG_ENGINE=vm`.
     - Plan: `docs/phase-4b-bytecode-vm/README.md`.
+    - Implementation plans: `docs/phase-4b-bytecode-vm/implementation/`.
     - Target versions: powang `0.21.0`, powang-lsp `0.27.0`.
-    - Keep the tree-walker as the reference engine until differential parity.
-    - The VM is opt-in before it becomes the default engine.
+    - The VM remains opt-in until one full release has zero differential mismatches.
+    - The tree-walker remains the reference engine and the fallback.
 
 ## Tooling
 
@@ -184,6 +191,7 @@ Open questions:
 
 ## Recently completed
 
+- [x] Phase 4B bytecode VM, engine selection and differential parity.
 - [x] Phase 1 correctness and guardrails.
 - [x] Phase 2A loops, labels, slicing, annotations, frames, spawned methods and constant-condition simplification.
 - [x] Phase 2B1 function types and lambdas.

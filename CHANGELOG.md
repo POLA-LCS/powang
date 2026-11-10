@@ -2,6 +2,34 @@
 
 All notable changes to powang are documented here.
 
+## 0.21.0
+
+### Added
+
+- A stack based bytecode virtual machine at `src/vm` with an opcode registry, program image codec, instruction builder, verifier, disassembler, trace mode and execution loop.
+- An AST compiler that lowers every implemented language construct to bytecode, including declarations, calls, containers, user types, enums, traits, operator dispatch, errors, references, modules and tasks.
+- The `--engine=tree` and `--engine=vm` selection flag, the `POWANG_ENGINE` environment variable and the `powang vm` command line surface.
+- `powang vm disasm` prints the module, type, trait, function, constant, call site, pattern and source tables plus the instruction stream.
+- `powang vm run --trace` prints a compact instruction trace with source spans.
+- `powang vm diff` runs both engines and compares standard output, standard error and the exit code.
+- `powang vm bench` runs the benchmark corpus on both engines.
+- A differential test harness that runs the example suite and an inline corpus on both engines.
+- Image serialization with the `PWB1` container, format version `1`, a CRC32 checksum and deterministic table encoding.
+- A verifier that checks opcode validity, operand ranges, constant indices, slots, jump targets, exception ranges, stack heights, merge points, spans and cross table references.
+
+### Changed
+
+- `InterpreterState` carries an `engine` field. File runs, project runs, imports and the REPL honor the selected engine.
+- The module loader evaluates imported modules with the active engine, so a VM program keeps its module graph on the VM.
+- `callFunction` delegates to the VM when a function carries a code object and the VM engine is active, so shared runtime helpers and extern callbacks keep working.
+- The test helpers accept an `engine` argument and the full suite runs on both engines.
+
+### Notes
+
+- The tree walker remains the default engine. The VM is opt in until one full release has zero differential mismatches.
+- The Python reference VM is a correctness and differential oracle. The native VM remains the performance target.
+- Private interpreter state, checkpoints and temporary files are ignored by git.
+
 ## 0.19.1
 
 ### Changed
