@@ -35,13 +35,14 @@ The V9 gate is in progress by design. The VM is opt in at `0.21.0`. The default 
 
 Recorded results for `0.21.0`:
 
-- Tree suite: 575 tests, all pass.
-- VM suite with `POWANG_ENGINE=vm`: 575 tests, all pass.
+- Tree suite: 580 tests, all pass.
+- VM suite with `POWANG_ENGINE=vm`: 580 tests, all pass.
 - Differential example corpus: every `.po` file under `examples`, zero mismatches.
 - Differential inline corpus: 13 programs, zero mismatches.
 - Seeded fuzzer: 1000 generated programs on seed 2026, 7 oracle crashes skipped, zero mismatches.
 - Error parity corpus: 13 cases, identical output, error text and exit code.
 - Disassembler, trace, JSON output, image round trip, cache, engine flag and verifier reject tests pass.
+- Stress corpus: large containers, many closures, many awaited tasks, large string slicing and repeated runs.
 
 ## 2. Module status
 
