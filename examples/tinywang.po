@@ -1,0 +1,287 @@
+## tinywang: a tiny expression lexer and evaluator written in Powang.
+##
+## Supported syntax:
+##   numbers, + - * /, ^ for powers, sqrt(...) and parentheses.
+##
+## The example shows enums, user types, methods, references and error handling.
+
+use math;
+
+type TokenKind enum {
+    EOF,
+    INT,
+    FLOAT,
+    ADD,
+    MINUS,
+    MULT,
+    DIV,
+    POW,
+    SQRT,
+    LEFT_PAREN,
+    RIGHT_PAREN,
+}
+
+type Token[+] {
+    | kind: TokenKind;
+    | text: str;
+}
+
+fun is_white(ch: str): bool {
+    return ch == " " || ch == "\n" || ch == "\t" || ch == "\r";
+}
+
+fun is_digit(ch: str): bool {
+    return ch match {
+        case "0" >> true
+        case "1" >> true
+        case "2" >> true
+        case "3" >> true
+        case "4" >> true
+        case "5" >> true
+        case "6" >> true
+        case "7" >> true
+        case "8" >> true
+        case "9" >> true
+        case _ >> false
+    };
+}
+
+fun lex(source: str): arr[Token] {
+    tokens := arr[Token].[];
+    index := 0;
+
+    loop if index < size(source) {
+        ch := source[index];
+
+        if is_white(ch) {
+            index += 1;
+            continue;
+        }
+
+        if is_digit(ch) {
+            start := index;
+            is_float := false;
+
+            loop if index < size(source) && is_digit(source[index]) {
+                index += 1;
+            }
+
+            if index < size(source) && source[index] == "." {
+                is_float = true;
+                index += 1;
+                if index >= size(source) || !is_digit(source[index]) {
+                    error("missing decimal part");
+                }
+                loop if index < size(source) && is_digit(source[index]) {
+                    index += 1;
+                }
+            }
+
+            kind := TokenKind.INT;
+            if is_float {
+                kind = TokenKind.FLOAT;
+            }
+            tokens &> arr.push(Token.[kind, source[start >> index]]);
+            continue;
+        }
+
+        if ch == "+" {
+            tokens &> arr.push(Token.[TokenKind.ADD, ch]);
+            index += 1;
+            continue;
+        }
+        if ch == "-" {
+            tokens &> arr.push(Token.[TokenKind.MINUS, ch]);
+            index += 1;
+            continue;
+        }
+        if ch == "*" {
+            tokens &> arr.push(Token.[TokenKind.MULT, ch]);
+            index += 1;
+            continue;
+        }
+        if ch == "/" {
+            tokens &> arr.push(Token.[TokenKind.DIV, ch]);
+            index += 1;
+            continue;
+        }
+        if ch == "^" {
+            tokens &> arr.push(Token.[TokenKind.POW, ch]);
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            tokens &> arr.push(Token.[TokenKind.LEFT_PAREN, ch]);
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            tokens &> arr.push(Token.[TokenKind.RIGHT_PAREN, ch]);
+            index += 1;
+            continue;
+        }
+
+        if ch == "s" && index + 4 <= size(source) && source[index >> index + 4] == "sqrt" {
+            tokens &> arr.push(Token.[TokenKind.SQRT, "sqrt"]);
+            index += 4;
+            continue;
+        }
+
+        error("unexpected character: " + ch);
+    }
+
+    tokens &> arr.push(Token.[TokenKind.EOF, ""]);
+    return tokens;
+}
+
+fun power(base: num, exponent: num): num {
+    if exponent < 0.0 {
+        return 1.0 / power(base, -exponent);
+    }
+    whole := exponent as int;
+    whole_number := whole as num;
+    if whole_number != exponent {
+        error("fractional exponents are not supported");
+    }
+    result := 1.0;
+    count := 0;
+    loop if count < whole {
+        result *= base;
+        count += 1;
+    }
+    return result;
+}
+
+type Parser[+] {
+    | tokens: arr[Token];
+    | index: int;
+
+    fun this.peek(): Token {
+        if this.index >= size(this.tokens) {
+            return this.tokens[size(this.tokens) - 1];
+        }
+        return this.tokens[this.index];
+    }
+
+    fun this.advance(): Token {
+        token := this.peek();
+        if this.index < size(this.tokens) - 1 {
+            this.index += 1;
+        }
+        return token;
+    }
+
+    fun this.expression(): num {
+        result := this.term();
+        loop if this.peek().kind == TokenKind.ADD || this.peek().kind == TokenKind.MINUS {
+            operator := this.advance();
+            right := this.term();
+            if operator.kind == TokenKind.ADD {
+                result += right;
+            } else {
+                result -= right;
+            }
+        }
+        return result;
+    }
+
+    fun this.term(): num {
+        result := this.power();
+        loop if this.peek().kind == TokenKind.MULT || this.peek().kind == TokenKind.DIV {
+            operator := this.advance();
+            right := this.power();
+            if operator.kind == TokenKind.MULT {
+                result *= right;
+            } else {
+                if right == 0.0 {
+                    error("division by zero");
+                }
+                result /= right;
+            }
+        }
+        return result;
+    }
+
+    fun this.power(): num {
+        base := this.unary();
+        if this.peek().kind == TokenKind.POW {
+            this.advance();
+            return power(base, this.power());
+        }
+        return base;
+    }
+
+    fun this.unary(): num {
+        token := this.peek();
+        if token.kind == TokenKind.MINUS {
+            this.advance();
+            return -this.unary();
+        }
+        if token.kind == TokenKind.SQRT {
+            this.advance();
+            return math.sqrt(this.unary());
+        }
+        return this.primary();
+    }
+
+    fun this.primary(): num {
+        token := this.peek();
+        if token.kind == TokenKind.INT || token.kind == TokenKind.FLOAT {
+            this.advance();
+            return token.text as num;
+        }
+        if token.kind == TokenKind.LEFT_PAREN {
+            this.advance();
+            value := this.expression();
+            if this.peek().kind != TokenKind.RIGHT_PAREN {
+                error("expected ')'");
+            }
+            this.advance();
+            return value;
+        }
+        if token.kind == TokenKind.EOF {
+            error("unexpected end of expression");
+        }
+        error("unexpected token: " + token.text);
+        return 0.0;
+    }
+}
+
+fun evaluate(source: str): num {
+    parser := Parser.[lex(source), 0];
+    value := parser.expression();
+    if parser.peek().kind != TokenKind.EOF {
+        error("unexpected token: " + parser.peek().text);
+    }
+    return value;
+}
+
+expressions := [
+    "2.5",
+    "1 + 2 * 3",
+    "(1 + 2) * 3",
+    "2 ^ 8",
+    "2 ^ 3 ^ 2",
+    "sqrt(9) + 1",
+    "sqrt 16",
+    "2 ^ -2",
+    "10 / 4",
+    "1 / 0",
+    "1 +",
+];
+
+for expr >> expressions {
+    try {
+        value := evaluate(expr);
+        println($"{expr} = {value}");
+    } catch problem {
+        println($"{expr} -> {problem.message}");
+    }
+}
+
+print("tokens: ");
+for token >> lex("1 + 2.5 * 3") {
+    print(token.kind.name);
+    print(" ");
+}
+println("");

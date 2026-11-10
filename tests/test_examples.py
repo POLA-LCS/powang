@@ -198,6 +198,23 @@ class NewFeatureExampleTests(unittest.TestCase):
             "parallel orders: 3",
         )
 
+    def test_tinywang_example(self) -> None:
+        self.check(
+            "tinywang.po",
+            "2.5 = 2.5",
+            "1 + 2 * 3 = 7.0",
+            "(1 + 2) * 3 = 9.0",
+            "2 ^ 8 = 256.0",
+            "2 ^ 3 ^ 2 = 512.0",
+            "sqrt(9) + 1 = 4.0",
+            "sqrt 16 = 4.0",
+            "2 ^ -2 = 0.25",
+            "10 / 4 = 2.5",
+            "1 / 0 -> division by zero",
+            "1 + -> unexpected end of expression",
+            "tokens: INT ADD FLOAT MULT INT EOF",
+        )
+
     def test_operator_overloading_example(self) -> None:
         self.check(
             "operator-overloading.po",
