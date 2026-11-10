@@ -2,6 +2,33 @@
 
 All notable changes to powang are documented here.
 
+## 0.22.0
+
+### Added
+
+- `project.engine` in `project.po` selects `tree` or `vm` for a project run.
+- `powang run --engine=tree|vm` overrides the project engine for one run.
+- Imported module images join the optional bytecode cache with source and transitive dependency hashes.
+- Runtime block scopes. Block locals, loop variables, catch bindings and match bindings are hidden after their scope ends.
+- `powang vm abi` and `powang vm abi --json` generate the native opcode, operand and tag contract as a C header or JSON.
+- The native VM contract is documented in `docs/phase-4b-bytecode-vm/implementation/V10-native-vm-contract.md`.
+
+### Changed
+
+- The bytecode VM is the default execution engine. The tree walker remains available with `--engine=tree` and `POWANG_ENGINE=tree`.
+- The language version is `0.22.0` and the package version is `0.22.0`.
+
+### Fixed
+
+- Errors inside catch blocks now reach enclosing handlers and enclosing finally blocks.
+- Postfix `?` propagation runs active finally blocks, including nested ones.
+- Break and continue inside a finally body discard the pending error and clean up the handler.
+- Block locals no longer leak into the module scope, the task clone or a later block iteration.
+- Task handles copied by a typed declaration resolve to the live task in `wait`, `cancel` and `task_status`.
+- `performOperation` no longer recurses forever when an implicit cast makes no progress.
+- Deep recursion reports the language recursion error instead of a Python traceback.
+- Function copies keep their bytecode metadata.
+
 ## 0.21.0
 
 ### Added

@@ -1,6 +1,6 @@
 # Phase 4B Status
 
-Purpose: track the V0 to V9 gates, the `src/vm` module ownership and the Appendix F acceptance checklist.
+Purpose: track the V0 to V10 gates, the `src/vm` module ownership and the Appendix F acceptance checklist.
 
 Status values:
 
@@ -25,24 +25,25 @@ Update this file in the same commit that closes a task checklist box. A phase be
 | V6 | Modules, project and packages | gate green | 0.21.0 | see git log |
 | V7 | Errors and references | gate green | 0.21.0 | see git log |
 | V8 | Async and tasks | gate green | 0.21.0 | see git log |
-| V9 | Parity and default switch | in progress | 0.21.0 | see git log |
+| V9 | Parity and default switch | released | 0.22.0 | see git log |
+| V10 | Native ABI and runtime limits | gate green | 0.22.0 | see git log |
 
 Design documents: complete.
 
 Contracts document: complete.
 
-The V9 gate is in progress by design. The VM is opt in at `0.21.0`. The default engine switch waits for one full release with zero differential mismatches, as the design requires.
+The VM became the default engine in `0.22.0`. The tree walker remains the reference engine and the fallback with `--engine=tree` and `POWANG_ENGINE=tree`.
 
-Recorded results for `0.21.0`:
+Recorded results for `0.22.0`:
 
-- Tree suite: 580 tests, all pass.
-- VM suite with `POWANG_ENGINE=vm`: 580 tests, all pass.
+- Default VM suite: 593 tests, all pass.
+- Tree fallback suite with `POWANG_ENGINE=tree`: 593 tests, all pass.
 - Differential example corpus: every `.po` file under `examples`, zero mismatches.
 - Differential inline corpus: 13 programs, zero mismatches.
-- Seeded fuzzer: 1000 generated programs on seed 2026, 7 oracle crashes skipped, zero mismatches.
 - Error parity corpus: 13 cases, identical output, error text and exit code.
-- Disassembler, trace, JSON output, image round trip, cache, engine flag and verifier reject tests pass.
+- Seeded fuzzer: 1000 generated programs on seed 7 and 1000 on seed 2026, zero skips and zero mismatches.
 - Stress corpus: large containers, many closures, many awaited tasks, large string slicing and repeated runs.
+- Project engine, module cache, block scopes, task handle resolution, native ABI, disassembler, trace, JSON output, image round trip, cache, engine flag and verifier reject tests pass.
 
 ## 2. Module status
 
@@ -62,16 +63,16 @@ Recorded results for `0.21.0`:
 | `src/vm/disasm.py` | V0 | implemented |
 | `src/vm/trace.py` | V0 | implemented |
 | `src/vm/differential.py` | V0 | implemented |
+| `src/vm/fuzz.py` | V9 | implemented |
 | `src/vm/cli.py` | V0 | implemented |
 | `src/vm/dispatch.py` | V2 | implemented |
 | `src/vm/declarations.py` | V4 | implemented |
 | `src/vm/modules.py` | V6 | implemented |
 | `src/vm/tasks.py` | V8 | implemented |
 | `src/vm/bench.py` | V9 | implemented |
+| `src/vm/native_abi.py` | V10 | implemented |
 
-Tests live in the repository `tests/` directory, not under `src/vm/tests`. The design document's recommended `src/vm/tests/` layout is a suggestion. The project keeps one test discovery root so the tree and VM suites run together.
-
-`src/vm/compiler.py` and `src/vm/interpreter.py` were extended phase by phase without changing their public names. `src/vm/values.py`, `src/vm/verifier.py` and `src/vm/image.py` keep the same public names.
+Tests live in the repository `tests/` directory, not under `src/vm/tests`. The design document's recommended `src/vm/tests/` layout is a suggestion. The project keeps one test discovery root so the default and fallback suites run together.
 
 ## 3. Appendix F acceptance checklist
 
@@ -93,22 +94,22 @@ Tests live in the repository `tests/` directory, not under `src/vm/tests`. The d
 Notes:
 
 - "Every opcode has at least one unit test" is covered by the registry encoding test, the handler coverage guard and the feature tests. A dedicated per opcode execution test for every opcode is not present. The coverage guard fails when an opcode name disappears from the interpreter source.
-- The default switch is deliberately deferred. The VM remains opt in at `0.21.0`.
+- The VM became the default only after the opt-in release with zero mismatches.
 
 ## 4. How to run the gates
 
 Run these commands from the repository root in Windows PowerShell.
 
-The tree suite:
+The default VM suite:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-The full suite on the VM:
+The tree fallback suite:
 
 ```powershell
-$env:POWANG_ENGINE = "vm"
+$env:POWANG_ENGINE = "tree"
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 Remove-Item Env:\POWANG_ENGINE
 ```
@@ -116,7 +117,7 @@ Remove-Item Env:\POWANG_ENGINE
 The VM unit and integration tests:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest tests.test_vm_foundation tests.test_vm_runtime tests.test_vm_tooling tests.test_vm_differential tests.test_vm_errors -v
+.\.venv\Scripts\python.exe -m unittest tests.test_vm_foundation tests.test_vm_runtime tests.test_vm_tooling tests.test_vm_differential tests.test_vm_errors tests.test_vm_stress -v
 ```
 
 The differential example corpus:
@@ -136,6 +137,7 @@ The disassembler:
 
 ```powershell
 .\.venv\Scripts\python.exe powang.py vm disasm examples\modern.po
+.\.venv\Scripts\python.exe powang.py vm disasm --json examples\modern.po
 ```
 
 Trace mode:
@@ -162,12 +164,19 @@ The optional bytecode cache:
 .\.venv\Scripts\python.exe powang.py vm run --vm-cache examples\modern.po
 ```
 
+The native ABI contract:
+
+```powershell
+.\.venv\Scripts\python.exe powang.py vm abi
+.\.venv\Scripts\python.exe powang.py vm abi --json
+```
+
 The engine selection:
 
 ```powershell
 .\.venv\Scripts\python.exe powang.py --engine=tree examples\modern.po
 .\.venv\Scripts\python.exe powang.py --engine=vm examples\modern.po
-$env:POWANG_ENGINE = "vm"
+$env:POWANG_ENGINE = "tree"
 .\.venv\Scripts\python.exe powang.py examples\modern.po
 Remove-Item Env:\POWANG_ENGINE
 ```
@@ -194,14 +203,13 @@ Error snapshots: <pass or fail>
 VM unit tests: <n> tests, <n> failures
 Known limitations: <none or list>
 Commit range: <first>..<last>
-Version: <0.20.x or 0.21.0>
+Version: <0.21.0 or 0.22.0>
 ```
 
 ## 6. Known limitations
 
-- The Python VM is a correctness reference. It is not expected to beat the tree walker on every program. The benchmark report shows the measured ratio.
-- Block locals share the module store with module globals. Task isolation treats names that the compiler did not record as module declarations as local and does not clone them. A block local that shadows a module global name is treated as a module global for task isolation.
-- The `project.engine` selection source is not available because the `Project` value has no `engine` field. Use `--engine=` or `POWANG_ENGINE` instead.
-- The optional cache covers the entry program image. Imported modules are compiled on demand and are not written to the cache.
-- The fuzzer skips a generated program when the tree walker raises a Python traceback or reports an internal error. Those cases are oracle crashes, not semantic references.
-- The VM remains opt in. The default engine is still `tree`.
+- The Python reference VM uses the host Python allocator and garbage collector. A native VM owns its own heap policy. There is no separate collector in the Python engine by design.
+- The native VM is a separate implementation target. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes. A production native VM is not part of the Python repository.
+- Preemptive scheduling and coroutine suspension are not part of the language model. Lazy tasks and worker tasks run without arbitrary expression suspension. A future coroutine model needs a new bytecode version and a new task state machine.
+- A JIT is not part of this phase. It can be added behind the same verifier, contract and differential suite.
+- The optional cache stores the entry program image and imported module images. It is off by default and enabled with `--vm-cache`.

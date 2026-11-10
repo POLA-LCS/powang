@@ -665,17 +665,19 @@ state engine is `vm`, it delegates to `VM.call_function`.
 
 ## 11. Engine selection
 
-`InterpreterState` gains `engine: str = "tree"`. Accepted values are `tree`
+`InterpreterState` gains `engine: str = "vm"`. Accepted values are `tree`
 and `vm`. Precedence:
 
 1. `--engine=tree` or `--engine=vm` on the command line.
 2. `POWANG_ENGINE` environment variable.
-3. Default `tree`. The current `Project` value has no `engine` field, so a
-   project file cannot select an engine yet. This is a recorded gap.
+3. `project.engine` from a loaded `Project` value.
+4. Default `vm`.
 
 The module loader evaluates imported modules with the active engine. In `vm`
 mode a module body is compiled and executed by the VM, then exported with the
-same export rules as `evaluate_module_ast`.
+same export rules as `evaluate_module_ast`. When the optional bytecode cache is
+enabled, imported module images are cached with their source and transitive
+dependency hashes.
 
 ## 12. CLI
 

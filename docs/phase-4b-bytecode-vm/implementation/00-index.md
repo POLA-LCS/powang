@@ -46,6 +46,7 @@ Each phase file uses the same section order:
 | `V7-errors-and-references.md` | V7 | Error values, try, catch, finally, error frames and positions, postfix question mark propagation, references, reference parameters, reference pipelines, reference lifetime checks | V6 closed | Error and reference suites pass on both engines, runtime error text matches exactly |
 | `V8-async-and-tasks.md` | V8 | Async declarations and lambdas, lazy tasks, spawn and await, waits, cancellation, status, task errors and cleanup, top level await, worker pool limits | V7 closed | Async and task suites pass on both engines, cleanup tests pass under repeated starts and shutdowns |
 | `V9-parity-and-default-switch.md` | V9 | Full differential suite, all examples, all error snapshots, disassembler and trace documentation, optional cached images, opt in release, default switch | V8 closed | One release opt in with zero mismatches, then one release default with tree fallback, no LSP change |
+| `V10-native-vm-contract.md` | V10 | Native ABI header and JSON contract, runtime limits, host memory and async boundaries | V9 released | The native contract is generated from the registry and covered by tests |
 
 ## 3. Dependency order
 
@@ -60,6 +61,7 @@ The gate order is strict:
 7. V6 must close before V7 starts.
 8. V7 must close before V8 starts.
 9. V8 must close before V9 starts.
+10. V9 must close before V10 starts.
 
 Work may overlap inside one phase only when the interfaces in `00-contracts.md` are frozen. A phase gate is not green until its differential corpus reports zero mismatches and the existing suite is unchanged.
 
@@ -73,13 +75,12 @@ Parallel work that does not change a gate:
 ## 4. Version strategy
 
 - The bytecode format version is `1` from V0. It changes only when an opcode is renumbered or an image table changes shape.
-- The language version for the implementation train is `0.20.x` for V0 through V8.
-- The language version at VM completion is `0.21.0`. V9 is the first release that may carry `0.21.0`.
+- The language version for the implementation train is `0.21.0` for V0 through V9.
+- `0.21.0` is the opt in release. The VM is available through `--engine=vm`, `POWANG_ENGINE=vm` and `project.engine >> "vm"`.
 - The target tooling version is powang-lsp `0.27.0`. The LSP itself keeps the same parser and checker.
-- The tree walker remains the default engine from V0 through the V9 gate.
-- The VM is opt in through `--engine=vm`, `POWANG_ENGINE=vm` or the project metadata engine key.
-- The VM becomes the default only after one full release with the VM opt in and zero differential mismatches.
-- After the default switch, the tree walker remains available as `--engine=tree` for at least one release.
+- `0.22.0` is the default switch release. The VM is the default engine and the tree walker remains the reference engine and the fallback.
+- The tree walker remains available as `--engine=tree` and `POWANG_ENGINE=tree` for at least one release after the default switch.
+- V10 defines the native ABI contract for a separate native implementation.
 - A cached image is valid only when the format version, language version, source hash, compiler version, package version, module dependency hashes and engine feature flags all match.
 
 ## 5. Commit convention

@@ -35,8 +35,8 @@ Start the interactive REPL by running `python powang.py` with no arguments.
 
 Powang ships two execution engines.
 
-- `tree` is the tree-walking interpreter. It is the reference engine and the default.
-- `vm` is the stack based bytecode virtual machine in `src/vm`.
+- `vm` is the stack based bytecode virtual machine in `src/vm`. It is the default engine.
+- `tree` is the tree-walking interpreter. It is the reference engine and the fallback.
 
 Select an engine per run:
 
@@ -48,7 +48,18 @@ python powang.py --engine=tree main.po
 Select a default engine for a shell session:
 
 ```sh
+POWANG_ENGINE=tree python powang.py main.po
 POWANG_ENGINE=vm python powang.py main.po
+```
+
+A project can select an engine in `project.po`:
+
+```po
+module project;
+
+export project: Project = Project.[
+    engine >> "vm"
+];
 ```
 
 Inspect, trace or compare a program:
@@ -60,9 +71,9 @@ python powang.py vm diff main.po
 python powang.py vm bench --runs 3
 ```
 
-The VM is opt in. The tree walker remains the reference oracle and the fallback.
-Both engines must produce the same output, the same runtime error text, the same
-source positions and the same exit code.
+The VM is the default. The tree walker remains the reference oracle and the
+fallback. Both engines must produce the same output, the same runtime error
+text, the same source positions and the same exit code.
 
 ## Language at a glance
 

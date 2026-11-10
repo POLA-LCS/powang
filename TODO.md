@@ -127,8 +127,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
     - Plan: `docs/phase-4b-bytecode-vm/README.md`.
     - Implementation plans: `docs/phase-4b-bytecode-vm/implementation/`.
     - Target versions: powang `0.21.0`, powang-lsp `0.27.0`.
-    - The VM remains opt-in until one full release has zero differential mismatches.
+    - The VM became the default engine in `0.22.0` after the opt-in release with zero mismatches.
     - The tree-walker remains the reference engine and the fallback.
+    - Native ABI and runtime limits are recorded in `V10-native-vm-contract.md`.
 
 ## Tooling
 
@@ -191,7 +192,7 @@ Open questions:
 
 ## Recently completed
 
-- [x] Phase 4B bytecode VM, engine selection and differential parity.
+- [x] Phase 4B bytecode VM, engine selection, default switch, native ABI and differential parity.
 - [x] Phase 1 correctness and guardrails.
 - [x] Phase 2A loops, labels, slicing, annotations, frames, spawned methods and constant-condition simplification.
 - [x] Phase 2B1 function types and lambdas.
