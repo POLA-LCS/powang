@@ -606,13 +606,27 @@ print(hello("wildcard"));
 print("\n");
 ```
 
-Standard library modules are imported by name.
+Bare names import built-in language modules from the Powang `modules/` directory. They do not search the input directory by default.
 
 ```po
 use strings;
 use json;
 use url;
 use crypto;
+```
+
+Relative modules use leading dots. One dot searches the input directory, two dots search its parent, and each additional dot goes up one more directory.
+
+```po
+use .helper;       ## <input-directory>/helper.po or helper/
+use ..shared;      ## <input-directory>/../shared.po or shared/
+use ...common;     ## <input-directory>/../../common.po or common/
+```
+
+Explicit path imports remain available and are unaffected.
+
+```po
+use "./lib/greeting.po" as greeting;
 ```
 
 ### Cross-module type checking
@@ -948,7 +962,7 @@ Output and input builtins:
 
 ## Standard library
 
-Import with `use name;`. Standard library modules live under `modules/`.
+Bare `use name;` resolves a built-in module under `modules/`. Use leading dots for relative files or directories, or a quoted path for an explicit path.
 
 | Module | Purpose |
 |---|---|

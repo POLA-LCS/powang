@@ -81,23 +81,50 @@ class ModuleLoader:
             return Path(relative).resolve()
         return self.interpreter_path
 
-    def resolve(self, kind: str, name: str, base: Path | None = None) -> Path:
+    def resolve(
+        self,
+        kind: str,
+        name: str,
+        base: Path | None = None,
+        level: int = 0,
+    ) -> Path:
         if kind == 'name':
-            for base_path in self.state.module_search_paths:
-                modules_root = base_path / 'modules'
-                candidate = modules_root / name
-                if candidate.exists():
-                    return candidate.resolve()
-                file_candidate = modules_root / f'{name}.po'
-                if file_candidate.is_file():
-                    return file_candidate.resolve()
+            ## Bare names are language built-ins. They always resolve from the
+            ## interpreter's modules directory, never from the input file.
             modules_root = self.interpreter_path.parent / 'modules'
             candidate = modules_root / name
-            if not candidate.exists() and (modules_root / f'{name}.po').is_file():
-                candidate = modules_root / f'{name}.po'
-        else:
-            importing = base if base is not None else self.default_base()
-            candidate = importing.parent / Path(name)
+            if candidate.exists():
+                return candidate.resolve()
+            file_candidate = modules_root / f'{name}.po'
+            if file_candidate.is_file():
+                return file_candidate.resolve()
+
+            ## Explicitly configured roots still support the package manager
+            ## and legacy project path configuration.
+            for base_path in self.state.module_search_paths:
+                configured_root = base_path / 'modules'
+                configured = configured_root / name
+                if configured.exists():
+                    return configured.resolve()
+                configured_file = configured_root / f'{name}.po'
+                if configured_file.is_file():
+                    return configured_file.resolve()
+            return candidate.resolve()
+
+        importing = base if base is not None else self.default_base()
+        if kind == 'relative':
+            root = importing.parent if importing.is_file() or importing.suffix else importing
+            for _ in range(max(0, level - 1)):
+                root = root.parent
+            candidate = root / name
+            if candidate.exists():
+                return candidate.resolve()
+            file_candidate = root / f'{name}.po'
+            if file_candidate.is_file():
+                return file_candidate.resolve()
+            return candidate.resolve()
+
+        candidate = importing.parent / Path(name)
         return candidate.resolve()
 
     def load(self, use_value: dict[str, Any]) -> PowangModule:
@@ -109,7 +136,10 @@ class ModuleLoader:
             base = Path(base_value).resolve()
         elif self.base_stack:
             base = self.base_stack[-1]
-        path = self.resolve(kind, name, base)
+        level = use_value.get('level', 0)
+        if not isinstance(level, int):
+            level = 0
+        path = self.resolve(kind, name, base, level)
         return self.load_path(path)
 
     def load_path(self, path: Path) -> PowangModule:

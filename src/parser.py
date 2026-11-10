@@ -245,8 +245,21 @@ class Parser:
     def helper_UseModule(self):
         line = self.next.line if self.next is not None else None
         column = self.next.column if self.next is not None else None
+        module_level = 0
         if self.next.type == LexerTokenType.IDENTIFIER:
             module_kind = 'name'
+            module_spec = self.Identifier()['value']
+        elif self.next.type in {
+            LexerTokenType.DOT,
+            LexerTokenType.ELLIPSIS,
+        }:
+            module_kind = 'relative'
+            while self.next.type in {
+                LexerTokenType.DOT,
+                LexerTokenType.ELLIPSIS,
+            }:
+                dot = self.advance('relative module prefix')
+                module_level += 3 if dot.type == LexerTokenType.ELLIPSIS else 1
             module_spec = self.Identifier()['value']
         elif self.next.type == LexerTokenType.STRING_LITERAL:
             module_kind = 'path'
@@ -254,7 +267,7 @@ class Parser:
         else:
             raise powang_throw(powang_error_syntax(
                 'use statement',
-                "Expected a module name or a path string",
+                "Expected a module name, a relative module or a path string",
                 [
                     f"but {LexerTokenType.toStr(self.next.type)} was encountered",
                 ],
@@ -282,6 +295,7 @@ class Parser:
         return doToken(ParserTokenType.USE_EXPRESSION, {
             'kind': module_kind,
             'name': module_spec,
+            'level': module_level,
             'alias': alias,
             'wildcard': wildcard,
             'base': str(self.source_path) if self.source_path is not None else None,

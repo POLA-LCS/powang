@@ -4857,11 +4857,14 @@ class _TypeChecker:
     def _load_import(self, value: dict) -> Optional[_ModuleTypeInfo]:
         kind = value.get('kind', 'name')
         name = value.get('name', '')
+        level = value.get('level', 0)
+        if not isinstance(level, int):
+            level = 0
         base_value = value.get('base')
         base = Path(base_value) if isinstance(base_value, str) and base_value else None
         try:
             loader = ModuleLoader(state=get_state())
-            path = loader.resolve(kind, name, base)
+            path = loader.resolve(kind, name, base, level)
         except Exception as error:
             self._error(
                 f"cannot resolve module '{name}'",

@@ -3,8 +3,14 @@
 ## Supported syntax:
 ##   numbers, + - * /, ^ for powers, sqrt(...) and parentheses.
 ##
-## The example shows enums, user types, methods, references and error handling.
+## The example shows enums, user types, methods, modules, references and error handling.
+##
+## Run the default batch examples with:
+##   python powang.py examples/tinywang.po
+## Run the interactive prompt with:
+##   python powang.py examples/tinywang.po interactive
 
+use args;
 use math;
 
 type TokenKind enum {
@@ -256,32 +262,57 @@ fun evaluate(source: str): num {
     return value;
 }
 
-expressions := [
-    "2.5",
-    "1 + 2 * 3",
-    "(1 + 2) * 3",
-    "2 ^ 8",
-    "2 ^ 3 ^ 2",
-    "sqrt(9) + 1",
-    "sqrt 16",
-    "2 ^ -2",
-    "10 / 4",
-    "1 / 0",
-    "1 +",
-];
-
-for expr >> expressions {
-    try {
-        value := evaluate(expr);
-        println($"{expr} = {value}");
-    } catch problem {
-        println($"{expr} -> {problem.message}");
+fun run_interactive() {
+    expr: str;
+    loop {
+        inputf(expr, ">> ");
+        if expr == "exit" {
+            break;
+        }
+        try {
+            value := evaluate(expr);
+            println($"| {value}");
+        } catch problem {
+            println($"{expr} -> {problem.message}");
+        }
     }
+    println("Finished.");
 }
 
-print("tokens: ");
-for token >> lex("1 + 2.5 * 3") {
-    print(token.kind.name);
-    print(" ");
+fun run_batch() {
+    expressions := [
+        "2.5",
+        "1 + 2 * 3",
+        "(1 + 2) * 3",
+        "2 ^ 8",
+        "2 ^ 3 ^ 2",
+        "sqrt(9) + 1",
+        "sqrt 16",
+        "2 ^ -2",
+        "10 / 4",
+        "1 / 0",
+        "1 +",
+    ];
+
+    for expr >> expressions {
+        try {
+            value := evaluate(expr);
+            println($"{expr} = {value}");
+        } catch problem {
+            println($"{expr} -> {problem.message}");
+        }
+    }
+
+    print("tokens: ");
+    for token >> lex("1 + 2.5 * 3") {
+        print(token.kind.name);
+        print(" ");
+    }
+    println("");
 }
-println("");
+
+if args.count() > 0 && args.at(0) == "interactive" {
+    run_interactive();
+} else {
+    run_batch();
+}

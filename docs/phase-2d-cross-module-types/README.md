@@ -52,8 +52,10 @@ The checker keeps a module cache keyed by resolved path. The cache is shared by 
 
 The checker resolves modules with the same rules as the runtime loader:
 
-- `use name` searches `modules/name`.
-- `use "./path.po"` resolves relative to the importing file.
+- `use name` searches the Powang `modules/name` directory. It is reserved for built-in language modules.
+- `use .name` resolves `<importing-directory>/name` or `<importing-directory>/name.po`.
+- `use ..name` resolves the same name in the parent of the importing directory. Each additional leading dot goes up one more directory.
+- `use "./path.po"` resolves an explicit path relative to the importing file.
 - Directory modules read every `.po` file in the directory.
 
 For each imported module:

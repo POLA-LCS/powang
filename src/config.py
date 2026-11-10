@@ -269,9 +269,6 @@ def load_config(state: Any, base_path: Path | str | None = None) -> None:
             if path.strip():
                 state.module_search_paths.append(Path(path).strip().resolve())
 
-    if not state.module_search_paths:
-        state.module_search_paths = [Path.cwd().resolve()]
-
 
 def load_project_config(state: Any, base_path: Path | str | None = None) -> bool:
     root = Path(base_path).resolve().parent if base_path else Path.cwd()

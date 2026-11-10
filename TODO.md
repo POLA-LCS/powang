@@ -8,7 +8,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 - [ ] Phase 4A: debugger and debug adapter.
   - Depends on stable source spans and a debug adapter design.
-  - Target versions: powang `0.18.0`, powang-lsp `0.24.0`.
+  - Target versions: powang `0.19.0`, powang-lsp `0.25.0`.
 
 ## Language features in order
 
@@ -61,6 +61,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] Preserve module boundaries for traits and object types.
    - [x] Qualified type annotations and construction.
    - [x] Import cycle detection.
+   - [x] Built-in `use name`, relative `use .name` and `use ..name`, and explicit path imports.
    - Plan: `docs/phase-2d-cross-module-types/README.md`
 
 6. [x] Async and await.
