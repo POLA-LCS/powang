@@ -261,7 +261,7 @@ The call evaluator expands spread arguments before argument binding:
 sum(...values);
 ```
 
-The spread source must be an `arr`, `tup` or `set`. A map spreads to an array of key-value tuples. A string spreads to an array of one-character strings.
+The spread source must be an `arr`, `tup` or `set`. A map spreads to an array of key-value tuples. A string spreads to an array of characters.
 
 ### 6.4 Runtime metadata
 

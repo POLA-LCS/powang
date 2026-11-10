@@ -398,13 +398,13 @@ class PowangString(PowangTypeBase):
     def size(self) -> 'PowangInteger':
         return PowangInteger(len(self.data))
 
-    def index(self, index: 'PowangAny') -> 'PowangString':
-        return PowangString(
+    def index(self, index: 'PowangAny') -> 'PowangChar':
+        return PowangChar(
             self.data[_resolved_index(index, len(self.data), f'{PowangString.type} indexing')]
         )
 
     def iterate(self) -> 'PowangArray':
-        return PowangArray([PowangString(char) for char in self.data])
+        return PowangArray([PowangChar(character) for character in self.data])
 
     def __add__(self, right: 'PowangAny'):
         if right.type in {PowangString.type, PowangChar.type}:

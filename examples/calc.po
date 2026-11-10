@@ -37,7 +37,7 @@ fun lex(source: str): arr[Token] {
     index := 0;
 
     loop if index < size(source) {
-        ch := source.char_at(index);
+        ch := source[index];
 
         if is_space(ch) {
             index += 1;
@@ -48,17 +48,17 @@ fun lex(source: str): arr[Token] {
             start := index;
             is_float := false;
 
-            loop if index < size(source) && is_digit(source.char_at(index)) {
+            loop if index < size(source) && is_digit(source[index]) {
                 index += 1;
             }
 
-            if index < size(source) && source.char_at(index) == '.' {
+            if index < size(source) && source[index] == '.' {
                 is_float = true;
                 index += 1;
-                if index >= size(source) || !is_digit(source.char_at(index)) {
+                if index >= size(source) || !is_digit(source[index]) {
                     error("missing decimal part");
                 }
-                loop if index < size(source) && is_digit(source.char_at(index)) {
+                loop if index < size(source) && is_digit(source[index]) {
                     index += 1;
                 }
             }
@@ -71,38 +71,40 @@ fun lex(source: str): arr[Token] {
             continue;
         }
 
+        ch_text := str.[ch];
+
         if ch == '+' {
-            tokens &> arr.push(Token.[TokenKind.ADD, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.ADD, ch_text]);
             index += 1;
             continue;
         }
         if ch == '-' {
-            tokens &> arr.push(Token.[TokenKind.MINUS, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.MINUS, ch_text]);
             index += 1;
             continue;
         }
         if ch == '*' {
-            tokens &> arr.push(Token.[TokenKind.MULT, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.MULT, ch_text]);
             index += 1;
             continue;
         }
         if ch == '/' {
-            tokens &> arr.push(Token.[TokenKind.DIV, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.DIV, ch_text]);
             index += 1;
             continue;
         }
         if ch == '^' {
-            tokens &> arr.push(Token.[TokenKind.POW, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.POW, ch_text]);
             index += 1;
             continue;
         }
         if ch == '(' {
-            tokens &> arr.push(Token.[TokenKind.LEFT_PAREN, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.LEFT_PAREN, ch_text]);
             index += 1;
             continue;
         }
         if ch == ')' {
-            tokens &> arr.push(Token.[TokenKind.RIGHT_PAREN, source[index]]);
+            tokens &> arr.push(Token.[TokenKind.RIGHT_PAREN, ch_text]);
             index += 1;
             continue;
         }

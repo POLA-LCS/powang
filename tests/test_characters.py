@@ -25,27 +25,29 @@ class CharacterLiteralTests(unittest.TestCase):
         self.assertEqual(result.stdout, "A|65|1|char|char|true|128512\n")
         assert_no_traceback(self, result)
 
-    def test_string_index_stays_str_and_char_access_returns_char(self) -> None:
+    def test_string_index_and_get_return_char(self) -> None:
         result = run_source(
             "value := \"A\"[0];\n"
             "println(typeof(value));\n"
-            "println(typeof(\"abc\".char_at(0)));\n"
+            "println(typeof(\"abc\".get(0)));\n"
         )
         self.assertEqual(result.returncode, 0, result.combined)
-        self.assertEqual(result.stdout, "str\nchar\n")
+        self.assertEqual(result.stdout, "char\nchar\n")
 
     def test_string_access_returns_char(self) -> None:
         result = run_source(
             "text := \"aé😀\";\n"
             "print(text[1]); print(\"|\");\n"
-            "print(text.char_at(1)); print(\"|\");\n"
-            "print(text.char_at(-1)); print(\"|\");\n"
+            "print(text[-1]); print(\"|\");\n"
             "print(typedeep(text.chars())); print(\"|\");\n"
+            "println(typeof(text[0]));\n"
+            "for ch >> text { print(ch); print(\" \"); }\n"
+            "println(\"\");\n"
             "for ch >> text.chars() { print(ch); print(\" \"); }\n"
             "println(\"\");\n"
         )
         self.assertEqual(result.returncode, 0, result.combined)
-        self.assertEqual(result.stdout, "é|é|😀|arr[char]|a é 😀 \n")
+        self.assertEqual(result.stdout, "é|😀|arr[char]|char\na é 😀 \na é 😀 \n")
 
     def test_concatenation_and_comparison(self) -> None:
         result = run_source(
@@ -150,7 +152,7 @@ class CharacterNativeMethodTests(unittest.TestCase):
 class CharacterTypeTests(unittest.TestCase):
     def test_assignment_and_function_parameters(self) -> None:
         result = run_source(
-            "fun first(text: str): char >> text.char_at(0);\n"
+            "fun first(text: str): char >> text[0];\n"
             "ch: char = 'a';\n"
             "text: str = 'b';\n"
             "println(ch);\n"
@@ -159,6 +161,24 @@ class CharacterTypeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.combined)
         self.assertEqual(result.stdout, "a\nb\nP\n")
+
+    def test_string_spread_yields_char(self) -> None:
+        result = run_source(
+            "fun count(values: any...): int >> size(values);\n"
+            "fun first(values: char...): char >> values[0];\n"
+            "print(count(...\"ab\")); print(\"|\");\n"
+            "println(first(...\"xy\"));\n"
+        )
+        self.assertEqual(result.returncode, 0, result.combined)
+        self.assertEqual(result.stdout, "2|x\n")
+
+    def test_typed_string_iteration_binds_char(self) -> None:
+        result = run_source(
+            "for ch: char >> \"ab\" { print(ch); }\n"
+            "println(\"\");\n"
+        )
+        self.assertEqual(result.returncode, 0, result.combined)
+        self.assertEqual(result.stdout, "ab\n")
 
     def test_string_to_char_annotation_requires_cast(self) -> None:
         result = run_source("ch: char = \"a\";\n")

@@ -3006,11 +3006,11 @@ class _TypeChecker:
             if method_name == 'size':
                 return INTEGER
         if receiver_type == STRING:
-            if method_name in {'add', 'sub', 'mul', 'reverse', 'get'}:
+            if method_name in {'add', 'sub', 'mul', 'reverse'}:
                 return mutating_return() if is_reference else STRING
             if method_name == 'div':
                 return _array_of(STRING)
-            if method_name == 'char_at':
+            if method_name == 'get':
                 return CHAR
             if method_name == 'chars':
                 return _array_of(CHAR)
@@ -3080,7 +3080,7 @@ class _TypeChecker:
         target_type = self._infer(value.get('target'))
         self._infer(value.get('index'))
         if target_type == STRING:
-            return STRING
+            return CHAR
         if _is_array_type(target_type):
             return _array_element_type(target_type)
         # Map values have no statically known element type in this slice.
@@ -4361,6 +4361,8 @@ class _TypeChecker:
             element_type = _array_element_type(iterable_type) if _is_array_type(iterable_type) else ANY
             if _is_set_type(iterable_type):
                 element_type = _set_element_type(iterable_type)
+            if iterable_type == STRING:
+                element_type = CHAR
             literal_elements = self._literal_array_elements(iterable_node)
 
             if literal_elements is not None and isinstance(iterator, dict):

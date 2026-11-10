@@ -9,7 +9,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [ ] Phase 4A: debugger and debug adapter.
   - Depends on stable source spans and a debug adapter design.
   - Target versions: powang `0.20.0`, powang-lsp `0.26.0`.
-  - The `char` type shipped in powang `0.19.0` and powang-lsp `0.25.0`.
+  - The `char` type shipped in powang `0.19.1` and powang-lsp `0.25.1`.
 
 ## Language features in order
 
@@ -99,10 +99,11 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] `char` as a Unicode scalar value.
    - [x] Single-quoted character literals and `\u{HEX}` escapes.
    - [x] `ord`, `chr`, `digit_value` and ASCII character predicates.
-   - [x] `str.char_at` and `str.chars` for explicit character access.
+   - [x] String indexing, string iteration and `str.get` return `char`.
+   - [x] `str.chars` materializes an `arr[char]`.
    - [x] Native `char` methods.
    - [x] Character concatenation, ordering, hashing and casts.
-   - String indexing remains a one-character `str` for compatibility.
+   - String slicing remains a `str`, and spread over a string yields `char`.
    - Plan: `docs/phase-3d-character-type/README.md`
 
 10. [ ] Debugger.

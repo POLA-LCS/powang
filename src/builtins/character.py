@@ -1,8 +1,8 @@
 """Character predicates and code point helpers.
 
 Every predicate accepts either a ``char`` or a one-character ``str``. The
-latter keeps older code that indexes a string working while new code can use
-``str.char_at`` or ``str.chars`` and stay in ``char``.
+latter keeps older code working while new code can use string indexing,
+string iteration or ``str.chars`` and stay in ``char``.
 """
 
 from ..powang_types import *

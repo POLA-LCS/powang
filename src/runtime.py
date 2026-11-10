@@ -1522,7 +1522,7 @@ def _spread_values(value: PowangAny) -> list[PowangAny]:
     if value.type == PowangMap.type:
         return [PowangTuple([key, item]) for key, item in value.data.items()]
     if value.type == PowangString.type:
-        return [PowangString(char) for char in value.data]
+        return [PowangChar(character) for character in value.data]
     raise powang_throw(powang_error_type_match(
         'spread',
         f'{PowangArray.type}, {PowangTuple.type}, {PowangSet.type}, '

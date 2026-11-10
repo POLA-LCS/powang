@@ -1,6 +1,6 @@
 # Phase 3D: Character type
 
-Status: complete. Shipped in powang `0.19.0` and powang-lsp `0.25.0`.
+Status: complete. Shipped in powang `0.19.1` and powang-lsp `0.25.1`.
 
 ## Goal
 
@@ -22,21 +22,20 @@ native character types planned for compiled backends.
   annotation does not require a cast when the source is a `char` because that
   conversion cannot fail.
 
-## String access during migration
+## String access
 
-String indexing and string iteration keep returning a one-character `str`.
-That preserves existing code and all existing examples.
+String indexing and string iteration return `char`. Slicing returns `str`,
+because a slice is still a string.
 
-New code should use explicit character access:
-
-- `str.char_at(index)` returns a `char` and supports negative indexes.
-- `str.chars()` returns `arr[char]`.
-- `str.get(index)` remains the string-returning index helper.
-- Iterating a `str` still yields one-character strings.
+- `text[index]` returns a `char` and supports negative indexes.
+- `text[start >> end]` returns a `str`.
+- `for character >> text` yields `char`.
+- `str.get(index)` returns a `char`.
+- `str.chars()` returns `arr[char]` when an array is more convenient.
 
 The compiled backend can store strings as UTF-32 or maintain a code point
-index so `char_at` is O(1). The interpreter uses Python's code point strings,
-so `char_at` is O(1) for the current representation.
+index so indexing and `chars` are O(1). The interpreter uses Python's code
+point strings, so indexing is O(1) for the current representation.
 
 ## Builtins
 
@@ -57,15 +56,15 @@ separate opt-in feature.
 `is_alnum`, `is_space`, `is_upper`, `is_lower` and `is_ascii`.
 
 `str.add`, `str.sub`, `str.count` and `str.div` accept a `char` or a `str`
-operand. `str.char_at` and `str.chars` are the character access methods.
+operand. String indexing, string iteration and `str.get` are the character
+access paths. `str.chars` materializes an `arr[char]`.
 
 ## Tooling
 
 - The LSP recognizes character literals in the grammar and semantic tokens.
 - Completion offers `char` as a builtin type.
 - Hover documents `char` and the character builtins.
-- Completion and hover cover character native methods and `str.char_at` and
-  `str.chars`.
+- Completion and hover cover character native methods and `str.chars`.
 - The LSP tracks single-quoted literals when it parses arguments, signatures
   and interpolation expressions.
 
@@ -75,4 +74,4 @@ operand. `str.char_at` and `str.chars` are the character access methods.
 predicates, native methods, typed arrays, match patterns, map and set keys,
 interpolation, invalid literals and unsupported arithmetic. The example
 `examples/characters.po` is part of the example suite. `examples/calc.po` uses
-`char`, `str.char_at`, `is_space` and `is_digit` in its lexer.
+`char`, string indexing, `is_space` and `is_digit` in its lexer.

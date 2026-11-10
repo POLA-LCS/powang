@@ -1,8 +1,7 @@
 ## Character values are Unicode scalar values.
 ##
-## char literals use single quotes. String indexing still returns a
-## one-character str, so this example uses str.char_at and str.chars when a
-## real char is wanted.
+## char literals use single quotes. String indexing and string iteration yield
+## char. Slicing still yields str, and str.chars materializes an arr[char].
 
 ch: char = 'A';
 print(ch); print(" "); print(ord(ch)); print(" "); println(size(ch));
@@ -10,8 +9,9 @@ print(ch); print(" "); print(ord(ch)); print(" "); println(size(ch));
 text := "héllo";
 println(text);
 println(text.chars());
-println(text.char_at(1));
-println(text.char_at(-1));
+println(text[1]);
+println(text[-1]);
+println(typeof(text[1]));
 println(typedeep(text.chars()));
 
 print('a' < 'b'); print(" ");
@@ -45,6 +45,12 @@ println("Z" as char);
 
 println(chr(128512));
 println(ord('😀'));
+
+for character >> "abc" {
+    print(character);
+    print(" ");
+}
+println("");
 
 for character >> "abc".chars() {
     print(character);

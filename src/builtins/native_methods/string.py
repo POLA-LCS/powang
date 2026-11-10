@@ -3,8 +3,7 @@ from ...error import *
 from .common import *
 NATIVE_TYPE = PowangString.type
 METHOD_NAMES = frozenset([
-    'add', 'char_at', 'chars', 'count', 'div', 'get', 'mul', 'reverse',
-    'size', 'sub',
+    'add', 'chars', 'count', 'div', 'get', 'mul', 'reverse', 'size', 'sub',
 ])
 def _string_operand(where: str, method: str, value: PowangAny) -> str:
     if value.type == PowangString.type or value.type == PowangChar.type:
@@ -39,9 +38,6 @@ def _dispatch_string(where: str, method: str, arguments: list[PowangAny]) -> Pow
     if method == 'reverse':
         return _finish(original, PowangString(source.data[::-1]))
     if method == 'get':
-        index = _normalize_index(len(source.data), _int_argument(arguments, 1, -1), method)
-        return PowangString(source.data[index])
-    if method == 'char_at':
         index = _normalize_index(len(source.data), _int_argument(arguments, 1, -1), method)
         return PowangChar(source.data[index])
     if method == 'chars':

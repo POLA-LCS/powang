@@ -981,17 +981,22 @@ emoji := '\u{1F600}';
 
 Escapes include `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0` and `\u{HEX}`. A literal must contain exactly one scalar value. Surrogate code points and values above `U+10FFFF` are rejected. Unicode escapes also work inside strings.
 
-String indexing still returns a one-character `str` so existing code keeps working. Use `str.char_at` or `str.chars` when a real `char` is wanted.
+String indexing and string iteration return `char`. Slicing still returns `str`, so a slice can produce a string while an index produces one character.
 
 ```po
 text := "aé😀";
-print(text[1]);          ## é, as a str
-print(text.char_at(1));  ## é, as a char
-print(text.char_at(-1)); ## 😀, as a char
+print(text[1]);   ## é, as a char
+print(text[-1]);  ## 😀, as a char
 
-for character >> text.chars() {
+for character >> text {
     print(character);
 }
+```
+
+`str.get(index)` also returns a `char`. `str.chars()` materializes the whole string as `arr[char]` when an array is more convenient.
+
+```po
+letters := text.chars();
 ```
 
 Characters concatenate with strings through `+`. Two characters also concatenate into a string. Comparisons use code point order.

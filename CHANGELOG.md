@@ -2,6 +2,18 @@
 
 All notable changes to powang are documented here.
 
+## 0.19.1
+
+### Changed
+
+- String indexing, string iteration and `str.get` now return `char`.
+- Spread over a string now yields `char`.
+- Slicing a string still returns `str`.
+
+### Removed
+
+- `str.char_at`. Use `text[index]`, `str.get(index)` or `str.chars()`.
+
 ## 0.19.0
 
 ### Added
