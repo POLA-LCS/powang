@@ -2,6 +2,15 @@ from ..powang_types import *
 from ..error import *
 from .. import typespec as ts
 
+def explicitCastChar(left: PowangAny) -> Optional[PowangChar]:
+    require(left.defined, lambda: powang_error_undefined_reference('explicit cast', 'left operand'))
+    if (cast_result := PowangChar.cast(left)) is not None:
+        return cast_result
+    if not left.weak.has_value or left.type == PowangNova.type:
+        return PowangChar('\0')
+    return None
+
+
 def explicitCastString(left: PowangAny) -> Optional[PowangString]:
     if not left.defined:
         return PowangString(f'<{left.type if left.type != PowangObjectType.type else left.type_name}: undefined>')
@@ -329,7 +338,7 @@ def can_cast(target: ts.TypeSpec, source_type: str) -> bool:
     return source_type in (
         PowangNova.type, PowangAnyType.type, PowangBoolean.type,
         PowangInteger.type, PowangNumber.type, PowangString.type,
-        PowangArray.type, PowangTuple.type, PowangMap.type,
+        PowangChar.type, PowangArray.type, PowangTuple.type, PowangMap.type,
         PowangErrorValue.type, PowangObjectType.type,
     )
 
@@ -346,6 +355,8 @@ def explicitCast(type, left: PowangAny):
             return explicitCastNumber(left)
         case PowangString.type:
             return explicitCastString(left)
+        case PowangChar.type:
+            return explicitCastChar(left)
         case PowangArray.type:
             return explicitCastArray(left)
         case PowangMap.type:

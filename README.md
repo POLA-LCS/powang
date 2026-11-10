@@ -64,7 +64,7 @@ println(classify(-3));
 
 powang is gradually typed. Annotated declarations, assignments, operators, calls and returns are checked. Unannotated code stays dynamic and degrades to `any`.
 
-Built-in annotation types: `int`, `num`, `str`, `bool`, `arr`, `map`, `set`, `tup`, `any`, `nova`, `obj`, `task`, `file`, `handle`, `error`. Reference parameters use `&T`.
+Built-in annotation types: `int`, `num`, `str`, `char`, `bool`, `arr`, `map`, `set`, `tup`, `any`, `nova`, `obj`, `task`, `file`, `handle`, `error`. Reference parameters use `&T`.
 
 ```po
 undefined_variable: int;
@@ -187,6 +187,15 @@ set.union(unique, [/3, 4]);
 ```
 
 `&>` is sugar for a reference pipeline. `x &> f(y)` is `&x :> f(y)`. The target may be a variable, a property such as `this.x`, or an array element such as `values[0]`. Parentheses are optional for pipeline targets, so a function with one required parameter and default parameters can be called as `value :> strings.split`.
+
+The `char` type also has native methods. `code()` returns the Unicode code point, `to_str()` returns a one-character string, and the ASCII predicates are available as methods.
+
+```po
+letter := 'A';
+print(letter.code());      ## 65
+print(letter.to_str());    ## A
+print(letter.is_alpha());  ## true
+```
 
 ### Copy semantics and locks
 
@@ -960,13 +969,71 @@ Output and input builtins:
 - `input(receptor)` reads one line into `receptor`.
 - `inputf(receptor, prompt)` prints `prompt` and then reads one line into `receptor`.
 
+### Characters
+
+A `char` is one Unicode scalar value, not a byte. Character literals use single quotes.
+
+```po
+letter: char = 'A';
+newline := '\n';
+emoji := '\u{1F600}';
+```
+
+Escapes include `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0` and `\u{HEX}`. A literal must contain exactly one scalar value. Surrogate code points and values above `U+10FFFF` are rejected. Unicode escapes also work inside strings.
+
+String indexing still returns a one-character `str` so existing code keeps working. Use `str.char_at` or `str.chars` when a real `char` is wanted.
+
+```po
+text := "aé😀";
+print(text[1]);          ## é, as a str
+print(text.char_at(1));  ## é, as a char
+print(text.char_at(-1)); ## 😀, as a char
+
+for character >> text.chars() {
+    print(character);
+}
+```
+
+Characters concatenate with strings through `+`. Two characters also concatenate into a string. Comparisons use code point order.
+
+```po
+print("x" + 'y');  ## xy
+print('a' + "b");  ## ab
+print('a' + 'b');  ## ab
+print('a' < 'b');  ## true
+```
+
+Explicit casts convert between `char` and `str`. A string must contain exactly one scalar value when cast to `char`.
+
+```po
+text := 'x' as str;
+letter := "y" as char;
+constructed := char.["z"];
+```
+
+Character builtins accept a `char` or a one-character `str`:
+
+- `is_digit`, `is_alpha`, `is_alnum`, `is_space`, `is_upper`, `is_lower` and `is_ascii` return `bool`.
+- `ord(value)` returns the Unicode code point.
+- `chr(code)` returns the character for a Unicode scalar value.
+- `digit_value(value)` returns `0` to `9`, or `-1` for a non-digit.
+
+```po
+print(ord('A'));          ## 65
+print(chr(65));           ## A
+print(is_digit('7'));     ## true
+print(digit_value('7'));  ## 7
+```
+
+The native methods `code`, `to_str`, `is_digit`, `is_alpha`, `is_alnum`, `is_space`, `is_upper`, `is_lower` and `is_ascii` are also available on `char` values.
+
 ## Standard library
 
 Bare `use name;` resolves a built-in module under `modules/`. Use leading dots for relative files or directories, or a quoted path for an explicit path.
 
 | Module | Purpose |
 |---|---|
-| `strings` | trim, upper, lower, replace, contains, starts_with, ends_with, slice, split, join, repeat, pad_left, pad_right, char_code, from_char_code, parse_int, parse_number, format_number |
+| `strings` | trim, upper, lower, replace, contains, starts_with, ends_with, slice, split, join, repeat, pad_left, pad_right, char_code, from_char_code, parse_int, parse_number, format_number. The character builtins `ord` and `chr` are preferred in new code. |
 | `math` | sqrt, log, cos, sin, tan |
 | `json` | parse, stringify |
 | `url` | encode, decode, parse_query, query_build |

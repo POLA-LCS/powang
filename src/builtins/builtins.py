@@ -4,6 +4,7 @@ from .input import *
 from .info import *
 from .file import *
 from .iterable import *
+from .character import *
 from .tasks import builtin_wait, builtin_cancel, builtin_task_status
 
 from .cast import * # HELPER
@@ -25,6 +26,18 @@ BUILTINS: dict[str, tuple[int, int, Callable[(...), PowangAny]]] = {
     # INFO
     'typeof': (1,  1, builtin_typeof),
     'typedeep': (1, 1, builtin_typedeep),
+
+    # CHARACTERS
+    'is_digit'  : (1, 1, builtin_is_digit),
+    'is_alpha'  : (1, 1, builtin_is_alpha),
+    'is_alnum'  : (1, 1, builtin_is_alnum),
+    'is_space'  : (1, 1, builtin_is_space),
+    'is_upper'  : (1, 1, builtin_is_upper),
+    'is_lower'  : (1, 1, builtin_is_lower),
+    'is_ascii'  : (1, 1, builtin_is_ascii),
+    'ord'       : (1, 1, builtin_ord),
+    'chr'       : (1, 1, builtin_chr),
+    'digit_value': (1, 1, builtin_digit_value),
 
     # ITERABLE
     'size'  : (1, -1, builtin_size),

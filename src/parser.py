@@ -14,6 +14,7 @@ NATI_TYPES: set[str] = {
     PowangNumber.type ,
     PowangBoolean.type,
     PowangString.type ,
+    PowangChar.type   ,
     PowangArray.type  ,
     PowangMap.type    ,
     PowangSet.type    ,
@@ -1189,6 +1190,7 @@ class Parser:
             LexerTokenType.INTEGER_LITERAL,
             LexerTokenType.FLOATING_LITERAL,
             LexerTokenType.STRING_LITERAL,
+            LexerTokenType.CHAR_LITERAL,
             LexerTokenType.BOOLEAN_LITERAL,
             LexerTokenType.NOVA_LITERAL,
             LexerTokenType.INTERPOLATED_STRING_LITERAL,
@@ -2774,6 +2776,8 @@ class Parser:
                 return self.FloatingNumberLiteral()
             case LexerTokenType.STRING_LITERAL:
                 return self.StringLiteral()
+            case LexerTokenType.CHAR_LITERAL:
+                return self.CharLiteral()
             case LexerTokenType.INTERPOLATED_STRING_LITERAL:
                 return self.InterpolatedStringLiteral()
         raise powang_throw(self._syntax_at_current(powang_error_syntax_unexpected_token(
@@ -2803,24 +2807,104 @@ class Parser:
 
     def StringLiteral(self):
         token = self.consume(LexerTokenType.STRING_LITERAL)
-        token.value = self._processStringEscapes(token.value)
+        try:
+            token.value = self._processStringEscapes(token.value)
+        except PowangError as error:
+            raise powang_throw(self._with_token_position(error, token))
         return token.toDict(token.value)
+
+    def CharLiteral(self):
+        token = self.consume(LexerTokenType.CHAR_LITERAL)
+        try:
+            value = self._processStringEscapes(token.value)
+        except PowangError as error:
+            raise powang_throw(self._with_token_position(error, token))
+        if len(value) != 1:
+            raise powang_throw(self._with_token_position(
+                powang_error_syntax(
+                    'character literal',
+                    'A character literal must contain exactly one character',
+                    [f'but {len(value)} characters were found'],
+                ),
+                token,
+            ))
+        if 0xD800 <= ord(value) <= 0xDFFF:
+            raise powang_throw(self._with_token_position(
+                powang_error_syntax(
+                    'character literal',
+                    'A character literal cannot hold a surrogate code point',
+                    ['use a Unicode scalar value instead'],
+                ),
+                token,
+            ))
+        token.value = value
+        return token.toDict(value)
+
+    @staticmethod
+    def _with_token_position(error: PowangError, token: LexerToken) -> PowangError:
+        return powang_error_with_position(
+            error,
+            (token.line + 1) if token.line is not None else None,
+            token.column,
+        )
 
     @staticmethod
     def _processStringEscapes(value: str) -> str:
         ## Manual escape processing: unicode_escape would re-decode the raw
         ## UTF-8 bytes as latin-1 and corrupt non-ASCII characters.
-        ESCAPES: dict[str, str] = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '"': '"', '0': '\0'}
+        ESCAPES: dict[str, str] = {
+            'n': '\n', 't': '\t', 'r': '\r', '\\': '\\',
+            '"': '"', "'": "'", '0': '\0',
+        }
         processed: list[str] = []
         i = 0
         while i < len(value):
             char = value[i]
-            if char == '\\' and i + 1 < len(value) and value[i + 1] in ESCAPES:
-                processed.append(ESCAPES[value[i + 1]])
-                i += 2
-            else:
-                processed.append(char)
-                i += 1
+            if char == '\\' and i + 1 < len(value):
+                escape = value[i + 1]
+                if escape == 'u' and i + 2 < len(value) and value[i + 2] == '{':
+                    end = value.find('}', i + 3)
+                    if end == -1:
+                        raise powang_throw(powang_error_syntax(
+                            'literal',
+                            'Unclosed unicode escape',
+                            ['write the escape as \\u{HEX}'],
+                        ))
+                    digits = value[i + 3:end]
+                    if not digits:
+                        raise powang_throw(powang_error_syntax(
+                            'literal',
+                            'Empty unicode escape',
+                            ['write at least one hexadecimal digit'],
+                        ))
+                    if any(character not in '0123456789abcdefABCDEF' for character in digits):
+                        raise powang_throw(powang_error_syntax(
+                            'literal',
+                            'Invalid unicode escape',
+                            [f'"{digits}" is not hexadecimal'],
+                        ))
+                    code_point = int(digits, 16)
+                    if code_point > 0x10FFFF:
+                        raise powang_throw(powang_error_syntax(
+                            'literal',
+                            'Unicode code point is out of range',
+                            [f'U+{code_point:X} is greater than U+10FFFF'],
+                        ))
+                    if 0xD800 <= code_point <= 0xDFFF:
+                        raise powang_throw(powang_error_syntax(
+                            'literal',
+                            'Unicode escape cannot hold a surrogate code point',
+                            [f'U+{code_point:04X} is not a Unicode scalar value'],
+                        ))
+                    processed.append(chr(code_point))
+                    i = end + 1
+                    continue
+                if escape in ESCAPES:
+                    processed.append(ESCAPES[escape])
+                    i += 2
+                    continue
+            processed.append(char)
+            i += 1
         return ''.join(processed)
 
     def InterpolatedStringLiteral(self):
@@ -2853,20 +2937,20 @@ class Parser:
                 flush_text()
                 depth = 1
                 j = i + 1
-                in_string = False
+                quote: str | None = None
                 escaped = False
                 while j < len(raw):
                     current = raw[j]
-                    if in_string:
+                    if quote is not None:
                         if escaped:
                             escaped = False
                         elif current == '\\':
                             escaped = True
-                        elif current == '"':
-                            in_string = False
+                        elif current == quote:
+                            quote = None
                     else:
-                        if current == '"':
-                            in_string = True
+                        if current in {'"', "'"}:
+                            quote = current
                         elif current == '{':
                             depth += 1
                         elif current == '}':

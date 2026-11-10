@@ -10,7 +10,7 @@ fun swap(first: &int, second: &int) {
     second = temporary;
 }
 
-fun add_all(target: &int, amounts: arr) {
+fun add_all(target: &int, amounts: arr[int]) {
     for amount >> amounts {
         target += amount;
     }

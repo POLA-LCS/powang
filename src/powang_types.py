@@ -309,6 +309,65 @@ class PowangNumber(PowangTypeBase):
             return PowangNumber(self.data % right.data)
         return None
 
+# ====== CHARACTER =========
+class PowangChar(PowangTypeBase):
+    """One Unicode scalar value.
+
+    Characters are stored as a one-code-point Python string so printing and
+    concatenation stay direct. Ordering and hashing use the code point, which
+    matches the compiled-language representation planned for later ports.
+    """
+    data: str
+    type: Literal['char'] = 'char'
+
+    def __init__(self, data: str = '\0'):
+        super().__init__(data)
+
+    @staticmethod
+    def cast(right: 'PowangAny'):
+        if right.type == PowangChar.type:
+            return PowangChar(right.data)
+        if right.type == PowangString.type and len(right.data) == 1:
+            return PowangChar(right.data)
+        return None
+
+    def size(self) -> 'PowangInteger':
+        return PowangInteger(1)
+
+    def __eq__(self, value: object) -> bool:
+        return isinstance(value, PowangChar) and self.data == value.data
+
+    def __lt__(self, value: 'PowangChar') -> bool:
+        if not isinstance(value, PowangChar):
+            return NotImplemented
+        return ord(self.data) < ord(value.data)
+
+    def __le__(self, value: 'PowangChar') -> bool:
+        if not isinstance(value, PowangChar):
+            return NotImplemented
+        return ord(self.data) <= ord(value.data)
+
+    def __gt__(self, value: 'PowangChar') -> bool:
+        if not isinstance(value, PowangChar):
+            return NotImplemented
+        return ord(self.data) > ord(value.data)
+
+    def __ge__(self, value: 'PowangChar') -> bool:
+        if not isinstance(value, PowangChar):
+            return NotImplemented
+        return ord(self.data) >= ord(value.data)
+
+    def __hash__(self) -> int:
+        return hash(('char', self.data))
+
+    def __add__(self, right: 'PowangAny'):
+        if right.type in {PowangString.type, PowangChar.type}:
+            return PowangString(self.data + right.data)
+        return None
+
+    def __repr__(self) -> str:
+        return repr(self.data)
+
 # ====== STRING =========
 class PowangString(PowangTypeBase):
     data: str
@@ -319,6 +378,8 @@ class PowangString(PowangTypeBase):
     @staticmethod
     def cast(right: 'PowangAny'):
         if right.type == PowangString.type:
+            return PowangString(right.data)
+        if right.type == PowangChar.type:
             return PowangString(right.data)
         ## Error values print through their readable one-line form. This keeps
         ## `print(err)` useful without making errors JSON-serializable.
@@ -346,7 +407,7 @@ class PowangString(PowangTypeBase):
         return PowangArray([PowangString(char) for char in self.data])
 
     def __add__(self, right: 'PowangAny'):
-        if right.type == PowangString.type:
+        if right.type in {PowangString.type, PowangChar.type}:
             return PowangString(self.data + right.data)
         if right.type == PowangBoolean.type:
             return PowangBoolean.cast(self) + right
@@ -931,6 +992,7 @@ PowangAny = Union[
     PowangInteger,     # int
     PowangNumber,      # float
     PowangString,      # str
+    PowangChar,        # char
     PowangArray,       # list
     PowangMap,         # dict
     PowangSet,         # set
@@ -954,6 +1016,7 @@ def PowangTypeMap(type: str) -> Callable[(...), PowangAny]:
         PowangNumber.type     : PowangNumber,
         PowangBoolean.type    : PowangBoolean,
         PowangString.type     : PowangString,
+        PowangChar.type       : PowangChar,
         PowangArray.type      : PowangArray,
         PowangMap.type        : PowangMap,
         PowangSet.type        : PowangSet,

@@ -2,6 +2,25 @@
 
 All notable changes to powang are documented here.
 
+## 0.19.0
+
+### Added
+
+- `char`, a Unicode scalar value type, with single-quoted literals such as `'a'`.
+- Character escapes, including `\u{HEX}` Unicode escapes in character and string literals.
+- Character builtins: `is_digit`, `is_alpha`, `is_alnum`, `is_space`, `is_upper`, `is_lower`, `is_ascii`, `ord`, `chr` and `digit_value`.
+- `str.char_at` and `str.chars` for explicit character access.
+- Native `char` methods: `code`, `to_str` and the ASCII character predicates.
+- Character concatenation with strings and characters.
+- Character ordering, hashing and comparison by code point.
+- Explicit `char` and `str` casts and `char.[value]` construction.
+
+### Changed
+
+- String indexing still returns a one-character `str` for compatibility.
+  Use `str.char_at` when a `char` is required.
+- `str.chars` returns `arr[char]`, while iterating a `str` still yields one-character strings.
+
 ## 0.14.0
 
 ### Added

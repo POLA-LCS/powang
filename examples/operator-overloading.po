@@ -19,25 +19,26 @@ type Vector[+] {
         }
         return this.y - other.y;
     }
+    fun this.repr(): str >> $"({this.x}; {this.y})";
 }
 
 left := Vector.[1, 2];
 right := Vector.[3, 4];
 
 sum := left + right;
-print($"sum=({sum.x},{sum.y})"); print("\n");
+print($"sum={sum.repr()}"); print("\n");
 
 difference := left - right;
-print($"difference=({difference.x},{difference.y})"); print("\n");
+print($"difference={difference.repr()}"); print("\n");
 
 scaled := left * 3;
-print($"scaled=({scaled.x},{scaled.y})"); print("\n");
+print($"scaled={scaled.repr()}"); print("\n");
 
 negated := -left;
-print($"negated=({negated.x},{negated.y})"); print("\n");
+print($"negated={negated.repr()}"); print("\n");
 
 print($"less={left < right}"); print("\n");
 print($"equal={left == right}"); print("\n");
 
 left += right;
-print($"compound=({left.x},{left.y})"); print("\n");
+print($"compound={left.repr()}"); print("\n");

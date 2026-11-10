@@ -815,6 +815,12 @@ def performOperation(
         left = unwrap_any_value(left)
     if right.type == PowangAnyType.type:
         right = unwrap_any_value(right)
+    if PowangChar.type in {left.type, right.type} and operator not in {
+        '+', '==', '!=', '<', '>', '<=', '>=',
+    }:
+        raise powang_throw(powang_error_unsupported_operation(
+            'operation', left.type, operator, right.type
+        ))
     if operator in {'+', '-', '*', '/', '%'}:
         require(left.type != PowangNova.type and left.weak.has_value, lambda: powang_error_unsupported_operation(
             'operation', f'nova weak {left.type}', operator, right.type))
@@ -2693,6 +2699,9 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
 
         case LexerTokenType.STRING_LITERAL:
             return PowangString(expr_value)
+
+        case LexerTokenType.CHAR_LITERAL:
+            return PowangChar(expr_value)
 
         case ParserTokenType.INTERPOLATED_STRING:
             pieces: list[str] = []

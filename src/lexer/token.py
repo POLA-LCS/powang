@@ -15,6 +15,7 @@ class LexerTokenType(TokenTypeBase):
     INTEGER_LITERAL  = auto() # 69
     FLOATING_LITERAL = auto() # 3.141592
     STRING_LITERAL   = auto() # "hello"
+    CHAR_LITERAL     = auto() # 'a'
     INTERPOLATED_STRING_LITERAL = auto() # $"hello {name}"
 
     # Identifiers

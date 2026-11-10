@@ -1,14 +1,14 @@
-## tinywang: a tiny expression lexer and evaluator written in Powang.
+## calc: a tiny expression lexer and evaluator written in Powang.
 ##
 ## Supported syntax:
 ##   numbers, + - * /, ^ for powers, sqrt(...) and parentheses.
 ##
-## The example shows enums, user types, methods, modules, references and error handling.
+## The example shows enums, user types, methods, modules, characters and error handling.
 ##
 ## Run the default batch examples with:
-##   python powang.py examples/tinywang.po
+##   python powang.py examples/calc.po
 ## Run the interactive prompt with:
-##   python powang.py examples/tinywang.po interactive
+##   python powang.py examples/calc.po interactive
 
 use args;
 use math;
@@ -32,34 +32,14 @@ type Token[+] {
     | text: str;
 }
 
-fun is_white(ch: str): bool {
-    return ch == " " || ch == "\n" || ch == "\t" || ch == "\r";
-}
-
-fun is_digit(ch: str): bool {
-    return ch match {
-        case "0" >> true
-        case "1" >> true
-        case "2" >> true
-        case "3" >> true
-        case "4" >> true
-        case "5" >> true
-        case "6" >> true
-        case "7" >> true
-        case "8" >> true
-        case "9" >> true
-        case _ >> false
-    };
-}
-
 fun lex(source: str): arr[Token] {
     tokens := arr[Token].[];
     index := 0;
 
     loop if index < size(source) {
-        ch := source[index];
+        ch := source.char_at(index);
 
-        if is_white(ch) {
+        if is_space(ch) {
             index += 1;
             continue;
         }
@@ -68,17 +48,17 @@ fun lex(source: str): arr[Token] {
             start := index;
             is_float := false;
 
-            loop if index < size(source) && is_digit(source[index]) {
+            loop if index < size(source) && is_digit(source.char_at(index)) {
                 index += 1;
             }
 
-            if index < size(source) && source[index] == "." {
+            if index < size(source) && source.char_at(index) == '.' {
                 is_float = true;
                 index += 1;
-                if index >= size(source) || !is_digit(source[index]) {
+                if index >= size(source) || !is_digit(source.char_at(index)) {
                     error("missing decimal part");
                 }
-                loop if index < size(source) && is_digit(source[index]) {
+                loop if index < size(source) && is_digit(source.char_at(index)) {
                     index += 1;
                 }
             }
@@ -91,43 +71,43 @@ fun lex(source: str): arr[Token] {
             continue;
         }
 
-        if ch == "+" {
-            tokens &> arr.push(Token.[TokenKind.ADD, ch]);
+        if ch == '+' {
+            tokens &> arr.push(Token.[TokenKind.ADD, source[index]]);
             index += 1;
             continue;
         }
-        if ch == "-" {
-            tokens &> arr.push(Token.[TokenKind.MINUS, ch]);
+        if ch == '-' {
+            tokens &> arr.push(Token.[TokenKind.MINUS, source[index]]);
             index += 1;
             continue;
         }
-        if ch == "*" {
-            tokens &> arr.push(Token.[TokenKind.MULT, ch]);
+        if ch == '*' {
+            tokens &> arr.push(Token.[TokenKind.MULT, source[index]]);
             index += 1;
             continue;
         }
-        if ch == "/" {
-            tokens &> arr.push(Token.[TokenKind.DIV, ch]);
+        if ch == '/' {
+            tokens &> arr.push(Token.[TokenKind.DIV, source[index]]);
             index += 1;
             continue;
         }
-        if ch == "^" {
-            tokens &> arr.push(Token.[TokenKind.POW, ch]);
+        if ch == '^' {
+            tokens &> arr.push(Token.[TokenKind.POW, source[index]]);
             index += 1;
             continue;
         }
-        if ch == "(" {
-            tokens &> arr.push(Token.[TokenKind.LEFT_PAREN, ch]);
+        if ch == '(' {
+            tokens &> arr.push(Token.[TokenKind.LEFT_PAREN, source[index]]);
             index += 1;
             continue;
         }
-        if ch == ")" {
-            tokens &> arr.push(Token.[TokenKind.RIGHT_PAREN, ch]);
+        if ch == ')' {
+            tokens &> arr.push(Token.[TokenKind.RIGHT_PAREN, source[index]]);
             index += 1;
             continue;
         }
 
-        if ch == "s" && index + 4 <= size(source) && source[index >> index + 4] == "sqrt" {
+        if ch == 's' && index + 4 <= size(source) && source[index >> index + 4] == "sqrt" {
             tokens &> arr.push(Token.[TokenKind.SQRT, "sqrt"]);
             index += 4;
             continue;

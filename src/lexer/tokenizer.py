@@ -39,6 +39,10 @@ class Tokenizer:
             LexerTokenType.STRING_LITERAL,
             lambda x: x[1:-1]  # Remove the quotes
         ),
+        r"'((?:\\.|[^'\\])*)'": (
+            LexerTokenType.CHAR_LITERAL,
+            lambda x: x[1:-1]  # Remove the quotes
+        ),
         
         
         r'\&\&' : (LexerTokenType.AND, None),

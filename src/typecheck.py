@@ -40,6 +40,7 @@ from .powang_types import (
     PowangProject,
     PowangAnyType,
     PowangString,
+    PowangChar,
     PowangTask,
     BUILTIN_OBJECT_TYPES,
 )
@@ -83,6 +84,7 @@ BOOLEAN = PowangBoolean.type
 INTEGER = PowangInteger.type
 NUMBER = PowangNumber.type
 STRING = PowangString.type
+CHAR = PowangChar.type
 ARRAY = PowangArray.type
 MAP = PowangMap.type
 SET = PowangSet.type
@@ -95,7 +97,7 @@ TASK = PowangTask.type
 
 ## `function` and `file` are runtime types but are absent from the parser's
 ## NATI_TYPES set, so they need explicit handling here.
-NATIVE_TYPE_NAMES = set(NATI_TYPES) | {FUNCTION, FILE, HANDLE, OBJ}
+NATIVE_TYPE_NAMES = set(NATI_TYPES) | {CHAR, FUNCTION, FILE, HANDLE, OBJ}
 
 ARRAY_OPEN = f'{ARRAY}['
 ARRAY_CLOSE = ']'
@@ -245,6 +247,17 @@ BUILTIN_RETURN_TYPES: dict[str, str] = {
     'wait'  : ANY,
     'cancel': ANY,
     'task_status': STRING,
+    ## Character helpers accept either a char or a one-character str.
+    'is_digit'  : BOOLEAN,
+    'is_alpha'  : BOOLEAN,
+    'is_alnum'  : BOOLEAN,
+    'is_space'  : BOOLEAN,
+    'is_upper'  : BOOLEAN,
+    'is_lower'  : BOOLEAN,
+    'is_ascii'  : BOOLEAN,
+    'ord'       : INTEGER,
+    'chr'       : CHAR,
+    'digit_value': INTEGER,
 }
 
 
@@ -1022,7 +1035,7 @@ class _TypeChecker:
             return True
         if target == BOOLEAN and (source in (INTEGER, NUMBER, STRING) or _is_array_type(source)):
             return True
-        if target == STRING and source == ERROR:
+        if target == STRING and source in (ERROR, CHAR):
             return True
         if _is_array_type(target) and source == MAP:
             return True
@@ -1141,6 +1154,8 @@ class _TypeChecker:
             return NUMBER
         if node_type == LexerTokenType.STRING_LITERAL:
             return STRING
+        if node_type == LexerTokenType.CHAR_LITERAL:
+            return CHAR
         if node_type == ParserTokenType.INTERPOLATED_STRING:
             parts = value.get('parts') if isinstance(value, dict) else None
             if isinstance(parts, list):
@@ -1677,6 +1692,12 @@ class _TypeChecker:
         if left == NOVA or right == NOVA:
             return ANY
 
+        if operator == '+':
+            if left == CHAR and right in {CHAR, STRING}:
+                return STRING
+            if left == STRING and right == CHAR:
+                return STRING
+
         if operator == '*':
             if left == STRING and right in NUMERIC_TYPES:
                 return STRING
@@ -1705,6 +1726,8 @@ class _TypeChecker:
             return MAP
 
         if left == BOOLEAN or right == BOOLEAN:
+            if left == CHAR or right == CHAR:
+                return ANY
             return BOOLEAN
 
         if left in NUMERIC_TYPES and right in NUMERIC_TYPES:
@@ -2987,8 +3010,22 @@ class _TypeChecker:
                 return mutating_return() if is_reference else STRING
             if method_name == 'div':
                 return _array_of(STRING)
+            if method_name == 'char_at':
+                return CHAR
+            if method_name == 'chars':
+                return _array_of(CHAR)
             if method_name in {'count', 'size'}:
                 return INTEGER
+        if receiver_type == CHAR:
+            if method_name == 'code':
+                return INTEGER
+            if method_name == 'to_str':
+                return STRING
+            if method_name in {
+                'is_digit', 'is_alpha', 'is_alnum', 'is_space',
+                'is_upper', 'is_lower', 'is_ascii',
+            }:
+                return BOOLEAN
         if receiver_type == 'tup':
             if method_name == 'get':
                 if argument_nodes and len(argument_nodes) > 1:
@@ -3292,7 +3329,7 @@ class _TypeChecker:
                         where='native construction',
                     )
                 return NOVA
-            if normalized in (INTEGER, NUMBER, STRING, BOOLEAN):
+            if normalized in (INTEGER, NUMBER, STRING, CHAR, BOOLEAN):
                 if len(argument_types) != 1:
                     self._error(
                         f"{normalized} construction takes exactly one argument",

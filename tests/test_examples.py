@@ -198,9 +198,9 @@ class NewFeatureExampleTests(unittest.TestCase):
             "parallel orders: 3",
         )
 
-    def test_tinywang_example(self) -> None:
+    def test_calc_example(self) -> None:
         self.check(
-            "tinywang.po",
+            "calc.po",
             "2.5 = 2.5",
             "1 + 2 * 3 = 7.0",
             "(1 + 2) * 3 = 9.0",
@@ -215,16 +215,32 @@ class NewFeatureExampleTests(unittest.TestCase):
             "tokens: INT ADD FLOAT MULT INT EOF",
         )
 
+    def test_characters_example(self) -> None:
+        self.check(
+            "characters.po",
+            "A 65 1",
+            "[h, é, l, l, o]",
+            "arr[char]",
+            "true true true",
+            "xy",
+            "ab",
+            "71",
+            "128512",
+            "a b c",
+            "2 true",
+            "qwerty",
+        )
+
     def test_operator_overloading_example(self) -> None:
         self.check(
             "operator-overloading.po",
-            "sum=(4,6)",
-            "difference=(-2,-2)",
-            "scaled=(3,6)",
-            "negated=(-1,-2)",
+            "sum=(4; 6)",
+            "difference=(-2; -2)",
+            "scaled=(3; 6)",
+            "negated=(-1; -2)",
             "less=true",
             "equal=false",
-            "compound=(4,6)",
+            "compound=(4; 6)",
         )
 
 

@@ -1,6 +1,6 @@
 # Powang TODO
 
-Last updated: 2026-11-08
+Last updated: 2026-11-10
 
 Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
@@ -8,7 +8,8 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 - [ ] Phase 4A: debugger and debug adapter.
   - Depends on stable source spans and a debug adapter design.
-  - Target versions: powang `0.19.0`, powang-lsp `0.25.0`.
+  - Target versions: powang `0.20.0`, powang-lsp `0.26.0`.
+  - The `char` type shipped in powang `0.19.0` and powang-lsp `0.25.0`.
 
 ## Language features in order
 
@@ -94,16 +95,26 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
    - [x] LSP completion, hover, semantic tokens and diagnostics.
    - Plan: `docs/phase-3c-operator-overloading/README.md`
 
-9. [ ] Debugger.
-   - Depends on stable source spans and a debug adapter design.
+9. [x] Character type.
+   - [x] `char` as a Unicode scalar value.
+   - [x] Single-quoted character literals and `\u{HEX}` escapes.
+   - [x] `ord`, `chr`, `digit_value` and ASCII character predicates.
+   - [x] `str.char_at` and `str.chars` for explicit character access.
+   - [x] Native `char` methods.
+   - [x] Character concatenation, ordering, hashing and casts.
+   - String indexing remains a one-character `str` for compatibility.
+   - Plan: `docs/phase-3d-character-type/README.md`
 
-10. [ ] TLS, HTTP/2 and WebSockets.
+10. [ ] Debugger.
+    - Depends on stable source spans and a debug adapter design.
+
+11. [ ] TLS, HTTP/2 and WebSockets.
     - Platform work for the HTTP module.
 
-11. [ ] FFI handles and `extern type`.
+12. [ ] FFI handles and `extern type`.
     - The `handle` type exists. The registry and host callback design still need work.
 
-12. [ ] Performance work.
+13. [ ] Performance work.
     - Profile first.
     - A bytecode VM is not planned until profiling proves the tree-walker is the bottleneck.
 

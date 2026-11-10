@@ -4,6 +4,7 @@ from .common import *
 from .array import NATIVE_TYPE as ARRAY_NATIVE_TYPE, METHOD_NAMES as ARRAY_METHOD_NAMES, _dispatch_array
 from .map import NATIVE_TYPE as MAP_NATIVE_TYPE, METHOD_NAMES as MAP_METHOD_NAMES, _dispatch_map
 from .string import NATIVE_TYPE as STRING_NATIVE_TYPE, METHOD_NAMES as STRING_METHOD_NAMES, _dispatch_string
+from .char import NATIVE_TYPE as CHAR_NATIVE_TYPE, METHOD_NAMES as CHAR_METHOD_NAMES, _dispatch_char
 from .tuple import NATIVE_TYPE as TUPLE_NATIVE_TYPE, METHOD_NAMES as TUPLE_METHOD_NAMES, _dispatch_tuple
 from .set import NATIVE_TYPE as SET_NATIVE_TYPE, METHOD_NAMES as SET_METHOD_NAMES, _dispatch_set
 from .file import NATIVE_TYPE as FILE_NATIVE_TYPE, METHOD_NAMES as FILE_METHOD_NAMES, _dispatch_file
@@ -12,6 +13,7 @@ NATIVE_METHOD_TYPES = frozenset({
     ARRAY_NATIVE_TYPE,
     MAP_NATIVE_TYPE,
     STRING_NATIVE_TYPE,
+    CHAR_NATIVE_TYPE,
     TUPLE_NATIVE_TYPE,
     SET_NATIVE_TYPE,
     FILE_NATIVE_TYPE,
@@ -22,6 +24,7 @@ NATIVE_METHOD_NAMES: dict[str, frozenset[str]] = {
     ARRAY_NATIVE_TYPE: ARRAY_METHOD_NAMES,
     MAP_NATIVE_TYPE: MAP_METHOD_NAMES,
     STRING_NATIVE_TYPE: STRING_METHOD_NAMES,
+    CHAR_NATIVE_TYPE: CHAR_METHOD_NAMES,
     TUPLE_NATIVE_TYPE: TUPLE_METHOD_NAMES,
     SET_NATIVE_TYPE: SET_METHOD_NAMES,
     FILE_NATIVE_TYPE: FILE_METHOD_NAMES,
@@ -43,6 +46,7 @@ def call_native_method(
         PowangArray.type: _dispatch_array,
         PowangMap.type: _dispatch_map,
         PowangString.type: _dispatch_string,
+        PowangChar.type: _dispatch_char,
         PowangTuple.type: _dispatch_tuple,
         PowangSet.type: _dispatch_set,
         PowangFileStream.type: _dispatch_file,

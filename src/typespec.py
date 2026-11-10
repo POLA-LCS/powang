@@ -78,6 +78,7 @@ HEADS: dict[str, TypeHead] = {
     "int": TypeHead("int", Shape.SCALAR),
     "num": TypeHead("num", Shape.SCALAR),
     "str": TypeHead("str", Shape.SCALAR),
+    "char": TypeHead("char", Shape.SCALAR),
     "arr": TypeHead("arr", Shape.SEQUENCE, arity=(1, 1), variance=("cov",), constructible=True),
     "tup": TypeHead("tup", Shape.SEQUENCE, arity=(0, None), variadic=True, constructible=True),
     "map": TypeHead("map", Shape.MAPPING, arity=(2, 2), variance=("inv", "cov"), constructible=True),
@@ -851,7 +852,7 @@ def _scalar_compatible(target: str, source: str) -> bool:
         return True
     if target == "bool" and source in ("int", "num", "str", "arr"):
         return True
-    if target == "str" and source == "error":
+    if target == "str" and source in ("error", "char"):
         return True
     return False
 
@@ -860,7 +861,7 @@ COERCES_FROM: dict[str, set[str]] = {
     "int": {"num", "bool"},
     "num": {"int", "bool"},
     "bool": {"int", "num", "str", "arr"},
-    "str": {"error"},
+    "str": {"error", "char"},
     "arr": {"map"},
     "map": {"arr"},
 }
