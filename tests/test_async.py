@@ -139,6 +139,17 @@ class AsyncRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result.stdout, "9\n")
 
+    def test_bare_await_statement(self) -> None:
+        result = run_source(
+            "async fun work(): int {\n"
+            '    println("work");\n'
+            "    return 1;\n"
+            "}\n"
+            "await work();\n"
+            'println("done");\n'
+        )
+        self.assertEqual(result.stdout, "work\ndone\n")
+
     def test_async_call_returns_task(self) -> None:
         result = run_source(
             "async fun value(): int >> 9;\n"

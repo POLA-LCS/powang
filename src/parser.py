@@ -146,10 +146,10 @@ class Parser:
                 ))
                 exported_statement['exported'] = True
                 return exported_statement
-            if keyword == 'spawn':
-                ## `spawn` is an expression prefix, so a bare statement uses
-                ## the normal expression-statement path instead of the
-                ## statement-keyword dispatch below.
+            if keyword in {'spawn', 'await'}:
+                ## `spawn` and `await` are expression prefixes, so a bare
+                ## statement uses the normal expression-statement path
+                ## instead of the statement-keyword dispatch below.
                 expression = self.Statement()
                 self.consume(LexerTokenType.SEMI_COLON)
                 return expression

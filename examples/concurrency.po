@@ -1,0 +1,59 @@
+## Concurrency in two layers.
+##
+## spawn starts parallel worker tasks immediately.
+## wait joins a worker task and returns its result.
+##
+## async fun returns a lazy task. The body starts when the task is awaited.
+## await runs a lazy task, or waits for a spawned task, and returns its result.
+
+use time;
+
+fun fetch_users(): arr[str] {
+    time.sleep_ms(25);
+    return ["Ada", "Grace", "Linus"];
+}
+
+fun fetch_orders(): arr[int] {
+    time.sleep_ms(25);
+    return [10, 20, 30];
+}
+
+async fun fetch_user(id: int): str {
+    time.sleep_ms(10);
+    return $"user-{id}";
+}
+
+## The async body is lazy. Its two spawn calls happen only when the task is
+## awaited. Both workers start before either result is awaited, so the two
+## fetches run in parallel.
+async fun load_dashboard(): str {
+    users_task := spawn fetch_users();
+    orders_task := spawn fetch_orders();
+
+    users := await users_task;
+    orders := await orders_task;
+
+    return $"users={size(users)} orders={size(orders)} first={users[0]}";
+}
+
+## Async functions compose in source order. This one awaits the dashboard
+## first, then awaits a second lazy task.
+async fun add_owner(dashboard: str): str {
+    owner := await fetch_user(7);
+    return $"{dashboard} owner={owner}";
+}
+
+async fun run_example(): nova {
+    println("before dashboard");
+    dashboard_task := load_dashboard();
+    println($"dashboard status: {task_status(dashboard_task)}");
+    dashboard := await dashboard_task;
+    println(dashboard);
+    println(await add_owner(dashboard));
+
+    ## The explicit parallel API still works directly. wait joins the worker.
+    parallel_task := spawn fetch_orders();
+    println($"parallel orders: {size(wait(parallel_task))}");
+}
+
+await run_example();

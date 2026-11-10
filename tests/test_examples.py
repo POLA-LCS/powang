@@ -188,6 +188,16 @@ class NewFeatureExampleTests(unittest.TestCase):
     def test_async_example(self) -> None:
         self.check("async.po", "10\n15\n12\npending\n14\ndone\n")
 
+    def test_concurrency_example(self) -> None:
+        self.check(
+            "concurrency.po",
+            "before dashboard",
+            "dashboard status: pending",
+            "users=3 orders=3 first=Ada",
+            "users=3 orders=3 first=Ada owner=user-7",
+            "parallel orders: 3",
+        )
+
     def test_operator_overloading_example(self) -> None:
         self.check(
             "operator-overloading.po",
