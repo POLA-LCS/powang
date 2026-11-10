@@ -186,7 +186,7 @@ set.has(unique, 2);
 set.union(unique, [/3, 4]);
 ```
 
-`&>` is sugar for a reference pipeline. `x &> f(y)` is `&x :> f(y)`. Parentheses are optional for pipeline targets, so a function with one required parameter and default parameters can be called as `value :> strings.split`.
+`&>` is sugar for a reference pipeline. `x &> f(y)` is `&x :> f(y)`. The target may be a variable, a property such as `this.x`, or an array element such as `values[0]`. Parentheses are optional for pipeline targets, so a function with one required parameter and default parameters can be called as `value :> strings.split`.
 
 ### Copy semantics and locks
 

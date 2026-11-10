@@ -1247,10 +1247,19 @@ class _TypeChecker:
 
     # ------------------------------------------------------------ expressions
     def _infer_reference(self, value: Any) -> str:
-        """Type of `&name`: a reference to the target variable's type."""
+        """Type of `&name`, `&this.name` and `&values[index]`."""
         if not isinstance(value, dict):
             return ANY
-        name = self._identifier_name(value.get('target'))
+        target = value.get('target')
+        if isinstance(target, dict):
+            target_type = target.get('type')
+            if target_type == ParserTokenType.ACCESS_EXPRESSION:
+                resolved = self._infer_access(target.get('value'))
+                return ANY if resolved in (ANY, NOVA) else f'&{resolved}'
+            if target_type == ParserTokenType.INDEX_EXPRESSION:
+                resolved = self._infer_index(target.get('value'))
+                return ANY if resolved in (ANY, NOVA) else f'&{resolved}'
+        name = self._identifier_name(target)
         if name is None:
             return ANY
         variable = self._lookup(name)

@@ -1806,11 +1806,15 @@ class Parser:
         while self.next and self.next.type in operators:
             operator = self.advance()
             if operator.type == LexerTokenType.REFERENCE_PIPELINE:
-                if left.get('type') != LexerTokenType.IDENTIFIER:
+                if not self._is_reference_target(left):
                     raise powang_throw(self._syntax_at_current(powang_error_syntax(
                         'reference pipeline',
-                        "The left side of &> must be a variable",
-                        ["write x &> function(...) instead"],
+                        "The left side of &> must be a variable, property or array element",
+                        [
+                            "write x &> function(...)",
+                            "or this.x &> function(...)",
+                            "or values[0] &> function(...)",
+                        ],
                     )))
                 left = doToken(ParserTokenType.REFERENCE_EXPRESSION, {
                     'target': left,
@@ -1845,10 +1849,29 @@ class Parser:
             LexerTokenType.OPERATOR_INVERSE,
         ))
 
+    @staticmethod
+    def _is_reference_target(node: DictRepr) -> bool:
+        return isinstance(node, dict) and node.get('type') in {
+            LexerTokenType.IDENTIFIER,
+            ParserTokenType.ACCESS_EXPRESSION,
+            ParserTokenType.INDEX_EXPRESSION,
+        }
+
     def helper_UnaryExpression(self, operators: tuple[LexerTokenType, ...]):
         if self.next.type == LexerTokenType.AMPERSAND:
             self.advance('reference expression')
-            target = self.Identifier()
+            target = self.PostfixExpression()
+            require(self._is_reference_target(target), lambda: self._syntax_at_current(
+                powang_error_syntax(
+                    'reference expression',
+                    "The reference target must be a variable, property or array element",
+                    [
+                        "write &x",
+                        "or &this.x",
+                        "or &values[0]",
+                    ],
+                )
+            ))
             return doToken(ParserTokenType.REFERENCE_EXPRESSION, {
                 "target": target,
             }).toDict()

@@ -783,16 +783,27 @@ class PowangElementReference(PowangTypeBase):
 
     type: Literal['reference'] = 'reference'
 
-    def __init__(self, container: 'PowangArray', index: int):
+    def __init__(
+        self,
+        container: 'PowangArray',
+        index: int,
+        target_type: str = 'any',
+    ):
         super().__init__(None)
         self.container = container
         self.index = index
+        self.target_type = target_type
         self.defined = True
 
     def get(self) -> 'PowangAny':
         return self.container.data[self.index]
 
     def set(self, value: 'PowangAny') -> None:
+        if getattr(self.container, 'elements_locked', False):
+            raise powang_throw(powang_error_format(
+                'CONST', 'reference', 'array elements are locked',
+                ["the array element type ends with '!'"],
+            ))
         self.container.data[self.index] = value
 
     def __repr__(self) -> str:
@@ -804,19 +815,32 @@ class PowangPropertyReference(PowangTypeBase):
 
     type: Literal['reference'] = 'reference'
 
-    def __init__(self, container: 'PowangObjectType', name: str):
+    def __init__(
+        self,
+        container: 'PowangObjectType',
+        name: str,
+        target_type: str = 'any',
+        private: bool = False,
+    ):
         super().__init__(None)
         self.container = container
         self.name = name
+        self.target_type = target_type
+        self.private = private
         self.defined = True
 
     def get(self) -> 'PowangAny':
-        value = self.container.getProperty(self.name, False)
+        value = self.container.getProperty(self.name, self.private)
         if value is None:
             raise KeyError(self.name)
         return value
 
     def set(self, value: 'PowangAny') -> None:
+        if getattr(self.container, 'structure_locked', False):
+            raise powang_throw(powang_error_format(
+                'CONST', 'reference', 'object fields are locked',
+                ["the object type ends with '!'"],
+            ))
         self.container.data[self.name] = value
 
     def __repr__(self) -> str:

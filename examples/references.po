@@ -41,6 +41,28 @@ fun doubled(value: &int): int {
 print(doubled(&counter));
 print("\n");
 
+## Reference pipelines accept properties and array elements.
+type Counter[+] {
+    | value: int;
+
+    fun this.bump() {
+        this.value &> increment;
+    }
+}
+
+box := Counter.[3];
+box.bump();
+print(box.value);
+print("\n");
+
+values := [1, 2];
+fun add_ten(value: &int) {
+    value += 10;
+}
+values[0] &> add_ten;
+print(values[0]);
+print("\n");
+
 limit: int! = 5;
 try {
     ## increment(&limit);

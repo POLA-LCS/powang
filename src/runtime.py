@@ -666,6 +666,143 @@ def _call_comparison_operator(
     return PowangBoolean(comparison >= 0)
 
 
+def _runtime_reference_type(value: PowangAny) -> str:
+    if value.type == PowangObjectType.type:
+        return value.type_name or value.type
+    return value.type
+
+
+def _reference_value(where: str, target_node: Any) -> PowangAny:
+    if not isinstance(target_node, dict):
+        raise powang_throw(powang_error_format(
+            'REFERENCE', where, 'Invalid reference target', [],
+        ))
+    target_type = target_node.get('type')
+    if target_type == LexerTokenType.IDENTIFIER:
+        target_name = getValidIdentifier(where, target_node)
+        slot = ScopeStack.find_variable_slot(target_name)
+        if slot is None:
+            raise powang_throw(powang_error_identifier_not_found(where, target_name))
+        owner_scope, bound_value = slot
+        if bound_value.type == PowangReference.type:
+            raise powang_throw(powang_error_format(
+                'REFERENCE', where, "Cannot take a reference to a reference", [
+                    f"'{target_name}' already holds a reference",
+                ]))
+        if bool(bound_value.const):
+            raise powang_throw(powang_error_format(
+                'REFERENCE', where, "Cannot take a reference to a constant", [
+                    f"'{target_name}' is constant",
+                    "references mutate the target, so the target must be assignable",
+                ]))
+        return PowangReference(
+            owner_scope,
+            target_name,
+            _runtime_reference_type(bound_value),
+        )
+
+    if target_type == ParserTokenType.ACCESS_EXPRESSION:
+        access_value = target_node.get('value')
+        if not isinstance(access_value, dict):
+            raise powang_throw(powang_error_format(
+                'REFERENCE', where, 'Invalid property reference', [],
+            ))
+        owner = unwrap_any_value(
+            evaluateAstExpression(access_value.get('target'))
+        )
+        if owner.type == PowangModule.type:
+            raise powang_throw(powang_error_format(
+                'MODULE', where, "Modules are immutable", [
+                    "module properties cannot be referenced",
+                ],
+            ))
+        require(owner.type == PowangObjectType.type, lambda: powang_error_format(
+            'REFERENCE', where, 'Only object properties can be referenced', [
+                f"but {owner.type} was encountered",
+            ],
+        ))
+        property_name = getValidIdentifier(where, access_value.get('property'))
+        property_value = owner.getProperty(
+            property_name, _private_access_allowed(owner)
+        )
+        if property_value is None:
+            raise powang_throw(powang_error_identifier_not_found(
+                where, property_name, [
+                    "perhaps it is a private property?",
+                ],
+            ))
+        if property_value.type == PowangReference.type:
+            raise powang_throw(powang_error_format(
+                'REFERENCE', where, "Cannot take a reference to a reference", [
+                    f"'{property_name}' already holds a reference",
+                ]))
+        if bool(property_value.const):
+            raise powang_throw(powang_error_format(
+                'REFERENCE', where, "Cannot take a reference to a constant", [
+                    f"'{property_name}' is constant",
+                    "references mutate the target, so the target must be assignable",
+                ]))
+        if getattr(owner, 'structure_locked', False):
+            raise powang_throw(powang_error_format(
+                'CONST', where, "object fields are locked", [
+                    "the object type ends with '!'",
+                ],
+            ))
+        return PowangPropertyReference(
+            owner,
+            property_name,
+            _runtime_reference_type(property_value),
+            _private_access_allowed(owner),
+        )
+
+    if target_type == ParserTokenType.INDEX_EXPRESSION:
+        index_value = target_node.get('value')
+        if not isinstance(index_value, dict):
+            raise powang_throw(powang_error_format(
+                'REFERENCE', where, 'Invalid index reference', [],
+            ))
+        container = unwrap_any_value(
+            evaluateAstExpression(index_value.get('target'))
+        )
+        index = evaluateAstExpression(index_value.get('index'))
+        if container.type == PowangArray.type:
+            require(index.type == PowangInteger.type, lambda: powang_error_format(
+                'REFERENCE', where, 'Array references need an int index', [
+                    f"but {index.type} was encountered",
+                ],
+            ))
+            resolved = index.data
+            if resolved < 0:
+                resolved += len(container.data)
+            if resolved < 0 or resolved >= len(container.data):
+                raise powang_throw(powang_error_index_out_of_range(
+                    resolved, len(container.data),
+                ))
+            if getattr(container, 'elements_locked', False):
+                raise powang_throw(powang_error_format(
+                    'CONST', where, "array elements are locked", [
+                        "the array element type ends with '!'",
+                    ],
+                ))
+            element = container.data[resolved]
+            return PowangElementReference(
+                container,
+                resolved,
+                _runtime_reference_type(element),
+            )
+        raise powang_throw(powang_error_format(
+            'REFERENCE', where, 'Only array elements can be referenced by index', [
+                f"but {container.type} was encountered",
+            ],
+        ))
+
+    raise powang_throw(powang_error_format(
+        'REFERENCE', where, 'Invalid reference target', [
+            'write &x, &this.x or &values[0]',
+        ],
+    ))
+
+
 def performOperation(
     operator: str,
     left: PowangAny,
@@ -2575,24 +2712,7 @@ def _evaluateAstExpression(expression: DictRepr, is_identifier: bool = False) ->
             return PowangString(''.join(pieces))
 
         case ParserTokenType.REFERENCE_EXPRESSION:
-            target_node = expr_value['target']
-            target_name = getValidIdentifier(where, target_node)
-            slot = ScopeStack.find_variable_slot(target_name)
-            if slot is None:
-                raise powang_throw(powang_error_identifier_not_found(where, target_name))
-            owner_scope, bound_value = slot
-            if bound_value.type == PowangReference.type:
-                raise powang_throw(powang_error_format(
-                    'REFERENCE', where, "Cannot take a reference to a reference", [
-                        f"'{target_name}' already holds a reference",
-                    ]))
-            if bool(bound_value.const):
-                raise powang_throw(powang_error_format(
-                    'REFERENCE', where, "Cannot take a reference to a constant", [
-                        f"'{target_name}' is constant",
-                        "references mutate the target, so the target must be assignable",
-                    ]))
-            return PowangReference(owner_scope, target_name, bound_value.type)
+            return _reference_value(where, expr_value.get('target'))
 
         case ParserTokenType.UNARY_EXPRESSION:
             unary_operator = expr_value['operator']['value']
