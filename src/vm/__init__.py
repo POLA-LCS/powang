@@ -1,0 +1,180 @@
+"""Foundation package for the Phase 4B Powang bytecode virtual machine.
+
+This package exports the opcode registry, program image codec, builder,
+verifier, value helpers, frames, disassembler, trace types and error helpers.
+It intentionally does not import the compiler, interpreter, dispatch,
+declarations, modules, tasks, host, differential, bench or CLI modules so the
+foundation can be tested before the execution layer exists.
+"""
+
+from __future__ import annotations
+
+from .builder import Builder, Label
+from .compiler import CompileError, compile_ast, compile_source
+from .disasm import disassemble_code, disassemble_image
+from .errors import (
+    error_to_value,
+    error_value_from_exception,
+    format_frame,
+    format_frames,
+    from_error_value,
+    raise_error_value,
+    raise_value,
+    to_error_value,
+    value_to_error,
+)
+from .frames import HandlerEntry, LocalStore, VMFrame
+from .image import (
+    CONSTANT_KINDS,
+    FLAG_ASYNC,
+    FLAG_METHOD,
+    FLAG_STATIC,
+    FLAG_VARIADIC,
+    FORMAT_MAGIC,
+    FORMAT_VERSION,
+    LANGUAGE_VERSION,
+    TABLE_NAMES,
+    CallSite,
+    CodeObject,
+    Constant,
+    ExceptionEntry,
+    FunctionInfo,
+    ModuleInfo,
+    PatternDescriptor,
+    ProgramImage,
+    SourceSpan,
+    TraitInfo,
+    TypeInfo,
+    read_image,
+    write_image,
+)
+from .opcodes import (
+    BY_NAME,
+    BY_OPCODE,
+    OPCODES,
+    WIDTHS,
+    Operand,
+    OpcodeSpec,
+    decode_instruction,
+    decode_operands,
+    encode_operands,
+    spec,
+)
+from .trace import TRACE_KINDS, TextTraceSink, TraceEvent, TraceSink
+from .values import (
+    TAGS,
+    SpreadValue,
+    constant_to_value,
+    copy_value,
+    decode_constant_json,
+    encode_constant_json,
+    is_defined,
+    is_nova,
+    is_weak,
+    nova,
+    spread_values,
+    stable_key,
+    tag_of,
+    truthy,
+    unwrap,
+    value_to_constant,
+    value_to_constant_kind,
+)
+from .interpreter import VM, VMRunOptions, run_program
+from .modules import VMSession, evaluate_module_ast_vm, evaluate_program_image
+from .verifier import VerificationError, verify_code, verify_image
+
+
+ENGINE_TREE = "tree"
+ENGINE_VM = "vm"
+ENGINES: tuple[str, ...] = (ENGINE_TREE, ENGINE_VM)
+DEFAULT_ENGINE = ENGINE_TREE
+
+
+__all__ = [
+    "BY_NAME",
+    "BY_OPCODE",
+    "CompileError",
+    "VM",
+    "VMRunOptions",
+    "VMSession",
+    "compile_ast",
+    "compile_source",
+    "evaluate_module_ast_vm",
+    "evaluate_program_image",
+    "run_program",
+    "CONSTANT_KINDS",
+    "CallSite",
+    "CodeObject",
+    "Constant",
+    "DEFAULT_ENGINE",
+    "ENGINE_TREE",
+    "ENGINE_VM",
+    "ENGINES",
+    "ExceptionEntry",
+    "FLAG_ASYNC",
+    "FLAG_METHOD",
+    "FLAG_STATIC",
+    "FLAG_VARIADIC",
+    "FORMAT_MAGIC",
+    "FORMAT_VERSION",
+    "FunctionInfo",
+    "HandlerEntry",
+    "LANGUAGE_VERSION",
+    "Label",
+    "LocalStore",
+    "ModuleInfo",
+    "OPCODES",
+    "Operand",
+    "OpcodeSpec",
+    "PatternDescriptor",
+    "ProgramImage",
+    "SourceSpan",
+    "SpreadValue",
+    "TABLE_NAMES",
+    "TAGS",
+    "TRACE_KINDS",
+    "TextTraceSink",
+    "TraceEvent",
+    "TraceSink",
+    "TraitInfo",
+    "TypeInfo",
+    "VMFrame",
+    "VerificationError",
+    "WIDTHS",
+    "Builder",
+    "constant_to_value",
+    "copy_value",
+    "decode_constant_json",
+    "decode_instruction",
+    "decode_operands",
+    "disassemble_code",
+    "disassemble_image",
+    "encode_constant_json",
+    "encode_operands",
+    "error_to_value",
+    "error_value_from_exception",
+    "format_frame",
+    "format_frames",
+    "from_error_value",
+    "is_defined",
+    "is_nova",
+    "is_weak",
+    "nova",
+    "raise_error_value",
+    "raise_value",
+    "read_image",
+    "spec",
+    "spread_values",
+    "stable_key",
+    "tag_of",
+    "to_error_value",
+    "truthy",
+    "unwrap",
+    "value_to_constant",
+    "value_to_constant_kind",
+    "value_to_error",
+    "verify_code",
+    "verify_image",
+    "write_image",
+]
