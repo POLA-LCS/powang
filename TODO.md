@@ -10,6 +10,7 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
   - Depends on stable source spans and a debug adapter design.
   - Target versions: powang `0.20.0`, powang-lsp `0.26.0`.
   - The `char` type shipped in powang `0.19.1` and powang-lsp `0.25.1`.
+  - The bytecode VM plan is defined in `docs/phase-4b-bytecode-vm/README.md`.
 
 ## Language features in order
 
@@ -115,9 +116,12 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 12. [ ] FFI handles and `extern type`.
     - The `handle` type exists. The registry and host callback design still need work.
 
-13. [ ] Performance work.
-    - Profile first.
-    - A bytecode VM is not planned until profiling proves the tree-walker is the bottleneck.
+13. [ ] Performance work and bytecode VM.
+    - Profile the tree-walker first.
+    - Plan: `docs/phase-4b-bytecode-vm/README.md`.
+    - Target versions: powang `0.21.0`, powang-lsp `0.27.0`.
+    - Keep the tree-walker as the reference engine until differential parity.
+    - The VM is opt-in before it becomes the default engine.
 
 ## Tooling
 
