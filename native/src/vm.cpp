@@ -455,8 +455,11 @@ Value make_integer_result(Machine& machine, const BigInt& value) {
 }
 
 Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
-    if (left.tag == Tag::Bool && right.tag == Tag::Bool) {
-        return make_bool(left.b || right.b);
+    if (left.tag == Tag::Bool) {
+        return make_bool(left.b || truthy(right));
+    }
+    if (right.tag == Tag::Bool) {
+        return make_bool(truthy(left) || right.b);
     }
     if (left.tag == Tag::Char && right.tag == Tag::Str) {
         std::u32string text(1, left.c);
@@ -536,8 +539,11 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
-    if (left.tag == Tag::Bool && right.tag == Tag::Bool) {
-        return make_bool(left.b && !right.b);
+    if (left.tag == Tag::Bool) {
+        return make_bool(left.b || !truthy(right));
+    }
+    if (right.tag == Tag::Bool) {
+        return make_bool(truthy(left) || !right.b);
     }
     if (left.tag == Tag::Str && right.tag == Tag::Str) {
         std::u32string text = as_string_const(left)->code_points;
@@ -608,8 +614,11 @@ Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_mul(Machine& machine, const Value& left, const Value& right) {
-    if (left.tag == Tag::Bool && right.tag == Tag::Bool) {
-        return make_bool(left.b && right.b);
+    if (left.tag == Tag::Bool) {
+        return make_bool(left.b && truthy(right));
+    }
+    if (right.tag == Tag::Bool) {
+        return make_bool(truthy(left) && right.b);
     }
     if (left.tag == Tag::Str && right.tag == Tag::Str) {
         const std::u32string& text = as_string_const(left)->code_points;
@@ -713,6 +722,12 @@ Value chunk_size_error(
 }
 
 Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
+    if (left.tag == Tag::Bool) {
+        return make_bool(left.b && !truthy(right));
+    }
+    if (right.tag == Tag::Bool) {
+        return make_bool(truthy(left) && !right.b);
+    }
     if (left.tag == Tag::Str && is_integer_value(right)) {
         const std::int64_t size = value_as_int(right, "string chunking");
         if (size <= 0) {
@@ -919,7 +934,38 @@ bool is_numeric_value(const Value& value) {
 // false and NEQ true. Bool left comparisons keep Python truthiness, where NaN
 // is true.
 Comparison compare_values(
-    const Value& left, const Value& right, const char* opcode) {
+    Machine& machine,
+    const Value& left,
+    const Value& right,
+    const char* opcode) {
+    const std::string equality(opcode);
+    const std::string symbol =
+        equality == "EQ" || equality == "EQ_TYPED" ? "=="
+        : equality == "NEQ" || equality == "NEQ_TYPED" ? "!="
+        : equality == "LT" || equality == "LT_TYPED" ? "<"
+        : equality == "LE" || equality == "LE_TYPED" ? "<="
+        : equality == "GT" || equality == "GT_TYPED" ? ">"
+        : equality == "GE" || equality == "GE_TYPED" ? ">="
+        : equality;
+    if (equality == "EQ" || equality == "NEQ"
+        || equality == "EQ_TYPED" || equality == "NEQ_TYPED") {
+        const bool both_numeric =
+            is_numeric_value(left) && is_numeric_value(right);
+        if (!both_numeric) {
+            const bool comparable =
+                left.tag == right.tag
+                || left.tag == Tag::Nova || right.tag == Tag::Nova
+                || (left.tag == Tag::Str && right.tag == Tag::Char)
+                || (left.tag == Tag::Char && right.tag == Tag::Str);
+            if (!comparable) {
+                throw_error(error_unsupported_operation(
+                    machine.arena, "comparisson",
+                    runtime_type_name(left), symbol,
+                    runtime_type_name(right)));
+            }
+            return {false, value_equal(left, right) ? 0 : 1};
+        }
+    }
     if (is_numeric_value(left) && is_numeric_value(right)) {
         if (left.tag == Tag::Bool) {
             bool other = false;
@@ -1017,9 +1063,10 @@ Comparison compare_values(
                 break;
         }
     }
-    runtime_fail(
-        std::string("native N1 ") + opcode + " does not support "
-        + tag_name(left.tag) + " and " + tag_name(right.tag) + " operands");
+    throw_error(error_unsupported_operation(
+        machine.arena, "comparisson",
+        runtime_type_name(left), symbol.c_str(),
+        runtime_type_name(right)));
 }
 
 Value load_constant(
@@ -2955,6 +3002,17 @@ Value execute(Frame& frame, Machine& machine) {
                         machine, value, "negate", {}, "operator -"));
                     break;
                 }
+                if (value.tag != Tag::Int && value.tag != Tag::BigInt
+                    && value.tag != Tag::Num) {
+                    throw_error(make_error(
+                        machine.arena, "PREFIX", "",
+                        "Unsupported prefix",
+                        {
+                            "for prefix \"-\"",
+                            "and type \""
+                                + runtime_type_name(value) + "\"",
+                        }));
+                }
                 push_value(frame, arithmetic_negate(machine, value));
                 break;
             }
@@ -2982,7 +3040,9 @@ Value execute(Frame& frame, Machine& machine) {
                     (left.tag == Tag::Obj || right.tag == Tag::Obj)
                     ? compare_object_values(
                         machine, left, right, instruction.spec->name)
-                    : compare_values(left, right, instruction.spec->name);
+                    : compare_values(
+                        machine, left, right,
+                        instruction.spec->name);
                 bool result = false;
                 switch (static_cast<Opcode>(instruction.opcode)) {
                     case Opcode::EQ:
@@ -6284,6 +6344,28 @@ Value slice_value(
 
 Value reverse_value(Machine& machine, const Value& value) {
     switch (value.tag) {
+        case Tag::Int:
+        case Tag::BigInt: {
+            const std::string text =
+                value.tag == Tag::Int
+                ? std::to_string(value.i)
+                : as_bigint_const(value)->value.format_decimal();
+            const std::string reversed(text.rbegin(), text.rend());
+            try {
+                return make_int(std::stoll(reversed));
+            } catch (const std::exception&) {
+                return make_nova();
+            }
+        }
+        case Tag::Num: {
+            const std::string text = format_number(value.d);
+            const std::string reversed(text.rbegin(), text.rend());
+            try {
+                return make_num(std::stod(reversed));
+            } catch (const std::exception&) {
+                return make_nova();
+            }
+        }
         case Tag::Str: {
             const std::u32string& source =
                 as_string_const(value)->code_points;
@@ -6302,13 +6384,11 @@ Value reverse_value(Machine& machine, const Value& value) {
             return make_tuple(machine.arena.allocate_tuple(std::move(items)));
         }
         default:
-            runtime_fail(
-                std::string("value of type ") + tag_name(value.tag)
-                + " cannot be reversed");
+            return make_nova();
     }
 }
 
-std::int64_t value_size(const Value& value) {
+std::int64_t value_size(Machine& machine, const Value& value) {
     switch (value.tag) {
         case Tag::Str:
             return static_cast<std::int64_t>(
@@ -6324,22 +6404,21 @@ std::int64_t value_size(const Value& value) {
         case Tag::Char:
             return 1;
         default:
-            runtime_fail(
-                std::string("value of type ") + tag_name(value.tag)
-                + " has no size");
+            throw_error(error_unsupported_operation(
+                machine.arena, "",
+                runtime_type_name(value) + " ", "size"));
     }
 }
 
 Value builtin_size(Machine& machine, const Value& value) {
-    (void)machine;
-    return make_int(value_size(value));
+    return make_int(value_size(machine, value));
 }
 
 Value builtin_size_all(Machine& machine, const std::vector<Value>& values) {
     (void)machine;
     std::int64_t total = 0;
     for (const Value& value : values) {
-        total += value_size(value);
+        total += value_size(machine, value);
     }
     return make_int(total);
 }

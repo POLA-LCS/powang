@@ -10,6 +10,7 @@ Usage:
     python -m src.vm.native.differential --corpus tests/native/corpus/n5
     python -m src.vm.native.differential --examples examples --fail-fast
     python -m src.vm.native.differential --corpus tests/native/corpus --json
+    python -m src.vm.native.differential --fuzz --seed 2026 --count 1000
 """
 
 from __future__ import annotations
@@ -150,13 +151,59 @@ def collect_programs(
     return unique
 
 
+def run_fuzz(
+    seed: int,
+    count: int,
+    *,
+    fail_fast: bool = False,
+    as_json: bool = False,
+) -> int:
+    import random
+    import tempfile
+
+    from ..fuzz import generate_program
+
+    ensure_runtime()
+    rng = random.Random(seed)
+    results: list[Comparison] = []
+    with tempfile.TemporaryDirectory(
+        prefix="powang-native-fuzz-",
+    ) as directory:
+        root = Path(directory)
+        for index in range(count):
+            source = generate_program(rng)
+            path = root / f"fuzz_{index:04d}.po"
+            path.write_text(source, encoding="utf-8", newline="\n")
+            result = compare_file(path)
+            results.append(result)
+            if not as_json:
+                print(result.report())
+            if not result.equal and fail_fast:
+                break
+    if as_json:
+        print(json.dumps({
+            "seed": seed,
+            "requested": count,
+            "total": len(results),
+            "passed": sum(1 for item in results if item.equal),
+            "failed": sum(1 for item in results if not item.equal),
+        }, indent=2))
+    return 0 if all(item.equal for item in results) else 1
+
+
 def run(
     corpora: Sequence[Path] = (),
     examples: Sequence[Path] = (),
     *,
     fail_fast: bool = False,
     as_json: bool = False,
+    fuzz: bool = False,
+    seed: int = 1,
+    count: int = 100,
 ) -> int:
+    if fuzz:
+        return run_fuzz(
+            seed, count, fail_fast=fail_fast, as_json=as_json)
     ensure_runtime()
     programs = collect_programs(corpora, examples)
     if not programs:
@@ -208,12 +255,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--fuzz", action="store_true")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--count", type=int, default=100)
     arguments = parser.parse_args(argv)
     return run(
         arguments.corpus,
         arguments.examples,
         fail_fast=arguments.fail_fast,
         as_json=arguments.json,
+        fuzz=arguments.fuzz,
+        seed=arguments.seed,
+        count=arguments.count,
     )
 
 
