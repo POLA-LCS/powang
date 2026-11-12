@@ -64,9 +64,23 @@ executable cache is not implemented yet. Cold and warm compile timings for a
 6. The default scalar host bridge for `math`, `strings`, `json`, `url`,
    `crypto`, `time` and `env`.
 
+## Seeded fuzz status
+
+The native differential runner accepts `--fuzz --seed N --count N` and
+compares generated programs against the Python VM. On seed 2026 the first 10
+generated programs match. Program 10 exposes one remaining text mismatch for a
+weak `nova` multiplied by a string:
+
+- Python reports `(in operation)` and the left type `nova weak nova`.
+- Native reports `(in implicit operation)` and the left type `nova`.
+
+The seeded fuzz gate is therefore open. The generator, the runner and the
+comparison path are implemented.
+
 ## Remaining gates
 
-1. Seeded native fuzz differential over 1000 programs on two seeds.
+1. Seeded native fuzz differential over 1000 programs on two seeds. The first
+   mismatch on seed 2026 is recorded above.
 2. The 100-start stress test.
 3. Warm executable cache and compile timing measurements.
 4. Optional inline caches and threaded dispatch.
