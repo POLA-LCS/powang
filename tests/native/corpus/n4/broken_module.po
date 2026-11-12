@@ -1,0 +1,3 @@
+print("before ");
+use "./fixtures/broken.po" as b;
+print("after");

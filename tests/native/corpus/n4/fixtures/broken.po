@@ -1,0 +1,3 @@
+module broken;
+print("inside ");
+error("BROKEN", "load fail");
