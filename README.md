@@ -75,11 +75,11 @@ The VM is the default. The tree walker remains the reference oracle and the
 fallback. Both engines must produce the same output, the same runtime error
 text, the same source positions and the same exit code.
 
-## Native C++17 runtime (N2)
+## Native C++17 runtime (N3 core)
 
 An optional native C++17 runtime lives under `native/`. It is not the default engine. The Python VM remains the default engine and the differential oracle, and the tree walker remains the reference engine and the fallback.
 
-The native runtime consumes the same `PWB1` program image as the Python compiler. N2 covers scalars, big integers with int64 promotion, globals, functions, recursion, closures by value and reference, defaults, named arguments, variadics, overload selection, range loops, iterators, UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, deep copy, interpolation, the format and character builtins and the array, string, map, set, tuple and char native methods. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Float modulo follows the divisor sign, including signed zero. User types, enums, traits, modules, project values, externs, errors, references, tasks, file and task methods and the full host bridge remain N3 to N6 work. Runtime error stream and text parity is not complete, so the native runtime does not yet have full language parity.
+The native runtime consumes the same `PWB1` program image as the Python compiler. N3 core covers scalars, big integers with int64 promotion, globals, functions, recursion, closures by value and reference, defaults, named arguments, variadics, overload selection, range loops, iterators, UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, deep copy, interpolation, the format and character builtins, the container native methods, user types, constructors, public and private fields, instance methods, statics, enums, traits, default methods and operator overloading. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Float modulo follows the divisor sign, including signed zero. Native method lock enforcement, exact access-control, ambiguity and lock error text, modules, project values, externs, errors, references, tasks, file and task methods and the full host bridge remain. Runtime error stream and text parity is not complete, so the native runtime does not yet have full language parity.
 
 The Python side of the build is under `src/vm/native/`. `source_gen.py` renders the generated `temp.cpp` translation unit into an in-memory buffer, and the default integrated compiler writes a temporary `temp.cpp` file for diagnostics. `compiler.py` runs the integrated `g++` driver, `build.py` configures and builds the runtime with CMake and Ninja, and `loader.py` compiles and runs an image. The generated source is temporary and is never committed.
 
@@ -100,7 +100,7 @@ python powang.py vm native run main.po
 python powang.py vm native compile --output build/main.exe main.po
 ```
 
-`compile` accepts `--keep-source` to write `<output-stem>.cpp` next to the executable for debugging, for example `build/main.cpp` for `build/main.exe`. The package version is still `0.22.0` and N0, N1 and N2 are milestones, not releases. Full native parity is not claimed.
+`compile` accepts `--keep-source` to write `<output-stem>.cpp` next to the executable for debugging, for example `build/main.cpp` for `build/main.exe`. The package version is still `0.22.0` and N0, N1, N2 and the N3 core are milestones, not releases. Full native parity is not claimed.
 
 ## Language at a glance
 

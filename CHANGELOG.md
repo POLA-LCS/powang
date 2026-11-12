@@ -16,13 +16,14 @@ All notable changes to powang are documented here.
 - The native N1 execution tier: big integers with int64 promotion, locals, globals, declarations, branches, range loops, `loop`, `break`, `continue`, functions, recursion, mutual recursion, defaults, named arguments, variadics, overload selection, closures by value and by reference, named lambda recursion, higher order function values, frames and iterators.
 - The native N2 object tier: UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, iteration, deep copy with a cycle memo, interpolation, the `format` and `printf` builtins, the character builtins and the array, string, map, set, tuple and char native methods.
 - `src/vm/native/meta.py` builds the deterministic PWBM function and type metadata block, and `pwb_native meta` prints it. `tests/test_native_meta.py` has 5 tests for metadata determinism, the image hash, parameter metadata and the C++ metadata round trip.
-- `tests/native/corpus/n1` has 5 differential programs for arithmetic, big integers, control flow, functions, overloads, variadics, recursion and closures. `tests/native/corpus/n2` has 6 differential programs for strings, containers, copy semantics, slicing, interpolation and native methods. `tests/test_vm_native_corpus.py` runs both corpora.
-- The full test suite now has 618 tests.
+- The native N3 core: user types, constructors, public and private fields, instance methods, statics, enums, traits, default methods and operator overloading.
+- `tests/native/corpus/n1` has 5 differential programs for arithmetic, big integers, control flow, functions, overloads, variadics, recursion and closures. `tests/native/corpus/n2` has 6 differential programs for strings, containers, copy semantics, slicing, interpolation and native methods. `tests/native/corpus/n3` has 5 differential programs for types, constructors, enums, traits and operators. `tests/test_vm_native_corpus.py` runs all three corpora.
+- The full test suite now has 619 tests.
 
 ### Notes
 
-- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The version stays `0.22.0` because N0, N1 and N2 are milestones, not releases.
-- N0, N1 and N2 cover scalars, big integers, functions, closures, strings, containers and native methods. User types, modules, errors, references, tasks and the full host surface are N3 to N6 work. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow promotes to bigint. Runtime error stream and text parity is not complete. Full native parity is not claimed.
+- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The version stays `0.22.0` because N0, N1, N2 and the N3 core are milestones, not releases.
+- N0, N1, N2 and the N3 core cover scalars, big integers, functions, closures, strings, containers, user types, enums, traits, operators and native methods. Native method lock enforcement, exact access-control, ambiguity and lock error text, modules, errors, references, tasks and the full host surface remain. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow promotes to bigint. Runtime error stream and text parity is not complete. Full native parity is not claimed.
 
 ## 0.22.0
 

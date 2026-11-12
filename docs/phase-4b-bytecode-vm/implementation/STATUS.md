@@ -52,7 +52,7 @@ Recorded results for `0.22.0`:
 | N0 | `PWB1` reader, decoder, verifier, disassembler, generated opcode table, `temp.cpp` source generation and integrated `g++` driver | gate green | 0.22.0 |
 | N1 | Big integers, locals, globals, control flow, functions, closures, calls, defaults, named arguments, variadics, overload selection, frames and iterators | gate green | 0.22.0 |
 | N2 | Strings, arrays, tuples, maps, sets, indexing, slicing, iteration, deep copy, interpolation, core builtins and native methods | gate green | 0.22.0 |
-| N3 | User types, enums, traits, operator dispatch and locks | not started | 0.23.0 |
+| N3 | User types, constructors, fields, methods, statics, enums, traits, operator dispatch and locks | in progress | 0.23.0 |
 | N4 | Modules, project, externs, errors and references | not started | 0.23.0 |
 | N5 | Async, tasks, file I/O and the host bridge | not started | 0.24.0 |
 | N6 | Full parity, performance and distribution | not started | 0.25.0 |
@@ -65,13 +65,15 @@ N1 execution is gate green. It adds arbitrary precision integers with int64 prom
 
 N2 is gate green. It adds UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, iteration, deep copy with a cycle memo, interpolation, the `format` and `printf` builtins, the character builtins and the array, string, map, set, tuple and char native methods. `tests/native/corpus/n2` has 6 differential programs. The file and task native methods remain in N5. Runtime error stream and text parity remains incomplete.
 
-`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 5 tests for deterministic PWBM metadata, the image hash, parameter metadata and the C++ metadata round trip. `tests/test_vm_native_corpus.py` has 2 differential tests covering the N1 and N2 corpora. The full suite has 618 tests. Run them with:
+N3 core is gate green for user types, constructors, fields, instance methods, statics, enums, traits, default methods and operator overloading. `tests/native/corpus/n3` has 5 differential programs. Native method lock enforcement and exact access-control, ambiguity and lock error text parity remain, so N3 is not fully closed.
+
+`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 5 tests for deterministic PWBM metadata, the image hash, parameter metadata and the C++ metadata round trip. `tests/test_vm_native_corpus.py` has 3 differential tests covering the N1, N2 and N3 corpora. The full suite has 619 tests. Run them with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_native_build -v
 ```
 
-The version is still `0.22.0`. N0, N1 and N2 are milestones, not releases. The plan targets `0.23.0` for N0 to N2. N3 to N6 remain planned, so the full native VM is not complete.
+The version is still `0.22.0`. N0, N1, N2 and the N3 core are milestones, not releases. The plan targets `0.23.0` for N0 to N2. The N3 lock and error remainder and N4 to N6 remain planned, so the full native VM is not complete.
 
 ## 2. Module status
 
@@ -237,7 +239,7 @@ Version: <0.21.0 or 0.22.0>
 ## 6. Known limitations
 
 - The Python reference VM uses the host Python allocator and garbage collector. A native VM owns its own heap policy. There is no separate collector in the Python engine by design.
-- The native C++17 runtime is implemented through milestone N2 under `native/`, and `powang vm native` is opt in. It consumes the same `PWB1` images as the Python compiler and covers scalars, big integers, functions, closures, strings, containers and native methods. User types, modules, errors, references, tasks and the full host surface are N3 to N6 work. Integer overflow promotes to bigint. Division and modulo by zero return nova for int and num operands, matching the Python VM. The full native VM is not complete. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes.
+- The native C++17 runtime is implemented through the N3 core under `native/`, and `powang vm native` is opt in. It consumes the same `PWB1` images as the Python compiler and covers scalars, big integers, functions, closures, strings, containers, user types, constructors, fields, methods, statics, enums, traits, operators and native methods. Native method lock enforcement, exact access-control, ambiguity and lock error text, modules, errors, references, tasks and the full host surface remain. Integer overflow promotes to bigint. Division and modulo by zero return nova for int and num operands, matching the Python VM. The full native VM is not complete. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes.
 - Runtime error stream and text parity is an explicit native parity task. `print();` is rejected by both engines with exit code 1, but the Python CLI writes its diagnostic to standard output while the native runtime writes its diagnostic to standard error. The exact error text also differs, so native error text and stream parity is not complete.
 - Preemptive scheduling and coroutine suspension are not part of the language model. Lazy tasks and worker tasks run without arbitrary expression suspension. A future coroutine model needs a new bytecode version and a new task state machine.
 - A JIT is not part of this phase. It can be added behind the same verifier, contract and differential suite.
