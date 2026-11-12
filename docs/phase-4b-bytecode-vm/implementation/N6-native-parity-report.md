@@ -71,15 +71,16 @@ ten second cold and five second warm compile gates.
 ## Seeded fuzz status
 
 The native differential runner accepts `--fuzz --seed N --count N` and
-compares generated programs against the Python VM. On seed 2026 the first 10
-generated programs match. Program 10 exposes one remaining text mismatch for a
-weak `nova` multiplied by a string:
+compares generated programs against the Python VM. Seed 7 passes 100 of 100
+generated programs. Seed 2026 passes 988 of 1000. The remaining 12 programs
+are concentrated in:
 
-- Python reports `(in operation)` and the left type `nova weak nova`.
-- Native reports `(in implicit operation)` and the left type `nova`.
+- Weak type ordering and error text for mixed weak `nova` operands.
+- Mixed bool operand casting in modulo and one prefix case.
+- One checker warning path that the native file path does not reproduce.
 
-The seeded fuzz gate is therefore open. The generator, the runner and the
-comparison path are implemented.
+The seeded fuzz gate is therefore open. The generator, the runner, the cache
+and the comparison path are implemented.
 
 ## Stress results
 
