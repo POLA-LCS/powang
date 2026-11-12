@@ -1,0 +1,11 @@
+trait AsyncNamed {
+    | name: str;
+    fun label(): str;
+    async fun describe(): str >> this.label();
+}
+type Person[+] {
+    | name: str;
+    fun this.label(): str >> this.name;
+}
+person: AsyncNamed = Person.["Ada"];
+print(await person.describe()); print("\n");

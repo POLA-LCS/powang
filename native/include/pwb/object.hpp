@@ -15,9 +15,12 @@
 #include <vector>
 
 #include "pwb/bigint.hpp"
+#include "pwb/errors.hpp"
+#include "pwb/file.hpp"
 #include "pwb/image.hpp"
 #include "pwb/meta.hpp"
 #include "pwb/references.hpp"
+#include "pwb/task.hpp"
 #include "pwb/value.hpp"
 
 namespace pwb {
@@ -120,6 +123,8 @@ public:
         std::string variant = "");
     ErrorObject* allocate_error();
     RefObject* allocate_reference();
+    TaskObject* allocate_task();
+    FileObject* allocate_file(std::string path, std::string mode);
 
     std::size_t bigint_count() const noexcept;
     std::size_t array_count() const noexcept;
@@ -144,6 +149,8 @@ private:
     std::deque<ObjectObject> objects_;
     std::deque<ErrorObject> errors_;
     std::deque<RefObject> references_;
+    std::deque<TaskObject> tasks_;
+    std::deque<FileObject> files_;
 };
 
 std::string format_heap_value(const Value& value);

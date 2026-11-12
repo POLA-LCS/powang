@@ -16,6 +16,7 @@ add_library(pwb_runtime STATIC
     src/bundle.cpp
     src/errors.cpp
     src/modules.cpp
+    src/tasks.cpp
     src/object.cpp
     src/vm.cpp
     src/host.cpp)
@@ -44,7 +45,8 @@ add_executable(pwb_native_tests
     tests/test_bigint.cpp
     tests/test_value.cpp
     tests/test_bundle.cpp
-    tests/test_errors.cpp)
+    tests/test_errors.cpp
+    tests/test_tasks.cpp)
 target_link_libraries(pwb_native_tests PRIVATE pwb_runtime)
 
 if(MSVC)

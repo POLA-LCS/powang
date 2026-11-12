@@ -1,0 +1,26 @@
+async fun value(): int >> 7;
+async fun second(): int >> 9;
+
+fun cancel_pending() {
+    pending := value();
+    print(task_status(pending)); print(" ");
+    cancel(pending);
+    print(task_status(pending)); print(" ");
+}
+
+fun cancel_done() {
+    done := second();
+    print(wait(done)); print(" ");
+    cancel(done);
+    print(task_status(done)); print(" ");
+}
+
+fun cancel_method() {
+    third := value();
+    third.cancel();
+    print(third.status()); print("\n");
+}
+
+cancel_pending();
+cancel_done();
+cancel_method();

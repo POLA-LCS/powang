@@ -54,7 +54,7 @@ Recorded results for `0.22.0`:
 | N2 | Strings, arrays, tuples, maps, sets, indexing, slicing, iteration, deep copy, interpolation, core builtins and native methods | gate green | 0.22.0 |
 | N3 | User types, constructors, fields, methods, statics, enums, traits, operator dispatch and locks | in progress | 0.23.0 |
 | N4 | Modules, project, externs, errors and references | gate green | 0.23.0 |
-| N5 | Async, tasks, file I/O and the host bridge | not started | 0.24.0 |
+| N5 | Async, tasks, file I/O and the host bridge | gate green | 0.24.0 |
 | N6 | Full parity, performance and distribution | not started | 0.25.0 |
 
 The native runtime lives under `native/` and consumes the same `PWB1` program image as the Python compiler. It is opt in. The Python VM remains the default engine and the differential oracle.
@@ -79,13 +79,22 @@ N4 gate results, commit range `857b8f6..3fc8237`:
 - Full Python suite: 635 tests pass.
 - The N4 corpus compares standard output, standard error and exit codes against the Python VM. Top-level language errors are written to standard output as in the Python CLI.
 
-`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 6 tests for deterministic PWBM metadata, the image hash, parameter metadata, PWBM version 2 descriptors and the C++ metadata round trip. `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_vm_native_corpus.py` has 4 differential tests covering the N1, N2, N3 and N4 corpora. The full suite has 635 tests. Run them with:
+N5 is gate green. It adds lazy async tasks, `spawn` worker tasks with cloned module snapshots, `await`, `wait`, `cancel`, `task_status`, the task native methods, the pending async task limit, task error propagation, cooperative cancellation and task isolation. It adds the file builtins and file values, the host input, inputf and system bridge, and the `typeof` and `typedeep` builtins. The worker executor is deterministic: it runs spawned work on the spawning thread against a cloned module snapshot, which matches the single-worker differential contract and avoids sharing the non-thread-safe machine across threads. True parallel worker execution and the full host surface remain N6 work.
+
+N5 gate results, commit range after `e7d7331`:
+
+- `tests.test_vm_native_corpus`: the N5 subtest runs 9 differential programs.
+- `tests.test_native_tasks`: 2 tests pass.
+- `ctest --test-dir build/native`: 1 of 1 test passes.
+- Full Python suite: 638 tests pass.
+
+`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 6 tests for deterministic PWBM metadata, the image hash, parameter metadata, PWBM version 2 descriptors and the C++ metadata round trip. `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_native_tasks.py` has 2 tests for host input parity and task status names. `tests/test_vm_native_corpus.py` has 5 differential tests covering the N1, N2, N3, N4 and N5 corpora. The full suite has 638 tests. Run them with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_native_build -v
 ```
 
-The version is still `0.22.0`. N0, N1, N2, the N3 core and N4 are milestones, not releases. The plan targets `0.23.0` for the native milestone series. The N3 lock and error remainder, and N5 to N6 remain planned, so the full native VM is not complete.
+The version is still `0.22.0`. N0, N1, N2, the N3 core, N4 and N5 are milestones, not releases. The plan targets `0.23.0` for the native milestone series. The N3 lock and error remainder and N6 remain planned, so the full native VM is not complete.
 
 ## 2. Module status
 

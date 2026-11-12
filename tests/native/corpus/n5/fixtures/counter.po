@@ -1,0 +1,6 @@
+module counter;
+counter := [0];
+export fun bump(): int {
+    counter[0] += 1;
+    return counter[0];
+}

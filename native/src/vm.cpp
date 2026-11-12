@@ -4,11 +4,15 @@
 #include <cmath>
 #include <cstdint>
 #include <cctype>
+#include <cstdlib>
 #include <cwctype>
+#include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <new>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -93,6 +97,10 @@ struct Machine {
     std::string entry_path;
     ProjectObject project;
     bool has_project = false;
+    std::uint64_t next_task_id = 0;
+    std::size_t lazy_pending = 0;
+    TaskObject* current_task = nullptr;
+    std::unordered_map<std::string, FileStream> files;
     std::size_t frame_depth = 0;
     // Python reports a 900 frame language limit, but its own recursion limit
     // trips first in practice. The native guard is lower so the C++ stack
@@ -144,6 +152,39 @@ Value call_extern_function(
     const std::string& name,
     const std::vector<Value>& positional,
     const std::vector<std::pair<std::string, Value>>& named);
+bool function_is_async(const FunctionObject* function);
+void run_task(Machine& machine, TaskObject* task);
+TaskObject* create_task(
+    Machine& machine,
+    FunctionObject* function,
+    std::vector<Value> positional,
+    std::vector<std::pair<std::string, Value>> named,
+    const Value* receiver,
+    const std::string& where,
+    const std::string& frame_name,
+    TaskObject::Kind kind);
+Value await_task(
+    Machine& machine, TaskObject* task, const std::string& where);
+void cancel_task(Machine& machine, TaskObject* task);
+Value invoke_function(
+    Machine& machine,
+    FunctionObject* function,
+    std::vector<Value> positional,
+    std::vector<std::pair<std::string, Value>> named,
+    const std::string& where,
+    const Value* receiver = nullptr,
+    const std::string& frame_name = "");
+bool resolve_pending_call(
+    Machine& machine,
+    Frame& frame,
+    const CallSite& site,
+    const std::vector<Value>& positional,
+    const Value* target,
+    FunctionObject*& function,
+    Value& receiver,
+    bool& has_receiver,
+    std::string& where,
+    std::string& frame_name);
 TypeRuntime* resolve_qualified_type(
     Machine& machine,
     Frame& frame,
@@ -2672,7 +2713,7 @@ Value execute(Frame& frame, Machine& machine) {
                     }
                     push_value(
                         frame,
-                        call_function(
+                        invoke_function(
                             machine, as_function(callee),
                             std::move(positional), std::move(named),
                             "call expression"));
@@ -2731,7 +2772,7 @@ Value execute(Frame& frame, Machine& machine) {
                     }
                     push_value(
                         frame,
-                        call_function(
+                        invoke_function(
                             machine, function, std::move(positional),
                             std::move(named), "call: " + site.name,
                             nullptr, site.name));
@@ -2749,7 +2790,7 @@ Value execute(Frame& frame, Machine& machine) {
                     && is_function(variable)) {
                     push_value(
                         frame,
-                        call_function(
+                        invoke_function(
                             machine, as_function(variable),
                             std::move(positional), std::move(named),
                             "call: " + site.name, nullptr, site.name));
@@ -2823,7 +2864,7 @@ Value execute(Frame& frame, Machine& machine) {
                 if (target.tag == Tag::Fun) {
                     push_value(
                         frame,
-                        call_function(
+                        invoke_function(
                             machine, as_function(target), positional, {},
                             "call expression"));
                     break;
@@ -2840,7 +2881,7 @@ Value execute(Frame& frame, Machine& machine) {
                             candidates, positional, *frame.module->meta);
                         push_value(
                             frame,
-                            call_function(
+                            invoke_function(
                                 machine, function, positional, {},
                                 "call expression"));
                         break;
@@ -2902,12 +2943,26 @@ Value execute(Frame& frame, Machine& machine) {
                         statics->second, positional, *module->meta);
                     push_value(
                         frame,
-                        call_function(
+                        invoke_function(
                             machine, function, positional, named,
                             "method call: " + runtime->info->name + "."
                                 + site.name,
                             nullptr,
                             runtime->info->name + "." + site.name));
+                    break;
+                }
+                if (receiver.tag == Tag::Task
+                    || receiver.tag == Tag::File) {
+                    std::vector<Value> native_arguments;
+                    native_arguments.reserve(positional.size() + 1);
+                    native_arguments.push_back(receiver);
+                    native_arguments.insert(
+                        native_arguments.end(),
+                        positional.begin(), positional.end());
+                    push_value(
+                        frame,
+                        call_native_method(
+                            machine, site, native_arguments, named));
                     break;
                 }
                 if (receiver.tag != Tag::Obj) {
@@ -2977,7 +3032,7 @@ Value execute(Frame& frame, Machine& machine) {
                 }
                 push_value(
                     frame,
-                    call_function(
+                    invoke_function(
                         machine, function, positional, {},
                         "method call: " + site.name, &receiver,
                         runtime_type_name(receiver) + "." + site.name));
@@ -3026,7 +3081,7 @@ Value execute(Frame& frame, Machine& machine) {
                     methods->second, positional, *owner->meta);
                 push_value(
                     frame,
-                    call_function(
+                    invoke_function(
                         machine, function, positional, named,
                         "method call: " + *site.type_name + "."
                         + site.name,
@@ -3117,7 +3172,7 @@ Value execute(Frame& frame, Machine& machine) {
                     *candidates, arguments, overload_meta);
                 push_value(
                     frame,
-                    call_function(
+                    invoke_function(
                         machine, function, arguments, {},
                         "trait call: " + trait_name + "." + site.name,
                         &receiver,
@@ -3216,7 +3271,7 @@ Value execute(Frame& frame, Machine& machine) {
                     *candidates, arguments, overload_meta);
                 push_value(
                     frame,
-                    call_function(
+                    invoke_function(
                         machine, function, arguments, {},
                         "operator call: " + site.name, &receiver,
                         runtime_type_name(receiver) + "." + site.name));
@@ -3631,6 +3686,112 @@ Value execute(Frame& frame, Machine& machine) {
                 frame.has_pending_return = false;
                 frame.transfer = Transfer{};
                 break;
+            case Opcode::AWAIT: {
+                const Value value = pop_value(frame);
+                if (!is_task(value)) {
+                    throw_error(error_type_match(
+                        machine.arena, "await", "task",
+                        runtime_type_name(value)));
+                }
+                TaskObject* task = as_task(value);
+                push_value(
+                    frame,
+                    await_task(
+                        machine, task,
+                        task->kind == TaskObject::Kind::Lazy
+                            ? "await" : "wait"));
+                break;
+            }
+            case Opcode::SPAWN: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                std::optional<Value> target;
+                if (!site.method_ast.empty()
+                    && site.method_ast != "null"
+                    && site.dispatch != "spawn_static") {
+                    target = pop_value(frame);
+                }
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                FunctionObject* function = nullptr;
+                Value receiver;
+                bool has_receiver = false;
+                std::string where;
+                std::string frame_name;
+                if (!resolve_pending_call(
+                        machine, frame, site, positional,
+                        target.has_value() ? &*target : nullptr,
+                        function, receiver, has_receiver, where,
+                        frame_name)) {
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "spawn: " + site.name,
+                        site.name));
+                }
+                TaskObject* task = create_task(
+                    machine, function, positional, named,
+                    has_receiver ? &receiver : nullptr, where,
+                    frame_name, TaskObject::Kind::Worker);
+                run_task(machine, task);
+                push_value(frame, make_task(task));
+                break;
+            }
+            case Opcode::CALL_ASYNC:
+            case Opcode::CALL_ASYNC_METHOD: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                std::optional<Value> target;
+                if (site.dispatch == "method"
+                    || site.dispatch == "module"
+                    || site.dispatch == "value") {
+                    target = pop_value(frame);
+                }
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                FunctionObject* function = nullptr;
+                Value receiver;
+                bool has_receiver = false;
+                std::string where;
+                std::string frame_name;
+                if (!resolve_pending_call(
+                        machine, frame, site, positional,
+                        target.has_value() ? &*target : nullptr,
+                        function, receiver, has_receiver, where,
+                        frame_name)) {
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "call: " + site.name,
+                        site.name));
+                }
+                TaskObject* task = create_task(
+                    machine, function, positional, named,
+                    has_receiver ? &receiver : nullptr, where,
+                    frame_name, TaskObject::Kind::Lazy);
+                push_value(frame, make_task(task));
+                break;
+            }
             case Opcode::RETURN: {
                 const Value value = pop_value(frame);
                 if (frame.is_function) {
@@ -3639,6 +3800,15 @@ Value execute(Frame& frame, Machine& machine) {
                 return value;
             }
             case Opcode::CHECK_CANCEL:
+                if (machine.current_task != nullptr
+                    && machine.current_task->cancel_requested) {
+                    throw_error(make_error(
+                        machine.arena, "TASK", "", "canceled",
+                        {"task "
+                             + std::to_string(
+                                 machine.current_task->id)
+                             + " cancellation was requested"}));
+                }
                 break;
             default:
                 runtime_fail(
@@ -3732,6 +3902,8 @@ std::string runtime_type_name(const Value& value) {
         case Tag::Error: return "error";
         case Tag::Ref: return "reference";
         case Tag::Project: return "Project";
+        case Tag::Task: return "task";
+        case Tag::File: return "file";
     }
     return "unknown";
 }
@@ -4300,6 +4472,254 @@ Value call_function(
         close_frame(frame);
         throw;
     }
+}
+
+bool function_is_async(const FunctionObject* function) {
+    return function != nullptr && function->metadata != nullptr
+        && meta_flag(*function->metadata, MetaFunctionFlag::Async);
+}
+
+std::shared_ptr<ModuleRuntime> clone_module_for_task(
+    Machine& machine,
+    ModuleRuntime& source,
+    FunctionObject* target,
+    FunctionObject*& cloned_target) {
+    auto clone = std::make_shared<ModuleRuntime>();
+    *clone = source;
+    clone->init = ModuleRuntime::Init::Ready;
+    clone->globals.clear();
+    for (const auto& [name, value] : source.globals) {
+        clone->globals[name] = copy_value(machine.arena, value);
+    }
+    clone->functions.clear();
+    for (const auto& [name, overloads] : source.functions) {
+        auto& copied = clone->functions[name];
+        copied.reserve(overloads.size());
+        for (FunctionObject* original : overloads) {
+            FunctionObject* function =
+                machine.arena.allocate_function(original->metadata);
+            *function = *original;
+            function->module = clone.get();
+            copied.push_back(function);
+            if (original == target) {
+                cloned_target = function;
+            }
+        }
+    }
+    for (auto& [name, type] : clone->types) {
+        (void)name;
+        type.module = clone.get();
+    }
+    for (auto& [name, trait] : clone->traits) {
+        (void)name;
+        trait.module = clone.get();
+    }
+    clone->wildcard_values.clear();
+    for (const auto& [name, value] : source.wildcard_values) {
+        clone->wildcard_values[name] =
+            copy_value(machine.arena, value);
+    }
+    if (cloned_target == nullptr && target != nullptr) {
+        FunctionObject* function =
+            machine.arena.allocate_function(target->metadata);
+        *function = *target;
+        function->module = clone.get();
+        cloned_target = function;
+    }
+    return clone;
+}
+
+TaskObject* create_task(
+    Machine& machine,
+    FunctionObject* function,
+    std::vector<Value> positional,
+    std::vector<std::pair<std::string, Value>> named,
+    const Value* receiver,
+    const std::string& where,
+    const std::string& frame_name,
+    TaskObject::Kind kind) {
+    if (function == nullptr) {
+        throw RuntimeError("task has no callable");
+    }
+    if (kind == TaskObject::Kind::Lazy) {
+        if (machine.lazy_pending >= 64) {
+            throw_error(make_error(
+                machine.arena, "TASK", "await",
+                "too many pending async tasks",
+                {
+                    "pending async tasks: "
+                        + std::to_string(machine.lazy_pending),
+                    "limit: 64",
+                    "await or cancel pending async tasks before creating more",
+                }));
+        }
+        ++machine.lazy_pending;
+    }
+    TaskObject* task = machine.arena.allocate_task();
+    task->id = ++machine.next_task_id;
+    task->kind = kind;
+    task->status = TaskObject::Status::Pending;
+    task->where = where;
+    task->frame_name = frame_name;
+    task->function = function;
+    task->positional.clear();
+    task->positional.reserve(positional.size());
+    for (const Value& value : positional) {
+        task->positional.push_back(
+            copy_value(machine.arena, value));
+    }
+    task->named.clear();
+    task->named.reserve(named.size());
+    for (const auto& [name, value] : named) {
+        task->named.emplace_back(
+            name, copy_value(machine.arena, value));
+    }
+    if (receiver != nullptr) {
+        task->receiver = *receiver;
+        task->has_receiver = true;
+    }
+    task->counted = kind == TaskObject::Kind::Lazy;
+    if (kind == TaskObject::Kind::Worker) {
+        ModuleRuntime* owner = function->module;
+        if (owner != nullptr) {
+            FunctionObject* cloned = nullptr;
+            task->module_clone = clone_module_for_task(
+                machine, *owner, function, cloned);
+            if (cloned != nullptr) {
+                task->function = cloned;
+            }
+        }
+    }
+    return task;
+}
+
+void run_task(Machine& machine, TaskObject* task) {
+    if (task == nullptr) {
+        return;
+    }
+    if (task->status == TaskObject::Status::Done
+        || task->status == TaskObject::Status::Failed
+        || task->status == TaskObject::Status::Canceled) {
+        return;
+    }
+    if (task->counted) {
+        task->counted = false;
+        if (machine.lazy_pending > 0) {
+            --machine.lazy_pending;
+        }
+    }
+    if (task->cancel_requested) {
+        task->status = TaskObject::Status::Canceled;
+        return;
+    }
+    task->status = TaskObject::Status::Running;
+    auto saved_frames = std::move(machine.call_frames);
+    machine.call_frames.clear();
+    Frame* saved_current = machine.current_frame;
+    machine.current_frame = nullptr;
+    const std::size_t saved_depth = machine.frame_depth;
+    machine.frame_depth = 0;
+    TaskObject* saved_task = machine.current_task;
+    machine.current_task = task;
+    try {
+        const Value value = call_function(
+            machine, task->function, task->positional, task->named,
+            task->where,
+            task->has_receiver ? &task->receiver : nullptr,
+            task->frame_name);
+        task->result = value;
+        task->status = TaskObject::Status::Done;
+    } catch (const UnwindSignal& signal) {
+        task->error = signal.error;
+        task->status = task->cancel_requested
+            ? TaskObject::Status::Canceled
+            : TaskObject::Status::Failed;
+    } catch (const std::exception& error) {
+        task->error = make_error(
+            machine.arena, "TASK", "task",
+            "task raised an unexpected error",
+            {std::string("std::exception: ") + error.what()});
+        task->status = TaskObject::Status::Failed;
+    }
+    machine.current_task = saved_task;
+    machine.frame_depth = saved_depth;
+    machine.current_frame = saved_current;
+    machine.call_frames = std::move(saved_frames);
+}
+
+std::string task_failure_text(TaskObject* task) {
+    if (task != nullptr && task->error != nullptr) {
+        return task->error->text();
+    }
+    return "task failed";
+}
+
+Value await_task(
+    Machine& machine, TaskObject* task, const std::string& where) {
+    if (task == nullptr) {
+        throw RuntimeError("null task value");
+    }
+    if (task->status == TaskObject::Status::Pending) {
+        run_task(machine, task);
+    }
+    if (task->status == TaskObject::Status::Done) {
+        return copy_value(machine.arena, task->result);
+    }
+    if (task->status == TaskObject::Status::Failed) {
+        throw_error(make_error(
+            machine.arena, "TASK", where, "task failed",
+            {task_failure_text(task)}));
+    }
+    if (task->status == TaskObject::Status::Canceled) {
+        const std::string original =
+            task->error != nullptr
+            ? task->error->text() : "cancellation requested";
+        throw_error(make_error(
+            machine.arena, "TASK", where, "task canceled",
+            {original}));
+    }
+    throw_error(make_error(
+        machine.arena, "TASK", where, "task is already running",
+        {"an async task cannot await itself"}));
+}
+
+void cancel_task(Machine& machine, TaskObject* task) {
+    (void)machine;
+    if (task == nullptr) {
+        return;
+    }
+    if (task->status == TaskObject::Status::Pending
+        || task->status == TaskObject::Status::Running) {
+        task->cancel_requested = true;
+        if (task->status == TaskObject::Status::Pending) {
+            task->status = TaskObject::Status::Canceled;
+        }
+    }
+    if (task->counted) {
+        task->counted = false;
+        if (machine.lazy_pending > 0) {
+            --machine.lazy_pending;
+        }
+    }
+}
+
+Value invoke_function(
+    Machine& machine,
+    FunctionObject* function,
+    std::vector<Value> positional,
+    std::vector<std::pair<std::string, Value>> named,
+    const std::string& where,
+    const Value* receiver,
+    const std::string& frame_name) {
+    if (function_is_async(function)) {
+        return make_task(create_task(
+            machine, function, std::move(positional),
+            std::move(named), receiver, where, frame_name,
+            TaskObject::Kind::Lazy));
+    }
+    return call_function(
+        machine, function, std::move(positional), std::move(named),
+        where, receiver, frame_name);
 }
 
 Value string_from_utf8(Machine& machine, const std::string& text) {
@@ -5230,6 +5650,215 @@ Value char_method(
     runtime_fail("unknown char method: " + name);
 }
 
+TaskObject* require_task_value(
+    Machine& machine,
+    const Value& value,
+    const std::string& where) {
+    if (!is_task(value)) {
+        throw_error(make_error(
+            machine.arena, "TYPE", "builtin: " + where,
+            "expected a task value",
+            {"but " + runtime_type_name(value) + " was encountered"}));
+    }
+    return as_task(value);
+}
+
+bool file_mode_valid(const std::string& mode) {
+    return mode == "read" || mode == "write" || mode == "append"
+        || mode == "write+" || mode == "append+";
+}
+
+bool file_mode_readable(const std::string& mode) {
+    return mode == "read" || mode == "write+" || mode == "append+";
+}
+
+bool file_mode_writable(const std::string& mode) {
+    return mode == "write" || mode == "append"
+        || mode == "write+" || mode == "append+";
+}
+
+std::ios::openmode file_open_mode(const std::string& mode) {
+    if (mode == "read") {
+        return std::ios::in;
+    }
+    if (mode == "write") {
+        return std::ios::out | std::ios::trunc;
+    }
+    if (mode == "append") {
+        return std::ios::out | std::ios::app;
+    }
+    if (mode == "write+") {
+        return std::ios::in | std::ios::out | std::ios::trunc;
+    }
+    return std::ios::in | std::ios::out | std::ios::app;
+}
+
+Value open_file_value(
+    Machine& machine,
+    const std::string& path,
+    const std::string& mode) {
+    if (!file_mode_valid(mode)) {
+        throw_error(make_error(
+            machine.arena, "VALUE", "builtin: open, mode",
+            "Invalid mode: " + mode,
+            {"valid modes are: read, write, append, write+, append+"}));
+    }
+    FileStream stream;
+    stream.stream = std::make_unique<std::fstream>();
+    stream.stream->open(path, file_open_mode(mode));
+    if (!stream.stream->is_open()) {
+        return make_bool(false);
+    }
+    stream.mode = mode;
+    machine.files[path] = std::move(stream);
+    return make_bool(true);
+}
+
+FileStream* find_file_stream(Machine& machine, const std::string& path) {
+    const auto found = machine.files.find(path);
+    return found == machine.files.end() ? nullptr : &found->second;
+}
+
+Value read_file_value(Machine& machine, const std::string& path) {
+    FileStream* stream = find_file_stream(machine, path);
+    if (stream == nullptr) {
+        throw_error(make_error(
+            machine.arena, "VALUE", "builtin: read",
+            "File is not opened: " + path));
+    }
+    if (!file_mode_readable(stream->mode)) {
+        throw_error(make_error(
+            machine.arena, "LOGIC", "builtin: read",
+            "File must be in a readable mode to read",
+            {"file is in the " + stream->mode}));
+    }
+    std::ostringstream text;
+    text << stream->stream->rdbuf();
+    return string_from_utf8(machine, text.str());
+}
+
+Value write_file_value(
+    Machine& machine,
+    const std::string& path,
+    const std::vector<Value>& lines) {
+    FileStream* stream = find_file_stream(machine, path);
+    if (stream == nullptr) {
+        throw_error(make_error(
+            machine.arena, "VALUE", "builtin: write",
+            "File is not opened: " + path));
+    }
+    if (!file_mode_writable(stream->mode)) {
+        throw_error(make_error(
+            machine.arena, "LOGIC", "builtin: write",
+            "File must be in a writable mode to write",
+            {"file is in the " + stream->mode}));
+    }
+    for (const Value& line : lines) {
+        if (line.tag == Tag::Str) {
+            *stream->stream << as_string_const(line)->utf8;
+        } else {
+            *stream->stream << format_value(line);
+        }
+    }
+    stream->stream->flush();
+    return make_bool(true);
+}
+
+Value close_file_value(Machine& machine, const std::string& path) {
+    const auto found = machine.files.find(path);
+    if (found == machine.files.end()) {
+        throw_error(make_error(
+            machine.arena, "VALUE", "builtin: close",
+            "File is not opened: " + path));
+    }
+    if (found->second.stream != nullptr) {
+        found->second.stream->close();
+    }
+    machine.files.erase(found);
+    return make_bool(true);
+}
+
+Value file_method(
+    Machine& machine,
+    const std::string& name,
+    const std::vector<Value>& positional) {
+    if (positional.empty()) {
+        throw RuntimeError("file method requires a receiver");
+    }
+    const Value receiver = positional[0];
+    std::string path;
+    if (receiver.tag == Tag::Str) {
+        path = as_string_const(receiver)->utf8;
+    } else if (is_file(receiver)) {
+        path = as_file(receiver)->path;
+    } else {
+        throw_error(error_type_match(
+            machine.arena, "native method: file",
+            "file or str", runtime_type_name(receiver)));
+    }
+    if (name == "open") {
+        std::string mode = "read";
+        if (positional.size() > 1) {
+            if (positional[1].tag != Tag::Str) {
+                throw_error(error_type_match(
+                    machine.arena, "native method: file",
+                    "str", runtime_type_name(positional[1])));
+            }
+            mode = as_string_const(positional[1])->utf8;
+        }
+        const Value opened = open_file_value(machine, path, mode);
+        if (!opened.b) {
+            return opened;
+        }
+        return make_file(machine.arena.allocate_file(path, mode));
+    }
+    if (name == "read") {
+        return read_file_value(machine, path);
+    }
+    if (name == "write") {
+        if (positional.size() < 2) {
+            throw_error(error_argument(
+                machine.arena, "native method: file.write",
+                "not enought arguments"));
+        }
+        return write_file_value(
+            machine, path, {positional[1]});
+    }
+    if (name == "close") {
+        return close_file_value(machine, path);
+    }
+    throw_error(error_identifier_not_found(
+        machine.arena, "native method", "file." + name));
+}
+
+Value task_method(
+    Machine& machine,
+    const std::string& name,
+    const std::vector<Value>& positional) {
+    if (positional.empty() || !is_task(positional[0])) {
+        throw_error(error_type_match(
+            machine.arena, "native method",
+            "task",
+            positional.empty() ? "nova" : runtime_type_name(positional[0])));
+    }
+    TaskObject* task = as_task(positional[0]);
+    if (name == "wait") {
+        return await_task(
+            machine, task,
+            task->kind == TaskObject::Kind::Lazy ? "await" : "wait");
+    }
+    if (name == "cancel") {
+        cancel_task(machine, task);
+        return make_nova();
+    }
+    if (name == "status") {
+        return string_from_utf8(
+            machine, task_status_name(task->status));
+    }
+    throw_error(error_identifier_not_found(
+        machine.arena, "native method", "task." + name));
+}
+
 Value call_native_method(
     Machine& machine,
     const CallSite& site,
@@ -5262,6 +5891,12 @@ Value call_native_method(
     }
     if (type == "char") {
         return char_method(machine, site.name, positional);
+    }
+    if (type == "task") {
+        return task_method(machine, site.name, positional);
+    }
+    if (type == "file") {
+        return file_method(machine, site.name, positional);
     }
     runtime_fail("native method type not implemented: " + type);
 }
@@ -5531,13 +6166,13 @@ Value call_module_member(
         }
         FunctionObject* function =
             select_overload(entry.functions, positional, *module.meta);
-        return call_function(
+        return invoke_function(
             machine, function, positional, {},
             where.empty() ? site.name : where, nullptr, site.name);
     }
     const Value member = entry.value;
     if (is_function(member)) {
-        return call_function(
+        return invoke_function(
             machine, as_function(member), positional, {}, where,
             nullptr, site.name);
     }
@@ -5545,6 +6180,186 @@ Value call_module_member(
         machine.arena, where, "Module member is not callable",
         {"member '" + site.name + "' of module '" + module.name
              + "' is a " + tag_name(member.tag)}));
+}
+
+bool resolve_pending_call(
+    Machine& machine,
+    Frame& frame,
+    const CallSite& site,
+    const std::vector<Value>& positional,
+    const Value* target,
+    FunctionObject*& function,
+    Value& receiver,
+    bool& has_receiver,
+    std::string& where,
+    std::string& frame_name) {
+    const std::string& dispatch = site.dispatch;
+    const bool spawn = dispatch == "spawn"
+        || dispatch == "spawn_static";
+    const bool identifier = dispatch == "call"
+        || (dispatch == "spawn" && target == nullptr);
+    if (identifier) {
+        const std::vector<FunctionObject*>* candidates = nullptr;
+        if (frame.function != nullptr) {
+            const auto found =
+                frame.function->captured.functions.find(site.name);
+            if (found != frame.function->captured.functions.end()) {
+                candidates = &found->second;
+            }
+        }
+        if (candidates == nullptr) {
+            const auto found =
+                frame.module->functions.find(site.name);
+            if (found != frame.module->functions.end()) {
+                candidates = &found->second;
+            }
+        }
+        if (candidates != nullptr && !candidates->empty()) {
+            const Meta& meta =
+                candidates->front()->module != nullptr
+                && candidates->front()->module->meta != nullptr
+                ? *candidates->front()->module->meta
+                : *frame.module->meta;
+            function = select_overload(*candidates, positional, meta);
+            where = "call: " + site.name;
+            frame_name = site.name;
+            return true;
+        }
+        Value value;
+        if (try_resolve_name(machine, frame, site.name, value)
+            && is_function(value)) {
+            function = as_function(value);
+            where = "call: " + site.name;
+            frame_name = site.name;
+            return true;
+        }
+        return false;
+    }
+    if (dispatch == "value") {
+        if (target == nullptr || !is_function(*target)) {
+            return false;
+        }
+        function = as_function(*target);
+        where = "call expression";
+        return true;
+    }
+    if (dispatch == "module"
+        || (spawn && target != nullptr && is_module(*target))) {
+        if (target == nullptr || !is_module(*target)) {
+            return false;
+        }
+        ModuleRuntime* module = as_module(*target);
+        const auto found = module->exports.find(site.name);
+        if (found == module->exports.end()
+            || found->second.kind != ExportEntry::Kind::Function) {
+            return false;
+        }
+        function = select_overload(
+            found->second.functions, positional, *module->meta);
+        where = "module: " + module->name;
+        frame_name = site.name;
+        return true;
+    }
+    if (dispatch == "method"
+        && target != nullptr && is_module(*target)) {
+        ModuleRuntime* module = as_module(*target);
+        const auto found = module->exports.find(site.name);
+        if (found == module->exports.end()
+            || found->second.kind != ExportEntry::Kind::Function) {
+            return false;
+        }
+        function = select_overload(
+            found->second.functions, positional, *module->meta);
+        where = "module: " + module->name;
+        frame_name = site.name;
+        return true;
+    }
+    if (dispatch == "method"
+        || (spawn && target != nullptr && target->tag == Tag::Obj)) {
+        if (target == nullptr || target->tag != Tag::Obj) {
+            return false;
+        }
+        receiver = *target;
+        has_receiver = true;
+        ObjectObject* object = as_object(*target);
+        TypeRuntime* type = object->type;
+        if (type == nullptr) {
+            const auto found =
+                frame.module->types.find(object->type_name);
+            if (found != frame.module->types.end()) {
+                type = &found->second;
+            }
+        }
+        if (type == nullptr) {
+            return false;
+        }
+        const std::vector<FunctionObject*>* candidates = nullptr;
+        const auto direct = type->methods.find(site.name);
+        if (direct != type->methods.end() && !direct->second.empty()) {
+            candidates = &direct->second;
+        }
+        if (candidates == nullptr && site.trait_name.has_value()) {
+            const auto trait =
+                type->trait_methods.find(*site.trait_name);
+            if (trait != type->trait_methods.end()) {
+                const auto found = trait->second.find(site.name);
+                if (found != trait->second.end()) {
+                    candidates = &found->second;
+                }
+            }
+        }
+        if (candidates == nullptr && type->module != nullptr) {
+            for (const auto& entry : type->module->traits) {
+                const auto found = entry.second.defaults.find(site.name);
+                if (found != entry.second.defaults.end()) {
+                    candidates = &found->second;
+                    break;
+                }
+            }
+        }
+        if (candidates == nullptr) {
+            for (const auto& entry : frame.module->traits) {
+                const auto found = entry.second.defaults.find(site.name);
+                if (found != entry.second.defaults.end()) {
+                    candidates = &found->second;
+                    break;
+                }
+            }
+        }
+        if (candidates == nullptr || candidates->empty()) {
+            return false;
+        }
+        const Meta& meta = type->module != nullptr
+            && type->module->meta != nullptr
+            ? *type->module->meta : *frame.module->meta;
+        function = select_overload(*candidates, positional, meta);
+        where = "method call: " + site.name;
+        frame_name = runtime_type_name(*target) + "." + site.name;
+        return true;
+    }
+    if (dispatch == "static" || dispatch == "spawn_static") {
+        if (!site.type_name.has_value()) {
+            return false;
+        }
+        TypeRuntime* type = resolve_qualified_type(
+            machine, frame, *site.type_name,
+            "method call: " + *site.type_name);
+        if (type == nullptr) {
+            return false;
+        }
+        const auto found = type->statics.find(site.name);
+        if (found == type->statics.end() || found->second.empty()) {
+            return false;
+        }
+        const Meta& meta = type->module != nullptr
+            && type->module->meta != nullptr
+            ? *type->module->meta : *frame.module->meta;
+        function = select_overload(found->second, positional, meta);
+        where = "method call: " + *site.type_name + "." + site.name;
+        frame_name = *site.type_name + "." + site.name;
+        return true;
+    }
+    return false;
 }
 
 void import_wildcard(
@@ -6198,6 +7013,188 @@ Value call_builtin(
             return make_int(1);
         }
         return string_from_utf8(machine, text);
+    }
+    if (name == "typeof" || name == "typedeep") {
+        if (positional.size() != 1) {
+            runtime_fail(name + " expects one argument");
+        }
+        return string_from_utf8(
+            machine, runtime_type_name(positional[0]));
+    }
+    if (name == "wait") {
+        if (positional.empty()) {
+            throw_error(error_argument(
+                machine.arena, "builtin: wait",
+                "not enought arguments"));
+        }
+        TaskObject* task = require_task_value(
+            machine, positional[0], "wait");
+        return await_task(
+            machine, task,
+            task->kind == TaskObject::Kind::Lazy ? "await" : "wait");
+    }
+    if (name == "cancel") {
+        if (positional.empty()) {
+            throw_error(error_argument(
+                machine.arena, "builtin: cancel",
+                "not enought arguments"));
+        }
+        cancel_task(
+            machine, require_task_value(
+                machine, positional[0], "cancel"));
+        return make_nova();
+    }
+    if (name == "task_status") {
+        if (positional.empty()) {
+            throw_error(error_argument(
+                machine.arena, "builtin: task_status",
+                "not enought arguments"));
+        }
+        TaskObject* task = require_task_value(
+            machine, positional[0], "task_status");
+        return string_from_utf8(
+            machine, task_status_name(task->status));
+    }
+    if (name == "open") {
+        if (positional.empty() || positional[0].tag != Tag::Str) {
+            throw_error(error_type_match(
+                machine.arena, "builtin: open, name",
+                "str",
+                positional.empty() ? "nova"
+                                   : runtime_type_name(positional[0])));
+        }
+        std::string mode = "read";
+        if (positional.size() > 1) {
+            if (positional[1].tag != Tag::Str) {
+                throw_error(error_type_match(
+                    machine.arena, "builtin: open, name",
+                    "str", runtime_type_name(positional[1])));
+            }
+            mode = as_string_const(positional[1])->utf8;
+        }
+        return open_file_value(
+            machine, as_string_const(positional[0])->utf8, mode);
+    }
+    if (name == "read") {
+        if (positional.empty() || positional[0].tag != Tag::Str) {
+            throw_error(error_type_match(
+                machine.arena, "builtin: read, name",
+                "str",
+                positional.empty() ? "nova"
+                                   : runtime_type_name(positional[0])));
+        }
+        return read_file_value(
+            machine, as_string_const(positional[0])->utf8);
+    }
+    if (name == "write") {
+        if (positional.empty() || positional[0].tag != Tag::Str) {
+            throw_error(error_type_match(
+                machine.arena, "builtin: write, name",
+                "str",
+                positional.empty() ? "nova"
+                                   : runtime_type_name(positional[0])));
+        }
+        std::vector<Value> lines;
+        if (positional.size() > 1) {
+            if (positional[1].tag == Tag::Arr) {
+                lines = as_array(positional[1])->items;
+            } else {
+                lines.push_back(positional[1]);
+            }
+        }
+        return write_file_value(
+            machine, as_string_const(positional[0])->utf8, lines);
+    }
+    if (name == "close") {
+        if (positional.empty() || positional[0].tag != Tag::Str) {
+            throw_error(error_type_match(
+                machine.arena, "builtin: close, name",
+                "str",
+                positional.empty() ? "nova"
+                                   : runtime_type_name(positional[0])));
+        }
+        return close_file_value(
+            machine, as_string_const(positional[0])->utf8);
+    }
+    if (name == "input" || name == "inputf") {
+        Value receptor = positional.empty()
+            ? make_string(machine.arena.allocate_string_utf8(""))
+            : positional[0];
+        if (name == "inputf") {
+            if (positional.size() < 2) {
+                throw_error(error_argument(
+                    machine.arena, "builtin: inputf",
+                    "not enought arguments"));
+            }
+            if (positional[1].tag != Tag::Str) {
+                throw_error(error_type_match(
+                    machine.arena, "builtin: inputf, prompt",
+                    "str", runtime_type_name(positional[1])));
+            }
+            machine.host.write(format_value(positional[1]));
+            receptor = positional[0];
+        }
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            throw_error(make_error(
+                machine.arena, "INPUT", "builtin: input",
+                "Input stream ended unexpectedly"));
+        }
+        if (receptor.tag == Tag::Str) {
+            return string_from_utf8(machine, line);
+        }
+        if (receptor.tag == Tag::Bool) {
+            return make_bool(!line.empty());
+        }
+        if (receptor.tag == Tag::Int || receptor.tag == Tag::BigInt) {
+            try {
+                std::size_t consumed = 0;
+                const long long value = std::stoll(line, &consumed);
+                if (consumed != line.size()) {
+                    throw std::invalid_argument("trailing");
+                }
+                return make_int(value);
+            } catch (const std::exception&) {
+                throw_error(make_error(
+                    machine.arena, "INPUT", "",
+                    "Invalid input for specified type",
+                    {"cannot convert " + line,
+                     "into type int"}));
+            }
+        }
+        if (receptor.tag == Tag::Num) {
+            try {
+                std::size_t consumed = 0;
+                const double value = std::stod(line, &consumed);
+                if (consumed != line.size()) {
+                    throw std::invalid_argument("trailing");
+                }
+                return make_num(value);
+            } catch (const std::exception&) {
+                throw_error(make_error(
+                    machine.arena, "INPUT", "",
+                    "Invalid input for specified type",
+                    {"cannot convert " + line,
+                     "into type num"}));
+            }
+        }
+        throw_error(error_type_match(
+            machine.arena, "builtin: input",
+            "primitive type", runtime_type_name(receptor)));
+    }
+    if (name == "system") {
+        if (positional.size() != 1
+            || positional[0].tag != Tag::Str) {
+            throw_error(error_type_match(
+                machine.arena, "builtin: system",
+                "str",
+                positional.empty() ? "nova"
+                                   : runtime_type_name(positional[0])));
+        }
+        const std::string command =
+            as_string_const(positional[0])->utf8;
+        const int code = std::system(command.c_str());
+        return make_int(static_cast<std::int64_t>(code));
     }
     runtime_fail("native N2 does not implement builtin '" + name + "'");
 }

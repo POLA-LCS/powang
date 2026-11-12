@@ -1,0 +1,31 @@
+use "./fixtures/counter.po" as counter;
+
+fun sum_squares(limit: int): int {
+    total: int = 0;
+    for index := 0; index < limit; index += 1 {
+        total += index * index;
+    }
+    return total;
+}
+
+type Worker[+] {
+    | value: int;
+    fun this.double(): int >> this.value * 2;
+    fun triple(value: int): int >> value * 3;
+}
+
+fun run() {
+    first := spawn sum_squares(100);
+    second := spawn sum_squares(200);
+    worker := Worker.[7];
+    method_task := spawn worker.double();
+    static_task := spawn Worker.triple(5);
+    module_task := spawn counter.bump();
+    print(wait(first)); print(" ");
+    print(wait(second)); print(" ");
+    print(wait(method_task)); print(" ");
+    print(wait(static_task)); print(" ");
+    print(wait(module_task)); print("\n");
+}
+
+run();

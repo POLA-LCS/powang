@@ -1,0 +1,27 @@
+async fun value(input: int): int >> input;
+
+async fun run(): int {
+    total := 0;
+    count := 0;
+    loop if count < 20 {
+        pending := value(count);
+        total += await pending;
+        count += 1;
+    }
+    return total;
+}
+
+fun worker(value: int): int >> value * 2;
+
+fun run_workers(): int {
+    total := 0;
+    count := 0;
+    loop if count < 10 {
+        pending := spawn worker(count);
+        total += wait(pending);
+        count += 1;
+    }
+    return total;
+}
+
+print(await run()); print(" "); print(run_workers()); print("\n");

@@ -1,0 +1,4 @@
+use "./fixtures/counter.po" as *;
+task := spawn bump();
+print(wait(task)); print(" ");
+print(bump()); print("\n");

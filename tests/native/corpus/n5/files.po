@@ -1,0 +1,8 @@
+path := "build/native/n5_test.txt";
+print(open(path, "write")); print(" ");
+print(write(path, ["hello", " ", "world"])); print(" ");
+print(close(path)); print(" ");
+print(open(path, "read")); print(" ");
+text := read(path);
+print(text); print(" ");
+print(close(path)); print("\n");

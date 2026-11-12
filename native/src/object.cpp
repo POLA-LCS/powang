@@ -184,6 +184,19 @@ RefObject* Arena::allocate_reference() {
     return &references_.back();
 }
 
+TaskObject* Arena::allocate_task() {
+    tasks_.push_back(TaskObject{});
+    return &tasks_.back();
+}
+
+FileObject* Arena::allocate_file(std::string path, std::string mode) {
+    FileObject file;
+    file.path = std::move(path);
+    file.mode = std::move(mode);
+    files_.push_back(std::move(file));
+    return &files_.back();
+}
+
 std::size_t Arena::bigint_count() const noexcept {
     return bigints_.size();
 }
@@ -283,6 +296,18 @@ std::string format_heap_value(const Value& value) {
             return "<reference>";
         case Tag::Project:
             return "<Project>";
+        case Tag::Task: {
+            const TaskObject* task = as_task(value);
+            return task != nullptr
+                ? "<task: " + std::to_string(task->id) + " "
+                    + task_status_name(task->status) + ">"
+                : "<task: 0 pending>";
+        }
+        case Tag::File: {
+            const FileObject* file = as_file(value);
+            return file != nullptr
+                ? "<file: " + file->path + ">" : "<file>";
+        }
         default:
             throw RuntimeError("value has no heap formatting rule");
     }
@@ -306,6 +331,8 @@ bool heap_truthy(const Value& value) {
         case Tag::Error:
         case Tag::Ref:
         case Tag::Project:
+        case Tag::Task:
+        case Tag::File:
             return true;
         default:
             return false;
@@ -423,6 +450,8 @@ bool value_equal(const Value& left, const Value& right) {
         case Tag::Error:
         case Tag::Ref:
         case Tag::Project:
+        case Tag::Task:
+        case Tag::File:
             return left.ref == right.ref;
     }
     return false;
@@ -567,6 +596,8 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
         case Tag::Error:
         case Tag::Ref:
         case Tag::Project:
+        case Tag::Task:
+        case Tag::File:
             return value;
     }
     return value;

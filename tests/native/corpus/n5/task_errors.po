@@ -1,0 +1,23 @@
+async fun boom(): int {
+    error("boom");
+    return 1;
+}
+
+try {
+    print(await boom());
+} catch caught {
+    print(caught.kind); print(" "); print(caught.message); print("\n");
+}
+
+fun worker_boom(): int {
+    error("BOOM", "spawned");
+    return 1;
+}
+
+t := spawn worker_boom();
+try {
+    print(wait(t));
+} catch caught {
+    print(caught.kind); print(" "); print(caught.message); print(" ");
+    print(caught.details[0]); print("\n");
+}

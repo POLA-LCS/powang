@@ -1,0 +1,10 @@
+async fun value(): int >> 1;
+count := 0;
+try {
+    loop if count < 70 {
+        task := value();
+        count += 1;
+    }
+} catch limit_error {
+    print("limit"); print("\n");
+}

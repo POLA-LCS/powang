@@ -1,0 +1,25 @@
+use "./fixtures/asynclib.po" as lib;
+
+async fun double(value: int): int >> value * 2;
+
+async fun total(): int {
+    a := await double(3);
+    b := await double(4);
+    return a + b;
+}
+
+type Worker[+] {
+    | value: int;
+    async fun this.double(): int >> this.value * 2;
+}
+
+worker := Worker.[5];
+print(await total()); print(" ");
+print(await worker.double()); print(" ");
+print(await lib.double(3)); print(" ");
+triple := async fun(value: int): int >> value * 3;
+print(await triple(4)); print(" ");
+pending := lib.double(4);
+print(task_status(pending)); print(" ");
+print(wait(pending)); print(" ");
+print(pending.status()); print("\n");

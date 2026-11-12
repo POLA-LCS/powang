@@ -32,6 +32,8 @@ struct ModuleRuntime;
 struct ErrorObject;
 struct RefObject;
 struct ProjectObject;
+struct TaskObject;
+struct FileObject;
 
 enum class Tag : std::uint8_t {
     Nova = 0,
@@ -55,6 +57,8 @@ enum class Tag : std::uint8_t {
     Error = 18,
     Ref = 19,
     Project = 20,
+    Task = 21,
+    File = 22,
 };
 
 enum ValueFlag : std::uint8_t {
@@ -104,6 +108,8 @@ inline const char* tag_name(Tag tag) noexcept {
         case Tag::Error: return "error";
         case Tag::Ref: return "reference";
         case Tag::Project: return "Project";
+        case Tag::Task: return "task";
+        case Tag::File: return "file";
     }
     return "unknown";
 }
@@ -275,6 +281,22 @@ inline Value make_project(ProjectObject* object) {
     return value;
 }
 
+inline Value make_task(TaskObject* object) {
+    Value value{};
+    value.flags = ValueDefined;
+    value.tag = Tag::Task;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_file(FileObject* object) {
+    Value value{};
+    value.flags = ValueDefined;
+    value.tag = Tag::File;
+    value.ref = object;
+    return value;
+}
+
 inline bool is_defined(const Value& value) noexcept {
     return (value.flags & ValueDefined) != 0;
 }
@@ -351,6 +373,14 @@ inline bool is_project(const Value& value) noexcept {
     return value.tag == Tag::Project;
 }
 
+inline bool is_task(const Value& value) noexcept {
+    return value.tag == Tag::Task;
+}
+
+inline bool is_file(const Value& value) noexcept {
+    return value.tag == Tag::File;
+}
+
 inline BigIntObject* as_bigint(const Value& value) {
     return static_cast<BigIntObject*>(value.ref);
 }
@@ -413,6 +443,14 @@ inline RefObject* as_reference(const Value& value) {
 
 inline ProjectObject* as_project(const Value& value) {
     return static_cast<ProjectObject*>(value.ref);
+}
+
+inline TaskObject* as_task(const Value& value) {
+    return static_cast<TaskObject*>(value.ref);
+}
+
+inline FileObject* as_file(const Value& value) {
+    return static_cast<FileObject*>(value.ref);
 }
 
 inline bool is_scalar_value(char32_t code_point) noexcept {
@@ -550,6 +588,8 @@ inline std::string format_value(const Value& value) {
         case Tag::Error:
         case Tag::Ref:
         case Tag::Project:
+        case Tag::Task:
+        case Tag::File:
             return format_heap_value(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);
@@ -592,6 +632,8 @@ inline bool truthy(const Value& value) {
         case Tag::Error:
         case Tag::Ref:
         case Tag::Project:
+        case Tag::Task:
+        case Tag::File:
             return heap_truthy(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);

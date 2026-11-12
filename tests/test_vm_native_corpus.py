@@ -55,10 +55,8 @@ class NativeCorpusTests(unittest.TestCase):
     def test_n3_corpus_matches(self) -> None:
         self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n3")
 
-    def test_n4_corpus_matches(self) -> None:
-        corpus = ROOT / "tests" / "native" / "corpus" / "n4"
+    def _run_file_corpus(self, corpus: Path) -> None:
         programs = sorted(corpus.glob("*.po"))
-        programs.append(corpus / "project" / "main.po")
         self.assertTrue(programs)
         for path in programs:
             with self.subTest(program=path.name):
@@ -83,6 +81,21 @@ class NativeCorpusTests(unittest.TestCase):
                 self.assertEqual(
                     native_stderr, python.stderr, path.name,
                 )
+
+    def test_n4_corpus_matches(self) -> None:
+        corpus = ROOT / "tests" / "native" / "corpus" / "n4"
+        self._run_file_corpus(corpus)
+        project = corpus / "project" / "main.po"
+        with self.subTest(program="project/main.po"):
+            python = run_file(project, engine="vm")
+            native = run_native_file(project)
+            self.assertEqual(native.returncode, python.returncode)
+            self.assertEqual(native.stdout, python.stdout)
+            self.assertEqual(native.stderr, python.stderr)
+
+    def test_n5_corpus_matches(self) -> None:
+        self._run_file_corpus(
+            ROOT / "tests" / "native" / "corpus" / "n5")
 
 
 if __name__ == "__main__":
