@@ -1,0 +1,5 @@
+try {
+    error("A", "first");
+} finally {
+    error("B", "second");
+}
