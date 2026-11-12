@@ -179,6 +179,11 @@ def run_module_image_vm(image: ProgramImage, program_ast: list[DictRepr],
                     file=sys.stderr,
                 )
             for name, value in variables.items():
+                ## Hidden compiler slots such as ``#result`` are local storage,
+                ## not module names. The tree walker never exposes them, so the
+                ## VM legacy export must skip them too.
+                if name.startswith("#"):
+                    continue
                 members[name] = value
             for name, overloads in functions.items():
                 members[name] = list(overloads)

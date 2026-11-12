@@ -175,7 +175,13 @@ class ScopeState:
         return PowangCopyConstructObjectType(value)
 
     def new_variable(self, name: str, value: PowangAny):
-        self.variables[-1][name] = value
+        scope = self.variables[-1]
+        ## Wildcard imports introduce names the compiler never declared, so a
+        ## slot-backed VM scope must grow a slot before the name can be bound.
+        ## Plain dictionaries used by the tree walker accept the name directly.
+        if hasattr(scope, 'add_slot') and scope.slot(name) is None:
+            scope.add_slot(name)
+        scope[name] = value
         return value
 
     def new_function(self, name: str, value: PowangFunction):

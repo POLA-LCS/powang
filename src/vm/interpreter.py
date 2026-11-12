@@ -1614,7 +1614,12 @@ def _scope_allows_name(scope, name: str, frame: VMFrame) -> bool:
     allowed = getattr(module_scope, 'global_names', None)
     if allowed is None:
         return True
-    return name in allowed
+    if name in allowed:
+        return True
+    ## Wildcard imports add names at run time. They are real module bindings
+    ## even though the compiler did not declare them as globals.
+    wildcards = getattr(module_scope, 'wildcards', None)
+    return wildcards is not None and name in wildcards
 
 
 def _lookup_variable_in_scope(name: str, where: str, frame: VMFrame,
