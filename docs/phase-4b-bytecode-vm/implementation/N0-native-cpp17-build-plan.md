@@ -1,6 +1,6 @@
 # N0: Native C++17 VM and In-Memory `temp.cpp` Build Plan
 
-Status: N0 is implemented and its gate is green. N1 to N6 remain planned. The native runtime consumes the same `PWB1` program image as the Python compiler. The Python VM remains the default engine and the differential oracle. The version is still `0.22.0`. N0 is a milestone, not a release. The plan targets `0.23.0` for N0 to N2.
+Status: N0, N1 and N2 are implemented and their gates are green. N3 to N6 remain planned. The native runtime consumes the same `PWB1` program image as the Python compiler. The Python VM remains the default engine and the differential oracle. The version is still `0.22.0`. N0, N1 and N2 are milestones, not releases. The plan targets `0.23.0` for N0 to N2.
 
 Reference engine: the Python bytecode VM in `src/vm`, package version `0.22.0`, image format `PWB1` version `1`.
 
@@ -13,7 +13,7 @@ The generated `temp.cpp` is rendered into a memory buffer. The default integrate
 
 ## Implementation note (N0)
 
-N0 is implemented and its gate is green. N1 to N6 remain planned. The native runtime consumes the same `PWB1` program image as the Python compiler. The Python VM remains the default engine and the differential oracle.
+N0, N1 and N2 are implemented and their gates are green. N3 to N6 remain planned. The native runtime consumes the same `PWB1` program image as the Python compiler. The Python VM remains the default engine and the differential oracle.
 
 The implemented layout uses different names from the placeholders in sections 2.1, 3.1 and 4.1.
 

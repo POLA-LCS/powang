@@ -50,19 +50,28 @@ Recorded results for `0.22.0`:
 | Milestone | Scope | Status | Version |
 |---|---|---|---|
 | N0 | `PWB1` reader, decoder, verifier, disassembler, generated opcode table, `temp.cpp` source generation and integrated `g++` driver | gate green | 0.22.0 |
-| N1 to N6 | Scalars and calls, strings and containers, user types and traits, modules and errors, async and tasks, full parity and performance | not started | `0.23.0` to `0.25.0` |
+| N1 | Big integers, locals, globals, control flow, functions, closures, calls, defaults, named arguments, variadics, overload selection, frames and iterators | gate green | 0.22.0 |
+| N2 | Strings, arrays, tuples, maps, sets, indexing, slicing, iteration, deep copy, interpolation, core builtins and native methods | gate green | 0.22.0 |
+| N3 | User types, enums, traits, operator dispatch and locks | not started | 0.23.0 |
+| N4 | Modules, project, externs, errors and references | not started | 0.23.0 |
+| N5 | Async, tasks, file I/O and the host bridge | not started | 0.24.0 |
+| N6 | Full parity, performance and distribution | not started | 0.25.0 |
 
 The native runtime lives under `native/` and consumes the same `PWB1` program image as the Python compiler. It is opt in. The Python VM remains the default engine and the differential oracle.
 
-The N0 gate runs a real `print(1 + 2);` image through the native executable. Standard output is exactly `3` with no trailing newline, the exit code is `0`, and the native entry-code disassembly is byte-identical to the Python disassembler. The N0 scalar subset covers nova, undef, bool, int, num and char values, integer and number arithmetic, comparisons, logical not, negation, locals, jumps, top level `print` and `println`, and the N0 disassembler and verifier. An unsupported opcode fails with a clear runtime error. The N0 number semantics tests match the Python VM: mixed int/num arithmetic and comparisons follow the Python VM cast order, division and modulo by zero return nova for int and num, and float modulo follows the divisor sign, including signed zero. Integer overflow remains an N1 gap.
+The N0 gate runs a real `print(1 + 2);` image through the native executable. Standard output is exactly `3` with no trailing newline, the exit code is `0`, and the native entry-code disassembly is byte-identical to the Python disassembler. The N0 scalar subset covers nova, undef, bool, int, num and char values, integer and number arithmetic, comparisons, logical not, negation, locals, jumps, top level `print` and `println`, and the N0 disassembler and verifier. An unsupported opcode fails with a clear runtime error. The N0 number semantics tests match the Python VM: mixed int/num arithmetic and comparisons follow the Python VM cast order, division and modulo by zero return nova for int and num, and float modulo follows the divisor sign, including signed zero. Integer overflow promotes to bigint in N1.
 
-`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. Run them with:
+N1 execution is gate green. It adds arbitrary precision integers with int64 promotion, locals, globals, declarations, branches, range loops, `loop`, `break`, `continue`, functions, recursion, mutual recursion, defaults, named arguments, variadics, overload selection, closures by value and by reference, named lambda recursion, higher order function values, frames and iterators. `tests/native/corpus/n1` has 5 differential programs.
+
+N2 is gate green. It adds UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, iteration, deep copy with a cycle memo, interpolation, the `format` and `printf` builtins, the character builtins and the array, string, map, set, tuple and char native methods. `tests/native/corpus/n2` has 6 differential programs. The file and task native methods remain in N5. Runtime error stream and text parity remains incomplete.
+
+`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 5 tests for deterministic PWBM metadata, the image hash, parameter metadata and the C++ metadata round trip. `tests/test_vm_native_corpus.py` has 2 differential tests covering the N1 and N2 corpora. The full suite has 618 tests. Run them with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_native_build -v
 ```
 
-The version is still `0.22.0`. N0 is a milestone, not a release. The plan targets `0.23.0` for N0 to N2. N1 to N6 remain planned, so the full native VM is not complete.
+The version is still `0.22.0`. N0, N1 and N2 are milestones, not releases. The plan targets `0.23.0` for N0 to N2. N3 to N6 remain planned, so the full native VM is not complete.
 
 ## 2. Module status
 
@@ -228,8 +237,8 @@ Version: <0.21.0 or 0.22.0>
 ## 6. Known limitations
 
 - The Python reference VM uses the host Python allocator and garbage collector. A native VM owns its own heap policy. There is no separate collector in the Python engine by design.
-- The native C++17 runtime is implemented through milestone N0 under `native/`, and `powang vm native` is opt in. It consumes the same `PWB1` images as the Python compiler and covers the N0 scalar subset only. Strings, containers, user types, modules, errors, references, tasks and the full host surface are N1 to N6 work. Integer overflow remains an N1 gap and raises a clear native runtime error instead of promoting to bigint. Division and modulo by zero return nova for int and num operands, matching the Python VM. The full native VM is not complete. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes.
-- Runtime error stream and text parity is an explicit N1 task. `print();` is rejected by both engines with exit code 1, but the Python CLI writes its diagnostic to standard output while the native runtime writes its diagnostic to standard error. The exact error text also differs, so native error text and stream parity is not complete.
+- The native C++17 runtime is implemented through milestone N2 under `native/`, and `powang vm native` is opt in. It consumes the same `PWB1` images as the Python compiler and covers scalars, big integers, functions, closures, strings, containers and native methods. User types, modules, errors, references, tasks and the full host surface are N3 to N6 work. Integer overflow promotes to bigint. Division and modulo by zero return nova for int and num operands, matching the Python VM. The full native VM is not complete. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes.
+- Runtime error stream and text parity is an explicit native parity task. `print();` is rejected by both engines with exit code 1, but the Python CLI writes its diagnostic to standard output while the native runtime writes its diagnostic to standard error. The exact error text also differs, so native error text and stream parity is not complete.
 - Preemptive scheduling and coroutine suspension are not part of the language model. Lazy tasks and worker tasks run without arbitrary expression suspension. A future coroutine model needs a new bytecode version and a new task state machine.
 - A JIT is not part of this phase. It can be added behind the same verifier, contract and differential suite.
 - The optional cache stores the entry program image and imported module images. It is off by default and enabled with `--vm-cache`.
