@@ -53,7 +53,7 @@ Recorded results for `0.22.0`:
 | N1 | Big integers, locals, globals, control flow, functions, closures, calls, defaults, named arguments, variadics, overload selection, frames and iterators | gate green | 0.22.0 |
 | N2 | Strings, arrays, tuples, maps, sets, indexing, slicing, iteration, deep copy, interpolation, core builtins and native methods | gate green | 0.22.0 |
 | N3 | User types, constructors, fields, methods, statics, enums, traits, operator dispatch and locks | in progress | 0.23.0 |
-| N4 | Modules, project, externs, errors and references | not started | 0.23.0 |
+| N4 | Modules, project, externs, errors and references | in progress | 0.23.0 |
 | N5 | Async, tasks, file I/O and the host bridge | not started | 0.24.0 |
 | N6 | Full parity, performance and distribution | not started | 0.25.0 |
 
@@ -67,13 +67,15 @@ N2 is gate green. It adds UTF-32 strings, arrays, tuples, insertion ordered maps
 
 N3 core is gate green for user types, constructors, fields, instance methods, statics, enums, traits, default methods and operator overloading. `tests/native/corpus/n3` has 5 differential programs. Native method lock enforcement and exact access-control, ambiguity and lock error text parity remain, so N3 is not fully closed.
 
-`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 5 tests for deterministic PWBM metadata, the image hash, parameter metadata and the C++ metadata round trip. `tests/test_vm_native_corpus.py` has 3 differential tests covering the N1, N2 and N3 corpora. The full suite has 619 tests. Run them with:
+N4.1a is gate green for the `PWBB` bundle container, SHA-256 digest, Python bundle builder, native bundle parser, generated-source embedding and the bundle-aware `run_embedded_bundle_with_meta` entry point. The bundle carries the entry `PWB1` image and its `PWBM` metadata. Imported module records, the module runtime, errors and references remain planned for N4.1b to N4.4.
+
+`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 5 tests for deterministic PWBM metadata, the image hash, parameter metadata and the C++ metadata round trip. `tests/test_native_bundle.py` has 12 tests for the bundle layout, digest, parser rejection cases, generated source and bundle execution. `tests/test_vm_native_corpus.py` has 3 differential tests covering the N1, N2 and N3 corpora. The full suite has 631 tests. Run them with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_native_build -v
 ```
 
-The version is still `0.22.0`. N0, N1, N2 and the N3 core are milestones, not releases. The plan targets `0.23.0` for N0 to N2. The N3 lock and error remainder and N4 to N6 remain planned, so the full native VM is not complete.
+The version is still `0.22.0`. N0, N1, N2, the N3 core and N4.1a are milestones, not releases. The plan targets `0.23.0` for N0 to N2. The N3 lock and error remainder, the N4 module, error and reference remainder, and N5 to N6 remain planned, so the full native VM is not complete.
 
 ## 2. Module status
 
@@ -239,7 +241,7 @@ Version: <0.21.0 or 0.22.0>
 ## 6. Known limitations
 
 - The Python reference VM uses the host Python allocator and garbage collector. A native VM owns its own heap policy. There is no separate collector in the Python engine by design.
-- The native C++17 runtime is implemented through the N3 core under `native/`, and `powang vm native` is opt in. It consumes the same `PWB1` images as the Python compiler and covers scalars, big integers, functions, closures, strings, containers, user types, constructors, fields, methods, statics, enums, traits, operators and native methods. Native method lock enforcement, exact access-control, ambiguity and lock error text, modules, errors, references, tasks and the full host surface remain. Integer overflow promotes to bigint. Division and modulo by zero return nova for int and num operands, matching the Python VM. The full native VM is not complete. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes.
+- The native C++17 runtime is implemented through the N3 core and the N4.1a bundle foundation under `native/`, and `powang vm native` is opt in. It consumes the same `PWB1` images as the Python compiler and covers scalars, big integers, functions, closures, strings, containers, user types, constructors, fields, methods, statics, enums, traits, operators and native methods. The N4.1a `PWBB` bundle carries the entry image and metadata and the generated source calls `run_embedded_bundle_with_meta`. Native method lock enforcement, exact access-control, ambiguity and lock error text, imported modules, language errors, references, tasks and the full host surface remain. Integer overflow promotes to bigint. Division and modulo by zero return nova for int and num operands, matching the Python VM. The full native VM is not complete. `V10-native-vm-contract.md` and `powang vm abi` define the contract it consumes.
 - Runtime error stream and text parity is an explicit native parity task. `print();` is rejected by both engines with exit code 1, but the Python CLI writes its diagnostic to standard output while the native runtime writes its diagnostic to standard error. The exact error text also differs, so native error text and stream parity is not complete.
 - Preemptive scheduling and coroutine suspension are not part of the language model. Lazy tasks and worker tasks run without arbitrary expression suspension. A future coroutine model needs a new bytecode version and a new task state machine.
 - A JIT is not part of this phase. It can be added behind the same verifier, contract and differential suite.

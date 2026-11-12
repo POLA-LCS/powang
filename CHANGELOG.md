@@ -18,12 +18,14 @@ All notable changes to powang are documented here.
 - `src/vm/native/meta.py` builds the deterministic PWBM function and type metadata block, and `pwb_native meta` prints it. `tests/test_native_meta.py` has 5 tests for metadata determinism, the image hash, parameter metadata and the C++ metadata round trip.
 - The native N3 core: user types, constructors, public and private fields, instance methods, statics, enums, traits, default methods and operator overloading.
 - `tests/native/corpus/n1` has 5 differential programs for arithmetic, big integers, control flow, functions, overloads, variadics, recursion and closures. `tests/native/corpus/n2` has 6 differential programs for strings, containers, copy semantics, slicing, interpolation and native methods. `tests/native/corpus/n3` has 5 differential programs for types, constructors, enums, traits and operators. `tests/test_vm_native_corpus.py` runs all three corpora.
-- The full test suite now has 619 tests.
+- The native N4.1a `PWBB` bundle container and SHA-256 digest. The Python bundle builder and native parser carry the entry `PWB1` image and `PWBM` metadata. The generated `temp.cpp` embeds the bundle and calls `run_embedded_bundle_with_meta`, and the raw single-image path remains.
+- `tests/test_native_bundle.py` has 12 tests for the bundle layout, digest, parser rejection cases, generated source and bundle execution.
+- The full test suite now has 631 tests.
 
 ### Notes
 
-- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The version stays `0.22.0` because N0, N1, N2 and the N3 core are milestones, not releases.
-- N0, N1, N2 and the N3 core cover scalars, big integers, functions, closures, strings, containers, user types, enums, traits, operators and native methods. Native method lock enforcement, exact access-control, ambiguity and lock error text, modules, errors, references, tasks and the full host surface remain. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow promotes to bigint. Runtime error stream and text parity is not complete. Full native parity is not claimed.
+- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The version stays `0.22.0` because N0, N1, N2, the N3 core and N4.1a are milestones, not releases.
+- N0, N1, N2 and the N3 core cover scalars, big integers, functions, closures, strings, containers, user types, enums, traits, operators and native methods. N4.1a covers the `PWBB` bundle and the bundle-aware entry point. Native method lock enforcement, exact access-control, ambiguity and lock error text, imported modules, language errors, references, tasks and the full host surface remain. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow promotes to bigint. Runtime error stream and text parity is not complete. Full native parity is not claimed.
 
 ## 0.22.0
 
