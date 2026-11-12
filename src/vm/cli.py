@@ -6,10 +6,14 @@ Commands:
 - ``powang vm run [--trace] <file.po> [args...]``
 - ``powang vm diff <file.po>``
 - ``powang vm bench [--runs N] [name...]``
+- ``powang vm native run <file.po> [args...]``
+- ``powang vm native compile [--output PATH] [--keep-source] <file.po>``
+- ``powang vm native info``
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -38,14 +42,17 @@ def _usage() -> int:
     print("    powang vm diff <file.po>")
     print("    powang vm bench [--runs N] [name...]")
     print("    powang vm abi [--json]")
+    print("    powang vm native run <file.po> [args...]")
+    print("    powang vm native compile [--output PATH] [--keep-source] <file.po>")
+    print("    powang vm native info")
     return 2
 
 
-def _compile_file(path: str, verify: bool = True):
+def _compile_file(path: str, verify: bool = True, check: bool = False):
     content = get_file_content(path)
     image = compile_source(
         content, path=path, module_name=Path(path).stem,
-        check=False, state=get_state(),
+        check=check, state=get_state(),
     )
     if verify:
         verify_image(image)
@@ -174,6 +181,141 @@ def _abi(args: list[str]) -> int:
     return 0
 
 
+_NATIVE_USAGE_LINES: tuple[str, ...] = (
+    "    powang vm native run <file.po> [args...]",
+    "    powang vm native compile [--output PATH] [--keep-source] <file.po>",
+    "    powang vm native info",
+)
+
+
+def _native_usage() -> None:
+    for line in _NATIVE_USAGE_LINES:
+        print(line)
+
+
+def _native_info(args: list[str]) -> int:
+    from .native.build import ensure_runtime
+    from .native.compiler import IntegratedGcc, NativeBuildError
+
+    try:
+        paths = ensure_runtime()
+    except NativeBuildError as error:
+        print(f"native build error: {error}", file=sys.stderr)
+        return 1
+    driver = IntegratedGcc(
+        include_dir=paths.include_dir, library_dir=paths.build_dir,
+    )
+    print(f"compiler: {driver.available() or 'missing'}")
+    print(f"version: {driver.version()}")
+    print(f"runtime: {paths.library}")
+    print(f"native: {paths.executable}")
+    return 0
+
+
+def _native_compile(args: list[str]) -> int:
+    from .native.compiler import NativeBuildError
+    from .native.loader import compile_image
+
+    output: Path | None = None
+    keep_source = False
+    path: str | None = None
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == '--output':
+            if index + 1 >= len(args):
+                _native_usage()
+                return 2
+            output = Path(args[index + 1])
+            index += 2
+            continue
+        if argument == '--keep-source':
+            keep_source = True
+            index += 1
+            continue
+        if argument.startswith('-') or path is not None:
+            _native_usage()
+            return 2
+        path = argument
+        index += 1
+    if path is None:
+        _native_usage()
+        return 2
+    if output is None:
+        suffix = '.exe' if os.name == 'nt' else ''
+        output = Path('build/native') / (Path(path).stem + suffix)
+    try:
+        state = _setup_state(path)
+        set_state(state)
+        try:
+            image = _compile_file(path, check=True)
+        finally:
+            state.close()
+        program = compile_image(
+            image, output=output, keep_source=keep_source,
+        )
+    except NativeBuildError as error:
+        print(f"native build error: {error}", file=sys.stderr)
+        if error.result is not None and error.result.stderr:
+            print(error.result.stderr, file=sys.stderr, end='')
+        return 1
+    print(program.executable)
+    return 0
+
+
+def _native_run(args: list[str]) -> int:
+    from .native.compiler import NativeBuildError
+    from .native.loader import run_native
+
+    path: str | None = None
+    script_args: list[str] = []
+    for argument in args:
+        if path is None:
+            if argument.startswith('-'):
+                continue
+            path = argument
+        else:
+            script_args.append(argument)
+    if path is None:
+        _native_usage()
+        return 2
+    try:
+        state = _setup_state(path)
+        set_state(state)
+        try:
+            image = _compile_file(path, check=True)
+        finally:
+            state.close()
+        result = run_native(image, script_args)
+    except NativeBuildError as error:
+        print(f"native build error: {error}", file=sys.stderr)
+        if error.result is not None and error.result.stderr:
+            print(error.result.stderr, file=sys.stderr, end='')
+        return 1
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    return result.returncode
+
+
+def _native(args: list[str]) -> int:
+    if not args:
+        _native_usage()
+        return 2
+    command = args[0]
+    rest = args[1:]
+    if command in {'--help', '-h', 'help'}:
+        _native_usage()
+        return 0
+    if command == 'info':
+        return _native_info(rest)
+    if command == 'compile':
+        return _native_compile(rest)
+    if command == 'run':
+        return _native_run(rest)
+    _native_usage()
+    return 2
+
+
 def vm_main(args: list[str]) -> int:
     if not args or args[0] in {'--help', '-h', 'help'}:
         return _usage()
@@ -190,6 +332,8 @@ def vm_main(args: list[str]) -> int:
             return _bench(rest)
         if command == 'abi':
             return _abi(rest)
+        if command == 'native':
+            return _native(rest)
     except VerificationError as error:
         print(powang_error_format('COMPILE', 'verifier', str(error)))
         return 1
