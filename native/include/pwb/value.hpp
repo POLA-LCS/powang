@@ -28,6 +28,10 @@ struct MapObject;
 struct SetObject;
 struct ObjectObject;
 struct TypeRuntime;
+struct ModuleRuntime;
+struct ErrorObject;
+struct RefObject;
+struct ProjectObject;
 
 enum class Tag : std::uint8_t {
     Nova = 0,
@@ -47,11 +51,23 @@ enum class Tag : std::uint8_t {
     Set = 14,
     Obj = 15,
     Type = 16,
+    Module = 17,
+    Error = 18,
+    Ref = 19,
+    Project = 20,
+};
+
+enum ValueFlag : std::uint8_t {
+    ValueDefined = 1u << 0,
+    ValueConst = 1u << 1,
+    ValueWeak = 1u << 2,
 };
 
 struct Value {
     Tag tag;
-    std::uint8_t reserved[7];
+    std::uint8_t flags;
+    std::uint8_t aux;
+    std::uint8_t reserved[5];
     union {
         std::int64_t i;
         double d;
@@ -84,24 +100,32 @@ inline const char* tag_name(Tag tag) noexcept {
         case Tag::Set: return "set";
         case Tag::Obj: return "obj";
         case Tag::Type: return "type";
+        case Tag::Module: return "module";
+        case Tag::Error: return "error";
+        case Tag::Ref: return "reference";
+        case Tag::Project: return "Project";
     }
     return "unknown";
 }
 
 inline Value make_nova() {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Nova;
     return value;
 }
 
 inline Value make_undef() {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Undef;
+    value.flags = 0;
     return value;
 }
 
 inline Value make_bool(bool flag) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Bool;
     value.b = flag;
     return value;
@@ -109,6 +133,7 @@ inline Value make_bool(bool flag) {
 
 inline Value make_int(std::int64_t number) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Int;
     value.i = number;
     return value;
@@ -116,6 +141,7 @@ inline Value make_int(std::int64_t number) {
 
 inline Value make_num(double number) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Num;
     value.d = number;
     return value;
@@ -123,6 +149,7 @@ inline Value make_num(double number) {
 
 inline Value make_char(char32_t code_point) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Char;
     value.c = code_point;
     return value;
@@ -130,6 +157,7 @@ inline Value make_char(char32_t code_point) {
 
 inline Value make_bigint(BigIntObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::BigInt;
     value.ref = object;
     return value;
@@ -137,6 +165,7 @@ inline Value make_bigint(BigIntObject* object) {
 
 inline Value make_function(FunctionObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Fun;
     value.ref = object;
     return value;
@@ -144,6 +173,7 @@ inline Value make_function(FunctionObject* object) {
 
 inline Value make_array(ArrayObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Arr;
     value.ref = object;
     return value;
@@ -151,6 +181,7 @@ inline Value make_array(ArrayObject* object) {
 
 inline Value make_spread(ArrayObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Spread;
     value.ref = object;
     return value;
@@ -158,6 +189,7 @@ inline Value make_spread(ArrayObject* object) {
 
 inline Value make_iterator(IteratorObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Iter;
     value.ref = object;
     return value;
@@ -165,6 +197,7 @@ inline Value make_iterator(IteratorObject* object) {
 
 inline Value make_string(StringObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Str;
     value.ref = object;
     return value;
@@ -172,6 +205,7 @@ inline Value make_string(StringObject* object) {
 
 inline Value make_tuple(TupleObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Tup;
     value.ref = object;
     return value;
@@ -179,6 +213,7 @@ inline Value make_tuple(TupleObject* object) {
 
 inline Value make_map(MapObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Map;
     value.ref = object;
     return value;
@@ -186,6 +221,7 @@ inline Value make_map(MapObject* object) {
 
 inline Value make_set(SetObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Set;
     value.ref = object;
     return value;
@@ -193,6 +229,7 @@ inline Value make_set(SetObject* object) {
 
 inline Value make_object(ObjectObject* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Obj;
     value.ref = object;
     return value;
@@ -200,9 +237,54 @@ inline Value make_object(ObjectObject* object) {
 
 inline Value make_type(TypeRuntime* object) {
     Value value{};
+    value.flags = ValueDefined;
     value.tag = Tag::Type;
     value.ref = object;
     return value;
+}
+
+inline Value make_module(ModuleRuntime* object) {
+    Value value{};
+    value.flags = ValueDefined;
+    value.tag = Tag::Module;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_error_value(ErrorObject* object) {
+    Value value{};
+    value.flags = ValueDefined;
+    value.tag = Tag::Error;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_reference(RefObject* object) {
+    Value value{};
+    value.flags = ValueDefined;
+    value.tag = Tag::Ref;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_project(ProjectObject* object) {
+    Value value{};
+    value.flags = ValueDefined;
+    value.tag = Tag::Project;
+    value.ref = object;
+    return value;
+}
+
+inline bool is_defined(const Value& value) noexcept {
+    return (value.flags & ValueDefined) != 0;
+}
+
+inline bool is_const(const Value& value) noexcept {
+    return (value.flags & ValueConst) != 0;
+}
+
+inline bool is_weak(const Value& value) noexcept {
+    return (value.flags & ValueWeak) != 0;
 }
 
 inline bool is_nova(const Value& value) noexcept {
@@ -253,6 +335,22 @@ inline bool is_type(const Value& value) noexcept {
     return value.tag == Tag::Type;
 }
 
+inline bool is_module(const Value& value) noexcept {
+    return value.tag == Tag::Module;
+}
+
+inline bool is_error(const Value& value) noexcept {
+    return value.tag == Tag::Error;
+}
+
+inline bool is_reference(const Value& value) noexcept {
+    return value.tag == Tag::Ref;
+}
+
+inline bool is_project(const Value& value) noexcept {
+    return value.tag == Tag::Project;
+}
+
 inline BigIntObject* as_bigint(const Value& value) {
     return static_cast<BigIntObject*>(value.ref);
 }
@@ -299,6 +397,22 @@ inline ObjectObject* as_object(const Value& value) {
 
 inline TypeRuntime* as_type(const Value& value) {
     return static_cast<TypeRuntime*>(value.ref);
+}
+
+inline ModuleRuntime* as_module(const Value& value) {
+    return static_cast<ModuleRuntime*>(value.ref);
+}
+
+inline ErrorObject* as_error(const Value& value) {
+    return static_cast<ErrorObject*>(value.ref);
+}
+
+inline RefObject* as_reference(const Value& value) {
+    return static_cast<RefObject*>(value.ref);
+}
+
+inline ProjectObject* as_project(const Value& value) {
+    return static_cast<ProjectObject*>(value.ref);
 }
 
 inline bool is_scalar_value(char32_t code_point) noexcept {
@@ -432,6 +546,10 @@ inline std::string format_value(const Value& value) {
         case Tag::Set:
         case Tag::Obj:
         case Tag::Type:
+        case Tag::Module:
+        case Tag::Error:
+        case Tag::Ref:
+        case Tag::Project:
             return format_heap_value(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);
@@ -470,6 +588,10 @@ inline bool truthy(const Value& value) {
         case Tag::Set:
         case Tag::Obj:
         case Tag::Type:
+        case Tag::Module:
+        case Tag::Error:
+        case Tag::Ref:
+        case Tag::Project:
             return heap_truthy(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);

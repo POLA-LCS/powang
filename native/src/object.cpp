@@ -6,6 +6,9 @@
 #include <string>
 #include <utility>
 
+#include "pwb/errors.hpp"
+#include "pwb/module.hpp"
+
 namespace pwb {
 namespace {
 
@@ -171,6 +174,11 @@ ObjectObject* Arena::allocate_object(
     return &objects_.back();
 }
 
+ErrorObject* Arena::allocate_error() {
+    errors_.push_back(ErrorObject{});
+    return &errors_.back();
+}
+
 std::size_t Arena::bigint_count() const noexcept {
     return bigints_.size();
 }
@@ -205,6 +213,10 @@ std::size_t Arena::set_count() const noexcept {
 
 std::size_t Arena::object_count() const noexcept {
     return objects_.size();
+}
+
+std::size_t Arena::error_count() const noexcept {
+    return errors_.size();
 }
 
 std::string format_heap_value(const Value& value) {
@@ -252,6 +264,20 @@ std::string format_heap_value(const Value& value) {
                 : "type";
             return "<" + name + ">";
         }
+        case Tag::Module: {
+            const ModuleRuntime* runtime = as_module(value);
+            return "<module: "
+                + (runtime != nullptr ? runtime->name : std::string("module"))
+                + ">";
+        }
+        case Tag::Error: {
+            const ErrorObject* error = as_error(value);
+            return error != nullptr ? error->readable() : "[ERROR]";
+        }
+        case Tag::Ref:
+            return "<reference>";
+        case Tag::Project:
+            return "<Project>";
         default:
             throw RuntimeError("value has no heap formatting rule");
     }
@@ -271,6 +297,10 @@ bool heap_truthy(const Value& value) {
             return !as_set(value)->items.empty();
         case Tag::Obj:
         case Tag::Type:
+        case Tag::Module:
+        case Tag::Error:
+        case Tag::Ref:
+        case Tag::Project:
             return true;
         default:
             return false;
@@ -384,6 +414,10 @@ bool value_equal(const Value& left, const Value& right) {
         case Tag::Fun:
         case Tag::Spread:
         case Tag::Iter:
+        case Tag::Module:
+        case Tag::Error:
+        case Tag::Ref:
+        case Tag::Project:
             return left.ref == right.ref;
     }
     return false;
@@ -431,7 +465,8 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
                 return found->second;
             }
             ArrayObject* copy = arena.allocate_array();
-            const Value result = make_array(copy);
+            Value result = make_array(copy);
+            result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;
             const ArrayObject* source = as_array(value);
             copy->items.reserve(source->items.size());
@@ -446,7 +481,8 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
                 return found->second;
             }
             TupleObject* copy = arena.allocate_tuple();
-            const Value result = make_tuple(copy);
+            Value result = make_tuple(copy);
+            result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;
             const TupleObject* source = as_tuple(value);
             copy->items.reserve(source->items.size());
@@ -461,7 +497,8 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
                 return found->second;
             }
             MapObject* copy = arena.allocate_map();
-            const Value result = make_map(copy);
+            Value result = make_map(copy);
+            result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;
             for (const auto& entry : as_map(value)->entries) {
                 map_set(
@@ -477,7 +514,8 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
                 return found->second;
             }
             SetObject* copy = arena.allocate_set();
-            const Value result = make_set(copy);
+            Value result = make_set(copy);
+            result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;
             for (const Value& item : as_set(value)->items) {
                 set_add(*copy, copy_value(arena, item, memo));
@@ -492,10 +530,13 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
             const ObjectObject* source = as_object(value);
             ObjectObject* copy = arena.allocate_object(
                 source->type_name, source->is_enum, source->variant);
+            copy->type = source->type;
+            copy->module = source->module;
             copy->structure_locked = source->structure_locked;
             copy->elements_locked = source->elements_locked;
             copy->private_fields = source->private_fields;
-            const Value result = make_object(copy);
+            Value result = make_object(copy);
+            result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;
             for (const auto& entry : source->fields) {
                 copy->fields.emplace(
@@ -516,6 +557,10 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
         case Tag::Char:
         case Tag::Spread:
         case Tag::Iter:
+        case Tag::Module:
+        case Tag::Error:
+        case Tag::Ref:
+        case Tag::Project:
             return value;
     }
     return value;

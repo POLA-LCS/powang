@@ -23,6 +23,9 @@ namespace pwb {
 
 struct FunctionObject;
 struct TypeRuntime;
+struct ModuleRuntime;
+struct ErrorObject;
+struct ProjectObject;
 
 struct CapturedScope {
     std::unordered_map<std::string, Value> values;
@@ -32,17 +35,20 @@ struct CapturedScope {
 
 struct FunctionObject {
     const FunctionMetadata* metadata = nullptr;
+    ModuleRuntime* module = nullptr;
     std::vector<Value> captures;
     CapturedScope captured;
     Value receiver = make_nova();
     bool has_receiver = false;
-    const TypeRuntime* owner = nullptr;
+    TypeRuntime* owner = nullptr;
     bool is_static = false;
     bool is_private = false;
     std::string trait_qualifier;
 };
 
 struct ObjectObject {
+    TypeRuntime* type = nullptr;
+    ModuleRuntime* module = nullptr;
     std::string type_name;
     std::string variant;
     bool is_enum = false;
@@ -54,6 +60,8 @@ struct ObjectObject {
 
 struct TypeRuntime {
     const TypeInfo* info = nullptr;
+    ModuleRuntime* module = nullptr;
+    std::string qualified_name;
     std::unordered_map<std::string, std::vector<FunctionObject*>> methods;
     std::unordered_map<std::string, std::vector<FunctionObject*>> statics;
     std::unordered_map<std::string, std::vector<FunctionObject*>> constructors;
@@ -108,6 +116,7 @@ public:
         std::string type_name,
         bool is_enum = false,
         std::string variant = "");
+    ErrorObject* allocate_error();
 
     std::size_t bigint_count() const noexcept;
     std::size_t array_count() const noexcept;
@@ -118,6 +127,7 @@ public:
     std::size_t map_count() const noexcept;
     std::size_t set_count() const noexcept;
     std::size_t object_count() const noexcept;
+    std::size_t error_count() const noexcept;
 
 private:
     std::deque<BigIntObject> bigints_;
@@ -129,6 +139,7 @@ private:
     std::deque<MapObject> maps_;
     std::deque<SetObject> sets_;
     std::deque<ObjectObject> objects_;
+    std::deque<ErrorObject> errors_;
 };
 
 std::string format_heap_value(const Value& value);

@@ -14,6 +14,8 @@ add_library(pwb_runtime STATIC
     src/meta.cpp
     src/sha256.cpp
     src/bundle.cpp
+    src/errors.cpp
+    src/modules.cpp
     src/object.cpp
     src/vm.cpp
     src/host.cpp)
