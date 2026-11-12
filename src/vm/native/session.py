@@ -7,7 +7,9 @@ imported module needs is compiled here, on the Python side, and carried in the
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import contextlib
+import io
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -32,10 +34,13 @@ class NativeFileSession:
     entry_path: Path
 
 
-def prepare_state(path: str | Path) -> Any:
+def prepare_state(
+    path: str | Path, *, warnings: bool = True,
+) -> Any:
     """Create the state used by the native file path."""
     state = fresh_state()
     state.engine = "vm"
+    state.warnings_enabled = warnings
     path_text = str(path)
     if not load_project_config(state, path_text):
         load_config(state, path_text)
@@ -50,10 +55,11 @@ def compile_native_file(
     path: str | Path,
     *,
     check: bool = True,
+    warnings: bool = True,
 ) -> NativeFileSession:
     """Compile a file and build its module bundle while the state is live."""
     entry_path = Path(path).resolve()
-    state = prepare_state(path)
+    state = prepare_state(path, warnings=warnings)
     set_state(state)
     try:
         content = get_file_content(str(path))
@@ -73,6 +79,8 @@ def compile_native_file(
                     content.count("\n") + 1) from None
             raise
         bundle = build_bundle(image, state)
+        if warnings:
+            state.emit_warnings()
     finally:
         state.close()
     return NativeFileSession(
@@ -89,10 +97,18 @@ def run_native_file(
     *,
     input_text: str | None = None,
     timeout: float = 60.0,
+    warnings: bool = True,
 ) -> NativeRunResult:
     """Compile and run one Powang file on the native runtime."""
-    session = compile_native_file(path)
-    return run_native(
+    warning_text = ""
+    if warnings:
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            session = compile_native_file(path, warnings=True)
+        warning_text = buffer.getvalue()
+    else:
+        session = compile_native_file(path, warnings=False)
+    result = run_native(
         session.image,
         args,
         input_text=input_text,
@@ -100,3 +116,8 @@ def run_native_file(
         bundle=session.bundle,
         use_cache=True,
     )
+    if warning_text:
+        result = replace(
+            result, stderr=warning_text + result.stderr,
+        )
+    return result

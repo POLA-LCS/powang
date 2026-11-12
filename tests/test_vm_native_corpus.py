@@ -35,7 +35,11 @@ class NativeCorpusTests(unittest.TestCase):
                     line + "\n" for line in python.stderr.splitlines()
                     if not line.startswith("[WARNING]")
                 )
-                self.assertEqual(native.stderr, python_stderr, path.name)
+                native_stderr = "".join(
+                    line + "\n" for line in native.stderr.splitlines()
+                    if not line.startswith("[WARNING]")
+                )
+                self.assertEqual(native_stderr, python_stderr, path.name)
 
     def test_n1_corpus_matches(self) -> None:
         self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n1")

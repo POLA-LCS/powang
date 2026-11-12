@@ -361,15 +361,28 @@ bool is_numeric_operand(const Value& value) {
         || value.tag == Tag::Num || value.tag == Tag::Bool;
 }
 
+std::string error_type_label(const Value& value) {
+    const std::string name = runtime_type_name(value);
+    if (is_weak(value)) {
+        return name + " weak " + name;
+    }
+    return name;
+}
+
 void require_numeric_pair(
     Machine& machine,
     const Value& left,
     const Value& right,
     const char* symbol) {
     if (!is_numeric_operand(left) || !is_numeric_operand(right)) {
+        const bool explicit_operation =
+            left.tag == Tag::Nova || right.tag == Tag::Nova
+            || left.tag == Tag::Char || right.tag == Tag::Char
+            || is_weak(left) || is_weak(right);
         throw_error(error_unsupported_operation(
-            machine.arena, "implicit operation",
-            runtime_type_name(left), symbol, runtime_type_name(right)));
+            machine.arena,
+            explicit_operation ? "operation" : "implicit operation",
+            error_type_label(left), symbol, error_type_label(right)));
     }
 }
 
@@ -480,7 +493,14 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
         } else if (right.tag == Tag::Char) {
             text.push_back(right.c);
         } else {
-            runtime_fail("string addition expects a str or a char");
+            const bool explicit_operation =
+                right.tag == Tag::Nova || is_weak(right);
+            throw_error(error_unsupported_operation(
+                machine.arena,
+                explicit_operation ? "operation"
+                                   : "implicit operation",
+                error_type_label(left), "+",
+                error_type_label(right)));
         }
         return make_string(machine.arena.allocate_string(std::move(text)));
     }
@@ -508,7 +528,15 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
         }
         return make_map(result);
     }
-    require_numeric_pair(machine, left, right, "+");
+    if (!is_numeric_operand(left) || !is_numeric_operand(right)) {
+        const bool explicit_operation =
+            left.tag == Tag::Nova || right.tag == Tag::Nova
+            || is_weak(left) || is_weak(right);
+        throw_error(error_unsupported_operation(
+            machine.arena,
+            explicit_operation ? "operation" : "implicit operation",
+            error_type_label(left), "+", error_type_label(right)));
+    }
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
             || left.tag == Tag::Bool || right.tag == Tag::Bool) {
@@ -539,6 +567,12 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
+    if ((left.tag == Tag::Bool && right.tag == Tag::Char)
+        || (left.tag == Tag::Char && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "-", error_type_label(right)));
+    }
     if (left.tag == Tag::Bool) {
         return make_bool(left.b || !truthy(right));
     }
@@ -614,6 +648,12 @@ Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_mul(Machine& machine, const Value& left, const Value& right) {
+    if ((left.tag == Tag::Bool && right.tag == Tag::Char)
+        || (left.tag == Tag::Char && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "*", error_type_label(right)));
+    }
     if (left.tag == Tag::Bool) {
         return make_bool(left.b && truthy(right));
     }
@@ -722,6 +762,12 @@ Value chunk_size_error(
 }
 
 Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
+    if ((left.tag == Tag::Bool && right.tag == Tag::Char)
+        || (left.tag == Tag::Char && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "/", error_type_label(right)));
+    }
     if (left.tag == Tag::Bool) {
         return make_bool(left.b && !truthy(right));
     }
@@ -850,6 +896,16 @@ Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_mod(Machine& machine, const Value& left, const Value& right) {
+    if (left.tag == Tag::Bool || right.tag == Tag::Bool) {
+        if (is_numeric_operand(left) && is_numeric_operand(right)) {
+            throw_error(error_unsupported_operation(
+                machine.arena, "implicit operation",
+                "bool", "%", "bool"));
+        }
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "%", error_type_label(right)));
+    }
     require_numeric_pair(machine, left, right, "%");
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
@@ -952,11 +1008,33 @@ Comparison compare_values(
         const bool both_numeric =
             is_numeric_value(left) && is_numeric_value(right);
         if (!both_numeric) {
+            if (left.tag == Tag::Bool) {
+                return {
+                    false,
+                    truthy(left) == truthy(right) ? 0 : 1};
+            }
+            if (left.tag == Tag::Char && right.tag == Tag::Str) {
+                const StringObject* text = as_string_const(right);
+                if (text->code_points.size() != 1) {
+                    throw_error(error_unsupported_operation(
+                        machine.arena, "comparisson",
+                        "char", symbol, "str"));
+                }
+                return {
+                    false,
+                    text->code_points.front() == left.c ? 0 : 1};
+            }
+            if (left.tag == Tag::Str && right.tag == Tag::Char) {
+                const StringObject* text = as_string_const(left);
+                return {
+                    false,
+                    text->code_points.size() == 1
+                        && text->code_points.front() == right.c
+                    ? 0 : 1};
+            }
             const bool comparable =
                 left.tag == right.tag
-                || left.tag == Tag::Nova || right.tag == Tag::Nova
-                || (left.tag == Tag::Str && right.tag == Tag::Char)
-                || (left.tag == Tag::Char && right.tag == Tag::Str);
+                || left.tag == Tag::Nova || right.tag == Tag::Nova;
             if (!comparable) {
                 throw_error(error_unsupported_operation(
                     machine.arena, "comparisson",
@@ -965,6 +1043,19 @@ Comparison compare_values(
             }
             return {false, value_equal(left, right) ? 0 : 1};
         }
+    }
+    if (is_weak(left) || is_weak(right)) {
+        throw_error(make_error(
+            machine.arena, "VALUE", "comparisson",
+            "Invalid weak comparisson",
+            {"trying to compare greatness or lessness with non strong "
+             "values"}));
+    }
+    if (left.tag == Tag::Bool) {
+        const bool other = truthy(right);
+        return {
+            false,
+            left.b == other ? 0 : (left.b ? 1 : -1)};
     }
     if (is_numeric_value(left) && is_numeric_value(right)) {
         if (left.tag == Tag::Bool) {
@@ -1018,13 +1109,22 @@ Comparison compare_values(
         const int order = a.compare(b);
         return {false, order < 0 ? -1 : (order > 0 ? 1 : 0)};
     }
-    if ((left.tag == Tag::Str && right.tag == Tag::Char)
-        || (left.tag == Tag::Char && right.tag == Tag::Str)) {
-        const std::string operation(opcode);
-        if (operation == "EQ" || operation == "NEQ") {
-            return {false, value_equal(left, right) ? 0 : 1};
+    if (left.tag == Tag::Str && right.tag == Tag::Char) {
+        const std::u32string& text = as_string_const(left)->code_points;
+        const std::u32string other(1, right.c);
+        const int order = text.compare(other);
+        return {false, order < 0 ? -1 : (order > 0 ? 1 : 0)};
+    }
+    if (left.tag == Tag::Char && right.tag == Tag::Str) {
+        const StringObject* text = as_string_const(right);
+        if (text->code_points.size() != 1) {
+            throw_error(error_unsupported_operation(
+                machine.arena, "comparisson",
+                "char", symbol.c_str(), "str"));
         }
-        runtime_fail("ordering is not supported between str and char");
+        const int order = left.c < text->code_points.front()
+            ? -1 : (left.c > text->code_points.front() ? 1 : 0);
+        return {false, order};
     }
     if ((left.tag == Tag::Arr || left.tag == Tag::Tup
          || left.tag == Tag::Map || left.tag == Tag::Set
@@ -6020,10 +6120,18 @@ bool match_pattern(
         if (!pattern_scalar(machine, pattern.literal, literal)) {
             return false;
         }
-        if (subject.tag == Tag::Char && literal.tag == Tag::Str) {
-            const StringObject* text = as_string_const(literal);
-            return text->code_points.size() == 1
-                && text->code_points.front() == subject.c;
+        if (subject.tag != literal.tag) {
+            if (subject.tag == Tag::Char && literal.tag == Tag::Str) {
+                const StringObject* text = as_string_const(literal);
+                return text->code_points.size() == 1
+                    && text->code_points.front() == subject.c;
+            }
+            if (subject.tag == Tag::Str && literal.tag == Tag::Char) {
+                const StringObject* text = as_string_const(subject);
+                return text->code_points.size() == 1
+                    && text->code_points.front() == literal.c;
+            }
+            return false;
         }
         return value_equal(subject, literal);
     }
@@ -6352,18 +6460,36 @@ Value reverse_value(Machine& machine, const Value& value) {
                 : as_bigint_const(value)->value.format_decimal();
             const std::string reversed(text.rbegin(), text.rend());
             try {
-                return make_int(std::stoll(reversed));
+                std::size_t consumed = 0;
+                const long long converted =
+                    std::stoll(reversed, &consumed);
+                if (consumed != reversed.size()) {
+                    throw std::invalid_argument("trailing");
+                }
+                return make_int(converted);
             } catch (const std::exception&) {
-                return make_nova();
+                throw_error(make_error(
+                    machine.arena, "RUNTIME", "explicit cast",
+                    "Invalid int string",
+                    {"\"" + reversed + "\""}));
             }
         }
         case Tag::Num: {
             const std::string text = format_number(value.d);
             const std::string reversed(text.rbegin(), text.rend());
             try {
-                return make_num(std::stod(reversed));
+                std::size_t consumed = 0;
+                const double converted =
+                    std::stod(reversed, &consumed);
+                if (consumed != reversed.size()) {
+                    throw std::invalid_argument("trailing");
+                }
+                return make_num(converted);
             } catch (const std::exception&) {
-                return make_nova();
+                throw_error(make_error(
+                    machine.arena, "RUNTIME", "explicit cast",
+                    "Invalid num string",
+                    {"\"" + reversed + "\""}));
             }
         }
         case Tag::Str: {

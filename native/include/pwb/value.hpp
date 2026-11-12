@@ -116,7 +116,7 @@ inline const char* tag_name(Tag tag) noexcept {
 
 inline Value make_nova() {
     Value value{};
-    value.flags = ValueDefined;
+    value.flags = ValueDefined | ValueWeak;
     value.tag = Tag::Nova;
     return value;
 }
