@@ -33,7 +33,7 @@ Start the interactive REPL by running `python powang.py` with no arguments.
 
 ## Execution engines
 
-Powang ships two execution engines.
+Powang ships two stable execution engines.
 
 - `vm` is the stack based bytecode virtual machine in `src/vm`. It is the default engine.
 - `tree` is the tree-walking interpreter. It is the reference engine and the fallback.
@@ -74,6 +74,33 @@ python powang.py vm bench --runs 3
 The VM is the default. The tree walker remains the reference oracle and the
 fallback. Both engines must produce the same output, the same runtime error
 text, the same source positions and the same exit code.
+
+## Native C++17 runtime (N0)
+
+An optional native C++17 runtime lives under `native/`. It is not the default engine. The Python VM remains the default engine and the differential oracle, and the tree walker remains the reference engine and the fallback.
+
+The native runtime consumes the same `PWB1` program image as the Python compiler. N0 covers the scalar subset: nova, undef, bool, int, num and char values, integer and number arithmetic, comparisons, logical not, negation, locals, jumps, top level `print` and `println`, and the N0 disassembler and verifier. An unsupported opcode reports a clear runtime error. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Float modulo follows the divisor sign, including signed zero. Integer overflow remains a later native gap. Runtime error stream and text parity is not complete. Strings, containers, user types, modules, errors, references, tasks and the full host surface are N1 to N6 work, so the native runtime does not yet have full language parity.
+
+The Python side of the build is under `src/vm/native/`. `source_gen.py` renders the generated `temp.cpp` translation unit into an in-memory buffer, and the default integrated compiler writes a temporary `temp.cpp` file for diagnostics. `compiler.py` runs the integrated `g++` driver, `build.py` configures and builds the runtime with CMake and Ninja, and `loader.py` compiles and runs an image. The generated source is temporary and is never committed.
+
+Build the runtime with g++ 16.1.0 or a compatible C++17 compiler, CMake and Ninja:
+
+```sh
+cmake -S native -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++
+cmake --build build/native
+```
+
+The verified environment is Windows 11 with g++ 16.1.0, CMake 4.4.2 and Ninja 1.13.2.
+
+Inspect, run and compile a program:
+
+```sh
+python powang.py vm native info
+python powang.py vm native run main.po
+python powang.py vm native compile --output build/main.exe main.po
+```
+
+`compile` accepts `--keep-source` to write `<output-stem>.cpp` next to the executable for debugging, for example `build/main.cpp` for `build/main.exe`. The package version is still `0.22.0` and N0 is a milestone, not a release. Full native parity is not claimed.
 
 ## Language at a glance
 

@@ -2,6 +2,23 @@
 
 All notable changes to powang are documented here.
 
+## Unreleased
+
+### Added
+
+- A native C++17 runtime milestone N0 under `native/`, consuming the same `PWB1` program image as the Python compiler.
+- An N0 scalar subset with nova, undef, bool, int, num and char values, integer and number arithmetic, comparisons, logical not, negation, locals, jumps, top level `print` and `println`, and the N0 disassembler and verifier. Unsupported opcodes report a clear runtime error.
+- A `temp.cpp` source generator in `src/vm/native/source_gen.py` that renders into a buffer. The default integrated compiler writes a temporary `temp.cpp` file for diagnostics. The generated source is temporary and is never committed.
+- An integrated `g++` driver in `src/vm/native/compiler.py`, a CMake and Ninja build in `src/vm/native/build.py`, and an image loader in `src/vm/native/loader.py`.
+- `powang vm native info`, `powang vm native run <file.po>` and `powang vm native compile [--output PATH] [--keep-source] <file.po>`.
+- `python -m src.vm.native.gen_opcodes --check` regenerates and checks `native/include/pwb/opcodes_generated.hpp` from the Python opcode registry.
+- 18 native build tests in `tests/test_native_build.py`. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests.
+
+### Notes
+
+- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The version stays `0.22.0` because N0 is a milestone, not a release.
+- N0 covers the scalar subset only. Strings, containers, user types, modules, errors, references, tasks and the full host surface are N1 to N6 work. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow remains an N1 gap and raises a native runtime error instead of promoting to bigint. Runtime error stream and text parity is not complete. Full native parity is not claimed.
+
 ## 0.22.0
 
 ### Added

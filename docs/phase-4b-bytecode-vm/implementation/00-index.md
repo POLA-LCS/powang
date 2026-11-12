@@ -1,6 +1,6 @@
 # Phase 4B Implementation Index
 
-Purpose: map the V0 to V9 bytecode VM plans, their dependency order, version strategy and commit convention.
+Purpose: map the V0 to V10 bytecode VM plans, the N0 native milestone, their dependency order, version strategy and commit convention.
 
 This index is the entry point for the implementation plan set. The design documents in the parent directory define language semantics. The binding interface contract is `docs/phase-4b-bytecode-vm/implementation/00-contracts.md`. Each phase file is written to stand alone. A reader can open one phase file, implement it, and use the design documents only as the semantic reference.
 
@@ -47,6 +47,9 @@ Each phase file uses the same section order:
 | `V8-async-and-tasks.md` | V8 | Async declarations and lambdas, lazy tasks, spawn and await, waits, cancellation, status, task errors and cleanup, top level await, worker pool limits | V7 closed | Async and task suites pass on both engines, cleanup tests pass under repeated starts and shutdowns |
 | `V9-parity-and-default-switch.md` | V9 | Full differential suite, all examples, all error snapshots, disassembler and trace documentation, optional cached images, opt in release, default switch | V8 closed | One release opt in with zero mismatches, then one release default with tree fallback, no LSP change |
 | `V10-native-vm-contract.md` | V10 | Native ABI header and JSON contract, runtime limits, host memory and async boundaries | V9 released | The native contract is generated from the registry and covered by tests |
+| `N0-native-cpp17-build-plan.md` | N0 | Native C++17 runtime, `PWB1` reader, verifier, disassembler, generated opcode table, in-memory `temp.cpp` build, integrated `g++` driver | V10 gate green | Native `print(1 + 2);` writes exactly `3` with no trailing newline, exit code `0`, disassembly parity with the Python disassembler |
+
+The N0 to N6 native milestones are tracked separately from the V0 to V10 Python VM gates. N0 is gate green. N1 to N6 are planned in `N0-native-cpp17-build-plan.md`. The Python VM remains the default engine.
 
 ## 3. Dependency order
 
@@ -62,6 +65,7 @@ The gate order is strict:
 8. V7 must close before V8 starts.
 9. V8 must close before V9 starts.
 10. V9 must close before V10 starts.
+11. V10 must close before N0 starts. N0 is gate green. N1 to N6 follow the milestone order in `N0-native-cpp17-build-plan.md`.
 
 Work may overlap inside one phase only when the interfaces in `00-contracts.md` are frozen. A phase gate is not green until its differential corpus reports zero mismatches and the existing suite is unchanged.
 
@@ -81,6 +85,7 @@ Parallel work that does not change a gate:
 - `0.22.0` is the default switch release. The VM is the default engine and the tree walker remains the reference engine and the fallback.
 - The tree walker remains available as `--engine=tree` and `POWANG_ENGINE=tree` for at least one release after the default switch.
 - V10 defines the native ABI contract for a separate native implementation.
+- N0 is implemented at `0.22.0` as a milestone, not a release. The plan targets `0.23.0` for N0 to N2. N1 to N6 remain planned.
 - A cached image is valid only when the format version, language version, source hash, compiler version, package version, module dependency hashes and engine feature flags all match.
 
 ## 5. Commit convention
