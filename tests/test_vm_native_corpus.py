@@ -5,11 +5,13 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from src.error import PowangError
 from src.vm.compiler import compile_source
 from src.vm.native.build import ensure_runtime
 from src.vm.native.compiler import NativeBuildError
 from src.vm.native.loader import run_native
-from tests.helpers import ROOT, run_source
+from src.vm.native.session import run_native_file
+from tests.helpers import ROOT, run_file, run_source
 
 
 class NativeCorpusTests(unittest.TestCase):
@@ -52,6 +54,35 @@ class NativeCorpusTests(unittest.TestCase):
 
     def test_n3_corpus_matches(self) -> None:
         self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n3")
+
+    def test_n4_corpus_matches(self) -> None:
+        corpus = ROOT / "tests" / "native" / "corpus" / "n4"
+        programs = sorted(corpus.glob("*.po"))
+        programs.append(corpus / "project" / "main.po")
+        self.assertTrue(programs)
+        for path in programs:
+            with self.subTest(program=path.name):
+                python = run_file(path, engine="vm")
+                try:
+                    native = run_native_file(path)
+                    native_stdout = native.stdout
+                    native_stderr = native.stderr
+                    native_code = native.returncode
+                except PowangError as error:
+                    ## The native file path surfaces an entry compile or
+                    ## check error before a runnable bundle exists.
+                    native_stdout = str(error) + "\n"
+                    native_stderr = ""
+                    native_code = 1
+                self.assertEqual(
+                    native_code, python.returncode, path.name,
+                )
+                self.assertEqual(
+                    native_stdout, python.stdout, path.name,
+                )
+                self.assertEqual(
+                    native_stderr, python.stderr, path.name,
+                )
 
 
 if __name__ == "__main__":

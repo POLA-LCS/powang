@@ -1,0 +1,5 @@
+fun bump(value: &int) { value += 1; }
+type Counter[+] { | value: int; }
+counter := Counter.[1];
+&counter.value :> bump;
+print(counter.value); print("\n");

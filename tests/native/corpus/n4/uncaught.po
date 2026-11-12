@@ -1,0 +1,7 @@
+fun inner(): int {
+    error("INNER", "failure", "detail");
+}
+fun outer(): int {
+    return inner();
+}
+outer();

@@ -1,0 +1,16 @@
+fun f(): int {
+    try {
+        print("try"); print(" ");
+        return 1;
+    } finally {
+        print("finally"); print(" ");
+    }
+}
+print(f()); print("\n");
+try {
+    error("E", "x");
+} catch e {
+    print("caught"); print(" ");
+} finally {
+    print("done"); print("\n");
+}

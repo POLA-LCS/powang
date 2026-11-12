@@ -1,0 +1,16 @@
+try {
+    print("a"); print(" ");
+    error("E", "one");
+} catch e {
+    print(e.kind); print(" "); print(e.message); print("\n");
+}
+try {
+    try {
+        error("INNER", "deep");
+    } catch inner {
+        print(inner.message); print(" ");
+        error("OUTER", "rethrow");
+    }
+} catch outer {
+    print(outer.kind); print(" "); print(outer.message); print("\n");
+}

@@ -1,0 +1,3 @@
+extern fun ping(value: int): int >> "not_allowed.ping";
+print("before ");
+print(ping(1));

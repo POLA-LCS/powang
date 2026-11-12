@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from ...error import PowangError
 from ...config import load_config, load_project_config
 from ...pkg.installer import load_package_config, require_packages_ready
 from ...runtime import get_file_content
@@ -56,13 +57,21 @@ def compile_native_file(
     set_state(state)
     try:
         content = get_file_content(str(path))
-        image = compile_source(
-            content,
-            path=path,
-            module_name=Path(path).stem,
-            check=check,
-            state=state,
-        )
+        try:
+            image = compile_source(
+                content,
+                path=path,
+                module_name=Path(path).stem,
+                check=check,
+                state=state,
+            )
+        except PowangError as error:
+            ## run_program gives an entry compile or check error the same
+            ## top-level line as a runtime error.
+            if error.line is None:
+                raise error.with_line(
+                    content.count("\n") + 1) from None
+            raise
         bundle = build_bundle(image, state)
     finally:
         state.close()

@@ -1,0 +1,7 @@
+fun increment(value: &int) { value += 1; }
+limit: int! = 5;
+try {
+    increment(&limit);
+} catch e {
+    print(e.kind); print(" "); print(e.message); print("\n");
+}

@@ -90,6 +90,7 @@ struct CodeObject {
     std::vector<Constant> constants;
     std::vector<SourceSpan> spans;
     std::vector<std::uint32_t> span_table;
+    std::vector<std::uint32_t> offset_to_span;
     std::vector<ExceptionEntry> exception_table;
     std::vector<std::string> local_names;
     std::vector<std::string> parameter_names;

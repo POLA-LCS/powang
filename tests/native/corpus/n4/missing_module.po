@@ -1,0 +1,3 @@
+print("before "); 
+use "./fixtures/nope.po" as n;
+print("after");

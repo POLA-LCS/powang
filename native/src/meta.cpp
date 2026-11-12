@@ -97,7 +97,7 @@ Meta parse_meta(const std::uint8_t* data, std::size_t size) {
     }
     Meta meta;
     meta.version = reader.u16("version");
-    if (meta.version != 1) {
+    if (meta.version != 1 && meta.version != 2) {
         throw MetadataError(
             "unsupported PWBM version: " + std::to_string(meta.version));
     }
@@ -191,6 +191,74 @@ Meta parse_meta(const std::uint8_t* data, std::size_t size) {
         meta.functions.push_back(std::move(function));
     }
 
+    if (meta.version >= 2) {
+        const std::uint32_t spec_map_count =
+            reader.u32("spec map count");
+        if (spec_map_count > kMaxRecords) {
+            throw MetadataError("PWBM spec map count is too large");
+        }
+        meta.spec_map.reserve(spec_map_count);
+        for (std::uint32_t index = 0; index < spec_map_count; ++index) {
+            MetaSpecMapEntry entry;
+            entry.image_index = reader.u32("spec map image index");
+            entry.meta_index = reader.u32("spec map meta index");
+            meta.spec_map.push_back(entry);
+        }
+        const std::uint32_t descriptor_count =
+            reader.u32("descriptor count");
+        if (descriptor_count > kMaxRecords) {
+            throw MetadataError("PWBM descriptor count is too large");
+        }
+        meta.descriptors.reserve(descriptor_count);
+        for (std::uint32_t index = 0; index < descriptor_count; ++index) {
+            MetaDescriptor descriptor;
+            const std::uint8_t kind = reader.u8("descriptor kind");
+            if (kind > static_cast<std::uint8_t>(
+                    MetaDescriptor::Kind::Extern)) {
+                throw MetadataError("unknown PWBM descriptor kind");
+            }
+            descriptor.kind = static_cast<MetaDescriptor::Kind>(kind);
+            descriptor.code_index = reader.u32("descriptor code index");
+            descriptor.constant_index =
+                reader.u32("descriptor constant index");
+            if (descriptor.kind == MetaDescriptor::Kind::ErrorSpec) {
+                descriptor.mode = reader.string("descriptor mode");
+                descriptor.where = reader.string("descriptor where");
+                descriptor.has_kind =
+                    reader.u8("descriptor has kind") != 0;
+                descriptor.argument_count =
+                    reader.u32("descriptor argument count");
+            } else {
+                descriptor.name = reader.string("descriptor name");
+                descriptor.python_target =
+                    reader.string("descriptor python target");
+                descriptor.min_argc =
+                    reader.u32("descriptor min argc");
+                const std::uint32_t parameter_count =
+                    reader.u32("descriptor parameter count");
+                if (parameter_count > kMaxRecords) {
+                    throw MetadataError(
+                        "PWBM descriptor parameter count is too large");
+                }
+                descriptor.parameters.reserve(parameter_count);
+                for (std::uint32_t position = 0;
+                     position < parameter_count; ++position) {
+                    MetaExternParameter parameter;
+                    parameter.name =
+                        reader.string("descriptor parameter name");
+                    parameter.type_name =
+                        reader.string("descriptor parameter type");
+                    parameter.flags =
+                        reader.u8("descriptor parameter flags");
+                    descriptor.parameters.push_back(std::move(parameter));
+                }
+                descriptor.return_type =
+                    reader.string("descriptor return type");
+            }
+            meta.descriptors.push_back(std::move(descriptor));
+        }
+    }
+
     if (reader.remaining() != 0) {
         throw MetadataError(
             "trailing bytes in PWBM metadata: "
@@ -200,8 +268,41 @@ Meta parse_meta(const std::uint8_t* data, std::size_t size) {
 }
 
 void validate_meta(const Meta& meta, const Image& image) {
-    if (meta.version != 1) {
+    if (meta.version != 1 && meta.version != 2) {
         throw MetadataError("unsupported PWBM version");
+    }
+    for (const MetaSpecMapEntry& entry : meta.spec_map) {
+        if (entry.image_index >= image.type_specs.size()
+            || entry.meta_index >= meta.types.size()) {
+            throw MetadataError("PWBM spec map index out of range");
+        }
+    }
+    for (const MetaDescriptor& descriptor : meta.descriptors) {
+        if (descriptor.code_index >= image.codes.size()) {
+            throw MetadataError("PWBM descriptor code index out of range");
+        }
+        const CodeObject& code =
+            image.codes[descriptor.code_index];
+        if (descriptor.constant_index >= code.constants.size()) {
+            throw MetadataError(
+                "PWBM descriptor constant index out of range");
+        }
+        const Constant& constant =
+            code.constants[descriptor.constant_index];
+        if (constant.kind != ConstantKind::Descriptor) {
+            throw MetadataError(
+                "PWBM descriptor constant is not a descriptor");
+        }
+        if (descriptor.kind == MetaDescriptor::Kind::ErrorSpec
+            && constant.text.find("error_spec") == std::string::npos) {
+            throw MetadataError(
+                "PWBM error descriptor constant kind mismatch");
+        }
+        if (descriptor.kind == MetaDescriptor::Kind::Extern
+            && constant.text.find("extern") == std::string::npos) {
+            throw MetadataError(
+                "PWBM extern descriptor constant kind mismatch");
+        }
     }
     for (std::size_t index = 0; index < meta.types.size(); ++index) {
         const MetaTypeSpec& type = meta.types[index];
@@ -271,6 +372,19 @@ void validate_meta(const Meta& meta, const Image& image) {
             }
         }
     }
+}
+
+const MetaDescriptor* find_descriptor(
+    const Meta& meta,
+    std::uint32_t code_index,
+    std::uint32_t constant_index) {
+    for (const MetaDescriptor& descriptor : meta.descriptors) {
+        if (descriptor.code_index == code_index
+            && descriptor.constant_index == constant_index) {
+            return &descriptor;
+        }
+    }
+    return nullptr;
 }
 
 std::string format_meta_summary(const Meta& meta) {

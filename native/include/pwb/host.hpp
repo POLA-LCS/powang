@@ -2,7 +2,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
+#include <string_view>
+
+#include "pwb/value.hpp"
 
 namespace pwb {
 
@@ -13,6 +17,13 @@ public:
     // Diagnostics from the embedded runtime boundary, normally standard
     // error. The host layer owns the actual stream.
     virtual void write_error(const std::string& text) = 0;
+
+    // Optional scalar extern boundary. A host that supports an extern
+    // overrides this method. The default reports that the ABI is unavailable.
+    virtual Value call_extern(
+        std::string_view name,
+        const Value* arguments,
+        std::size_t argument_count);
 };
 
 // Host that writes output to standard output and diagnostics to standard

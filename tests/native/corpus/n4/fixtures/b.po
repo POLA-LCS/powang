@@ -1,0 +1,3 @@
+module b;
+use "./a.po" as a;
+export fun fb(): int >> 2;

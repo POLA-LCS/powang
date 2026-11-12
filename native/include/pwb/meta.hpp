@@ -82,17 +82,49 @@ struct FunctionMetadata {
     std::vector<std::int32_t> defaults;
 };
 
+struct MetaSpecMapEntry {
+    std::uint32_t image_index = 0;
+    std::uint32_t meta_index = 0;
+};
+
+struct MetaExternParameter {
+    std::string name;
+    std::string type_name;
+    std::uint8_t flags = 0;
+};
+
+struct MetaDescriptor {
+    enum class Kind : std::uint8_t { ErrorSpec = 0, Extern = 1 };
+
+    Kind kind = Kind::ErrorSpec;
+    std::uint32_t code_index = 0;
+    std::uint32_t constant_index = 0;
+    std::string mode;
+    std::string where;
+    bool has_kind = false;
+    std::uint32_t argument_count = 0;
+    std::string name;
+    std::string python_target;
+    std::uint32_t min_argc = 0;
+    std::vector<MetaExternParameter> parameters;
+    std::string return_type;
+};
+
 struct Meta {
     std::uint16_t version = 0;
     std::uint16_t flags = 0;
     std::array<std::uint8_t, 32> image_hash{};
     std::vector<MetaTypeSpec> types;
     std::vector<FunctionMetadata> functions;
+    std::vector<MetaSpecMapEntry> spec_map;
+    std::vector<MetaDescriptor> descriptors;
 };
 
 Meta parse_meta(const std::uint8_t* data, std::size_t size);
 void validate_meta(const Meta& meta, const Image& image);
 std::string format_meta_summary(const Meta& meta);
+const MetaDescriptor* find_descriptor(
+    const Meta& meta, std::uint32_t code_index, std::uint32_t constant_index);
 
 inline bool meta_flag(MetaTypeSpec spec, MetaTypeFlag flag) {
     return (spec.flags & static_cast<std::uint8_t>(flag)) != 0;

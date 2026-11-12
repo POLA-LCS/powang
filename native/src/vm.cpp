@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cwctype>
 #include <limits>
+#include <memory>
 #include <new>
 #include <optional>
 #include <string>
@@ -23,11 +24,34 @@
 #include "pwb/object.hpp"
 #include "pwb/opcodes.hpp"
 #include "pwb/opcodes_generated.hpp"
+#include "pwb/project.hpp"
 #include "pwb/value.hpp"
 #include "pwb/verifier.hpp"
 
 namespace pwb {
 namespace {
+
+enum class TransferKind : std::uint8_t { None, Jump, Return };
+
+struct Transfer {
+    TransferKind kind = TransferKind::None;
+    std::int32_t target = -1;
+};
+
+struct HandlerEntry {
+    std::int32_t start_ip = 0;
+    std::int32_t end_ip = 0;
+    std::int32_t catch_ip = -1;
+    std::int32_t finally_ip = -1;
+    std::int32_t resume_ip = -1;
+    std::uint32_t stack_depth = 0;
+    std::uint32_t local_watermark = 0;
+    std::uint32_t scope_depth = 0;
+    std::uint8_t kind = 0;
+    std::uint8_t state = 0;  // 0 active, 1 catch, 2 finally
+    Value pending_return = make_nova();
+    ErrorObject* pending_error = nullptr;
+};
 
 struct Frame {
     const CodeObject* code = nullptr;
@@ -44,6 +68,17 @@ struct Frame {
     bool has_receiver = false;
     bool is_module = false;
     bool is_function = false;
+
+    std::vector<HandlerEntry> handlers;
+    Transfer transfer;
+    Value pending_return = make_nova();
+    bool has_pending_return = false;
+    ErrorObject* pending_error = nullptr;
+    std::shared_ptr<FrameLifetime> lifetime;
+
+    bool is_alive() const {
+        return lifetime != nullptr && lifetime->alive;
+    }
 };
 
 struct Machine {
@@ -52,8 +87,17 @@ struct Machine {
     Bundle* bundle = nullptr;
     ModuleTable modules;
     std::vector<ModuleRuntime*> module_stack;
+    std::vector<Frame*> module_frames;
+    std::vector<FrameRecord> call_frames;
+    Frame* current_frame = nullptr;
+    std::string entry_path;
+    ProjectObject project;
+    bool has_project = false;
     std::size_t frame_depth = 0;
-    std::size_t max_frames = 256;
+    // Python reports a 900 frame language limit, but its own recursion limit
+    // trips first in practice. The native guard is lower so the C++ stack
+    // cannot overflow before the language error is raised.
+    std::size_t max_frames = 500;
 };
 
 Value execute(Frame& frame, Machine& machine);
@@ -73,6 +117,9 @@ Frame make_frame(
     frame.function = function;
     frame.is_module = is_module;
     frame.is_function = is_function;
+    static std::uint64_t generation = 0;
+    frame.lifetime = std::make_shared<FrameLifetime>();
+    frame.lifetime->generation = ++generation;
     for (std::size_t slot = 0; slot < code.local_names.size(); ++slot) {
         const std::string& name = code.local_names[slot];
         if (!name.empty()) {
@@ -89,6 +136,14 @@ Value module_member_value(
     const std::string& where);
 Value error_property_value(
     Machine& machine, ErrorObject* error, const std::string& name);
+Value project_member_value(
+    Machine& machine, ProjectObject* project, const std::string& name);
+Value call_extern_function(
+    Machine& machine,
+    Frame& frame,
+    const std::string& name,
+    const std::vector<Value>& positional,
+    const std::vector<std::pair<std::string, Value>>& named);
 TypeRuntime* resolve_qualified_type(
     Machine& machine,
     Frame& frame,
@@ -106,6 +161,23 @@ Value call_module_member(
     const std::string& where);
 void import_wildcard(
     ModuleRuntime& target, Frame& frame, Machine& machine);
+
+void sync_module_global(
+    Machine& machine,
+    ModuleRuntime& module,
+    const std::string& name,
+    const Value& value) {
+    for (Frame* frame : machine.module_frames) {
+        if (frame == nullptr || !frame->is_module
+            || frame->module != &module) {
+            continue;
+        }
+        const auto slot = frame->local_slots.find(name);
+        if (slot != frame->local_slots.end()) {
+            frame->locals[slot->second] = value;
+        }
+    }
+}
 
 void publish_module_local(
     Frame& frame, std::uint32_t slot, const Value& value) {
@@ -127,6 +199,7 @@ void publish_module_local(
 }
 
 std::int64_t value_as_int(const Value& value, const char* what);
+std::string runtime_type_name(const Value& value);
 
 std::string frame_label(const Frame& frame) {
     if (frame.code == nullptr) {
@@ -212,12 +285,20 @@ const std::string& global_name_at(
     return image.global_names[static_cast<std::size_t>(index)];
 }
 
-void require_numeric(const Value& value, const char* opcode) {
-    if (value.tag != Tag::Int && value.tag != Tag::BigInt
-        && value.tag != Tag::Num) {
-        runtime_fail(
-            std::string("native N1 ") + opcode
-            + " requires int or num operands, got " + tag_name(value.tag));
+bool is_numeric_operand(const Value& value) {
+    return value.tag == Tag::Int || value.tag == Tag::BigInt
+        || value.tag == Tag::Num;
+}
+
+void require_numeric_pair(
+    Machine& machine,
+    const Value& left,
+    const Value& right,
+    const char* symbol) {
+    if (!is_numeric_operand(left) || !is_numeric_operand(right)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "implicit operation",
+            runtime_type_name(left), symbol, runtime_type_name(right)));
     }
 }
 
@@ -322,8 +403,7 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
             as_array(right)->items.end());
         return make_array(machine.arena.allocate_array(std::move(items)));
     }
-    require_numeric(left, "ADD");
-    require_numeric(right, "ADD");
+    require_numeric_pair(machine, left, right, "+");
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
             || left.tag == Tag::Bool || right.tag == Tag::Bool) {
@@ -392,8 +472,7 @@ Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
         }
         return make_array(machine.arena.allocate_array(std::move(items)));
     }
-    require_numeric(left, "SUB");
-    require_numeric(right, "SUB");
+    require_numeric_pair(machine, left, right, "-");
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
             || left.tag == Tag::Bool || right.tag == Tag::Bool) {
@@ -461,8 +540,7 @@ Value arithmetic_mul(Machine& machine, const Value& left, const Value& right) {
         }
         return make_string(machine.arena.allocate_string(std::move(text)));
     }
-    require_numeric(left, "MUL");
-    require_numeric(right, "MUL");
+    require_numeric_pair(machine, left, right, "*");
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
             || left.tag == Tag::Bool || right.tag == Tag::Bool) {
@@ -540,8 +618,7 @@ Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
         return make_array(
             machine.arena.allocate_array(std::move(parts)));
     }
-    require_numeric(left, "DIV");
-    require_numeric(right, "DIV");
+    require_numeric_pair(machine, left, right, "/");
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
             || left.tag == Tag::Bool || right.tag == Tag::Bool
@@ -584,8 +661,7 @@ Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_mod(Machine& machine, const Value& left, const Value& right) {
-    require_numeric(left, "MOD");
-    require_numeric(right, "MOD");
+    require_numeric_pair(machine, left, right, "%");
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
             || left.tag == Tag::Bool || right.tag == Tag::Bool
@@ -812,6 +888,36 @@ Value load_constant(
     }
 }
 
+void apply_declared_spec_flags(
+    const CodeObject& code, std::int64_t spec_index, Value& value) {
+    if (spec_index < 0
+        || static_cast<std::uint64_t>(spec_index)
+            >= code.constants.size()) {
+        return;
+    }
+    const Constant& spec = code.constants[
+        static_cast<std::size_t>(spec_index)];
+    if (spec.kind != ConstantKind::Spec) {
+        return;
+    }
+    if (spec.text.find("\"const\":true") != std::string::npos) {
+        value.flags |= ValueConst;
+    }
+    if (spec.text.find("\"weak\":true") != std::string::npos) {
+        value.flags |= ValueWeak;
+    }
+}
+
+std::uint32_t code_index_of(
+    const Image& image, const CodeObject& code) {
+    const CodeObject* base = image.codes.data();
+    const CodeObject* pointer = &code;
+    if (pointer >= base && pointer < base + image.codes.size()) {
+        return static_cast<std::uint32_t>(pointer - base);
+    }
+    throw RuntimeError("code object does not belong to its image");
+}
+
 std::vector<Value> collect_arguments(Frame& frame, std::size_t count);
 std::vector<Value> flatten_arguments(
     const CallSite& site,
@@ -823,7 +929,8 @@ Value call_function(
     std::vector<Value> positional,
     std::vector<std::pair<std::string, Value>> named,
     const std::string& where,
-    const Value* receiver = nullptr);
+    const Value* receiver = nullptr,
+    const std::string& frame_name = "");
 Value call_builtin(
     Machine& machine,
     const std::string& name,
@@ -857,7 +964,10 @@ Value string_from_utf8(Machine& machine, const std::string& text);
 std::string string_to_utf8(const Value& value);
 std::int64_t value_as_int(const Value& value, const char* what);
 std::int64_t resolved_index(
-    const Value& index, std::size_t size, const char* what);
+    Machine& machine,
+    const Value& index,
+    std::size_t size,
+    const char* what);
 std::size_t slice_start(const Value& value, std::size_t size);
 std::size_t slice_end(const Value& value, std::size_t size);
 Value index_get(
@@ -934,6 +1044,208 @@ bool object_satisfies_trait(
     const ObjectObject& object,
     const TraitRuntime& trait);
 
+[[noreturn]] void stale_reference(Machine& machine) {
+    throw_error(error_reference(
+        machine.arena, "reference expression", "Stale reference",
+        {"the target frame is no longer active"}));
+}
+
+Value reference_get(Machine& machine, RefObject* reference) {
+    if (reference == nullptr) {
+        throw RuntimeError("null reference value");
+    }
+    switch (reference->kind) {
+        case RefObject::Kind::Local: {
+            Frame* local_frame =
+                static_cast<Frame*>(reference->frame);
+            if (local_frame == nullptr
+                || reference->lifetime == nullptr
+                || !reference->lifetime->alive
+                || reference->lifetime->generation
+                    != reference->generation
+                || reference->slot >= local_frame->locals.size()) {
+                stale_reference(machine);
+            }
+            return local_frame->locals[reference->slot];
+        }
+        case RefObject::Kind::Global: {
+            if (reference->module == nullptr) {
+                throw RuntimeError("null module in reference");
+            }
+            const auto found =
+                reference->module->globals.find(reference->name);
+            if (found == reference->module->globals.end()) {
+                throw_error(error_identifier_not_found(
+                    machine.arena, "reference expression",
+                    reference->name));
+            }
+            return found->second;
+        }
+        case RefObject::Kind::Field: {
+            if (reference->object == nullptr) {
+                throw RuntimeError("null object in reference");
+            }
+            const auto found =
+                reference->object->fields.find(reference->name);
+            if (found == reference->object->fields.end()) {
+                throw_error(error_identifier_not_found(
+                    machine.arena, "reference expression",
+                    reference->name));
+            }
+            return found->second;
+        }
+        case RefObject::Kind::Index:
+            if (reference->array == nullptr) {
+                throw RuntimeError("null array in reference");
+            }
+            if (reference->index >= reference->array->items.size()) {
+                throw_error(error_index_out_of_range(
+                    machine.arena,
+                    static_cast<std::int64_t>(reference->index),
+                    static_cast<std::int64_t>(
+                        reference->array->items.size())));
+            }
+            return reference->array->items[reference->index];
+    }
+    throw RuntimeError("unknown reference kind");
+}
+
+void reference_set(
+    Machine& machine, RefObject* reference, const Value& value) {
+    if (reference == nullptr) {
+        throw RuntimeError("null reference value");
+    }
+    const Value stored = copy_value(machine.arena, value);
+    switch (reference->kind) {
+        case RefObject::Kind::Local: {
+            Frame* local_frame =
+                static_cast<Frame*>(reference->frame);
+            if (local_frame == nullptr
+                || reference->lifetime == nullptr
+                || !reference->lifetime->alive
+                || reference->lifetime->generation
+                    != reference->generation
+                || reference->slot >= local_frame->locals.size()) {
+                stale_reference(machine);
+            }
+            local_frame->locals[reference->slot] = stored;
+            return;
+        }
+        case RefObject::Kind::Global:
+            if (reference->module == nullptr) {
+                throw RuntimeError("null module in reference");
+            }
+            if (reference->module->globals.count(reference->name) == 0) {
+                throw_error(error_identifier_not_found(
+                    machine.arena, "reference expression",
+                    reference->name));
+            }
+            reference->module->globals[reference->name] = stored;
+            sync_module_global(
+                machine, *reference->module, reference->name, stored);
+            return;
+        case RefObject::Kind::Field:
+            if (reference->object == nullptr) {
+                throw RuntimeError("null object in reference");
+            }
+            if (reference->object->fields.count(reference->name) == 0) {
+                throw_error(error_identifier_not_found(
+                    machine.arena, "reference expression",
+                    reference->name));
+            }
+            reference->object->fields[reference->name] = stored;
+            return;
+        case RefObject::Kind::Index:
+            if (reference->array == nullptr) {
+                throw RuntimeError("null array in reference");
+            }
+            if (reference->index >= reference->array->items.size()) {
+                throw_error(error_index_out_of_range(
+                    machine.arena,
+                    static_cast<std::int64_t>(reference->index),
+                    static_cast<std::int64_t>(
+                        reference->array->items.size())));
+            }
+            reference->array->items[reference->index] = stored;
+            return;
+    }
+    throw RuntimeError("unknown reference kind");
+}
+
+Value unwrap_reference(Machine& machine, const Value& value) {
+    if (!is_reference(value)) {
+        return value;
+    }
+    return reference_get(machine, as_reference(value));
+}
+
+void close_frame(Frame& frame) {
+    if (frame.lifetime != nullptr) {
+        frame.lifetime->alive = false;
+    }
+}
+
+bool handle_error(Frame& frame, ErrorObject* error, std::int32_t fault_ip) {
+    for (std::int32_t index =
+             static_cast<std::int32_t>(frame.handlers.size()) - 1;
+         index >= 0; --index) {
+        HandlerEntry& handler =
+            frame.handlers[static_cast<std::size_t>(index)];
+        if (handler.state == 2) {
+            continue;
+        }
+        if (!(handler.start_ip <= fault_ip && fault_ip < handler.end_ip)) {
+            continue;
+        }
+        if (handler.catch_ip >= 0 && handler.state == 0) {
+            frame.handlers.resize(static_cast<std::size_t>(index) + 1);
+            if (frame.stack.size() > handler.stack_depth) {
+                frame.stack.resize(handler.stack_depth);
+            }
+            handler.state = 1;
+            frame.pending_error = nullptr;
+            frame.pending_return = make_nova();
+            frame.has_pending_return = false;
+            frame.transfer = Transfer{};
+            frame.ip = static_cast<std::uint32_t>(handler.catch_ip);
+            frame.stack.push_back(make_error_value(error));
+            return true;
+        }
+        if (handler.finally_ip >= 0) {
+            frame.handlers.resize(static_cast<std::size_t>(index) + 1);
+            if (frame.stack.size() > handler.stack_depth) {
+                frame.stack.resize(handler.stack_depth);
+            }
+            handler.state = 2;
+            frame.pending_error = error;
+            frame.pending_return = make_nova();
+            frame.has_pending_return = false;
+            frame.transfer = Transfer{};
+            frame.ip = static_cast<std::uint32_t>(handler.finally_ip);
+            return true;
+        }
+        frame.handlers.erase(
+            frame.handlers.begin() + index);
+    }
+    return false;
+}
+
+void attach_frames(Machine& machine, ErrorObject* error) {
+    if (error == nullptr || !error->frames.empty()
+        || machine.call_frames.empty()) {
+        return;
+    }
+    for (auto it = machine.call_frames.rbegin();
+         it != machine.call_frames.rend(); ++it) {
+        FrameRecord record;
+        record.name = it->name;
+        record.file = it->file;
+        record.line = it->line;
+        record.column = it->column;
+        error->frames.push_back(std::move(record));
+    }
+}
+
 Value execute(Frame& frame, Machine& machine) {
     const Image& image = *frame.module->image;
     const Meta* meta = frame.module->meta;
@@ -942,6 +1254,12 @@ Value execute(Frame& frame, Machine& machine) {
         const DecodedInstruction instruction =
             decode_instruction(code.bytecode, frame.ip);
         frame.ip = instruction.next_offset;
+        if (instruction.offset < code.offset_to_span.size()) {
+            frame.span_index =
+                code.offset_to_span[instruction.offset];
+        }
+        machine.current_frame = &frame;
+        try {
         switch (static_cast<Opcode>(instruction.opcode)) {
             case Opcode::NOP:
                 break;
@@ -1313,7 +1631,12 @@ Value execute(Frame& frame, Machine& machine) {
                 const std::uint32_t slot =
                     operand_slot(instruction, code, "slot");
                 frame.declared[slot] = true;
-                const Value value = copy_value(machine.arena, pop_value(frame));
+                Value value = copy_value(machine.arena, pop_value(frame));
+                if (instruction.find("spec") != nullptr) {
+                    apply_declared_spec_flags(
+                        code, operand_integer(instruction, "spec"),
+                        value);
+                }
                 frame.locals[slot] = value;
                 publish_module_local(frame, slot, value);
                 push_value(frame, value);
@@ -1339,7 +1662,12 @@ Value execute(Frame& frame, Machine& machine) {
                     runtime_fail("Cannot redefine variables");
                 }
                 frame.module->declared_globals.insert(name);
-                const Value value = copy_value(machine.arena, pop_value(frame));
+                Value value = copy_value(machine.arena, pop_value(frame));
+                if (instruction.find("spec") != nullptr) {
+                    apply_declared_spec_flags(
+                        code, operand_integer(instruction, "spec"),
+                        value);
+                }
                 frame.module->globals[name] = value;
                 push_value(frame, value);
                 break;
@@ -1349,6 +1677,50 @@ Value execute(Frame& frame, Machine& machine) {
                 frame.module->declared_globals.insert(name);
                 frame.module->globals[name] = make_undef();
                 push_value(frame, make_undef());
+                break;
+            }
+            case Opcode::DECLARE_EXTERN: {
+                const std::int64_t spec_index =
+                    operand_integer(instruction, "extern");
+                if (meta == nullptr) {
+                    throw RuntimeError("extern metadata is required");
+                }
+                const MetaDescriptor* descriptor = find_descriptor(
+                    *meta, code_index_of(image, code),
+                    static_cast<std::uint32_t>(spec_index));
+                if (descriptor == nullptr
+                    || descriptor->kind != MetaDescriptor::Kind::Extern) {
+                    throw RuntimeError("missing native extern descriptor");
+                }
+                const std::size_t dot =
+                    descriptor->python_target.find('.');
+                const std::string module_name =
+                    dot == std::string::npos
+                    ? descriptor->python_target
+                    : descriptor->python_target.substr(0, dot);
+                bool allowed = false;
+                if (machine.has_project) {
+                    for (const std::string& candidate :
+                         machine.project.module_names) {
+                        if (candidate == module_name) {
+                            allowed = true;
+                            break;
+                        }
+                    }
+                }
+                if (!allowed) {
+                    throw_error(error_module(
+                        machine.arena, "extern",
+                        "Module is not allowed in the extern enviroment",
+                        {"module: " + module_name}));
+                }
+                if (descriptor->name.empty()) {
+                    throw_error(make_error(
+                        machine.arena, "EXTERN", "extern type",
+                        "extern type declarations are not supported yet",
+                        {"python type: " + descriptor->python_target}));
+                }
+                frame.module->externs[descriptor->name] = *descriptor;
                 break;
             }
             case Opcode::DECLARE_FUNCTION: {
@@ -1402,6 +1774,226 @@ Value execute(Frame& frame, Machine& machine) {
                     }
                 }
                 push_value(frame, make_function(function));
+                break;
+            }
+            case Opcode::REF_LOCAL: {
+                const std::uint32_t slot =
+                    operand_slot(instruction, code, "slot");
+                const Value value = frame.locals[slot];
+                const std::string name =
+                    slot < code.local_names.size()
+                    ? code.local_names[slot] : std::string();
+                if (is_reference(value)) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Cannot take a reference to a reference",
+                        {"'" + name + "' already holds a reference"}));
+                }
+                if (is_const(value)) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Cannot take a reference to a constant",
+                        {
+                            "'" + name + "' is constant",
+                            "references mutate the target, so the target "
+                            "must be assignable",
+                        }));
+                }
+                RefObject* reference = machine.arena.allocate_reference();
+                reference->kind = RefObject::Kind::Local;
+                reference->frame = &frame;
+                reference->lifetime = frame.lifetime;
+                reference->generation = frame.lifetime->generation;
+                reference->slot = slot;
+                reference->target_type = runtime_type_name(value);
+                reference->is_const = is_const(value);
+                push_value(frame, make_reference(reference));
+                break;
+            }
+            case Opcode::REF_GLOBAL: {
+                const std::string& name =
+                    global_name_at(image, instruction, "name");
+                const auto found = frame.module->globals.find(name);
+                if (found == frame.module->globals.end()) {
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "reference expression", name));
+                }
+                const Value value = found->second;
+                if (is_reference(value)) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Cannot take a reference to a reference",
+                        {"'" + name + "' already holds a reference"}));
+                }
+                if (is_const(value)) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Cannot take a reference to a constant",
+                        {
+                            "'" + name + "' is constant",
+                            "references mutate the target, so the target "
+                            "must be assignable",
+                        }));
+                }
+                RefObject* reference = machine.arena.allocate_reference();
+                reference->kind = RefObject::Kind::Global;
+                reference->module = frame.module;
+                reference->name = name;
+                reference->target_type = runtime_type_name(value);
+                reference->is_const = is_const(value);
+                push_value(frame, make_reference(reference));
+                break;
+            }
+            case Opcode::REF_FIELD: {
+                const Value owner = pop_value(frame);
+                const std::string& name =
+                    global_name_at(image, instruction, "field");
+                if (owner.tag == Tag::Module) {
+                    throw_error(error_module(
+                        machine.arena, "reference expression",
+                        "Modules are immutable",
+                        {"module properties cannot be referenced"}));
+                }
+                if (owner.tag != Tag::Obj) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Only object properties can be referenced",
+                        {"but " + std::string(tag_name(owner.tag))
+                             + " was encountered"}));
+                }
+                ObjectObject* object = as_object(owner);
+                const auto field = object->fields.find(name);
+                if (field == object->fields.end()) {
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "reference expression", name,
+                        {"perhaps it is a private property?"}));
+                }
+                if (object->private_fields.count(name) != 0
+                    && !private_access_allowed(machine, frame, *object)) {
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "reference expression", name,
+                        {"perhaps it is a private property?"}));
+                }
+                if (object->structure_locked) {
+                    throw_error(error_const(
+                        machine.arena, "reference expression",
+                        "object fields are locked",
+                        {"the object type ends with '!'"}));
+                }
+                if (is_reference(field->second)) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Cannot take a reference to a reference",
+                        {"'" + name + "' already holds a reference"}));
+                }
+                if (is_const(field->second)) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Cannot take a reference to a constant",
+                        {
+                            "'" + name + "' is constant",
+                            "references mutate the target, so the target "
+                            "must be assignable",
+                        }));
+                }
+                RefObject* reference = machine.arena.allocate_reference();
+                reference->kind = RefObject::Kind::Field;
+                reference->object = object;
+                reference->name = name;
+                reference->target_type =
+                    runtime_type_name(field->second);
+                reference->is_const = is_const(field->second);
+                push_value(frame, make_reference(reference));
+                break;
+            }
+            case Opcode::REF_INDEX: {
+                const Value index = pop_value(frame);
+                const Value container = pop_value(frame);
+                if (container.tag != Tag::Arr) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Only array elements can be referenced by index",
+                        {"but " + std::string(tag_name(container.tag))
+                             + " was encountered"}));
+                }
+                if (index.tag != Tag::Int) {
+                    throw_error(error_reference(
+                        machine.arena, "reference expression",
+                        "Array references need an int index",
+                        {"but " + std::string(tag_name(index.tag))
+                             + " was encountered"}));
+                }
+                ArrayObject* array = as_array(container);
+                const std::int64_t original = index.i;
+                std::int64_t position = original;
+                const std::int64_t length = static_cast<std::int64_t>(
+                    array->items.size());
+                if (position < 0) {
+                    position += length;
+                }
+                if (position < 0 || position >= length) {
+                    throw_error(error_index_out_of_range(
+                        machine.arena, original, length));
+                }
+                if (array->elements_locked) {
+                    throw_error(error_const(
+                        machine.arena, "reference expression",
+                        "array elements are locked",
+                        {"the element type ends with '!'"}));
+                }
+                RefObject* reference = machine.arena.allocate_reference();
+                reference->kind = RefObject::Kind::Index;
+                reference->array = array;
+                reference->index = static_cast<std::size_t>(position);
+                reference->target_type = runtime_type_name(
+                    array->items[static_cast<std::size_t>(position)]);
+                reference->is_const = is_const(
+                    array->items[static_cast<std::size_t>(position)]);
+                push_value(frame, make_reference(reference));
+                break;
+            }
+            case Opcode::LOAD_REF: {
+                const Value reference = pop_value(frame);
+                if (!is_reference(reference)) {
+                    throw RuntimeError("LOAD_REF expects a reference");
+                }
+                push_value(
+                    frame,
+                    reference_get(machine, as_reference(reference)));
+                break;
+            }
+            case Opcode::STORE_REF: {
+                const Value value = pop_value(frame);
+                const Value reference = pop_value(frame);
+                if (!is_reference(reference)) {
+                    throw RuntimeError("STORE_REF expects a reference");
+                }
+                RefObject* target = as_reference(reference);
+                const Value current = reference_get(machine, target);
+                (void)current;
+                if (target->is_const) {
+                    throw_error(error_const(
+                        machine.arena, "assignment", "constant assign",
+                        {"trying to assign into a const "
+                             + target->target_type}));
+                }
+                if (target->kind == RefObject::Kind::Field
+                    && target->object != nullptr
+                    && target->object->structure_locked) {
+                    throw_error(error_const(
+                        machine.arena, "assignment",
+                        "object fields are locked",
+                        {"the object type ends with '!'"}));
+                }
+                if (target->kind == RefObject::Kind::Index
+                    && target->array != nullptr
+                    && target->array->elements_locked) {
+                    throw_error(error_const(
+                        machine.arena, "assignment",
+                        "array elements are locked",
+                        {"the element type ends with '!'"}));
+                }
+                reference_set(machine, target, value);
                 break;
             }
             case Opcode::IMPORT: {
@@ -1538,6 +2130,13 @@ Value execute(Frame& frame, Machine& machine) {
                         machine, target, member, "access expression"));
                 break;
             }
+            case Opcode::LOAD_PROJECT:
+                push_value(
+                    frame,
+                    machine.has_project
+                        ? make_project(&machine.project)
+                        : make_nova());
+                break;
             case Opcode::EXPORT:
                 (void)pop_value(frame);
                 break;
@@ -1545,15 +2144,19 @@ Value execute(Frame& frame, Machine& machine) {
                 const std::string& name = global_name_at(image, instruction);
                 const auto found = frame.module->globals.find(name);
                 if (found == frame.module->globals.end()) {
-                    runtime_fail("identifier '" + name + "' not found");
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "", name));
                 }
-                push_value(frame, found->second);
+                push_value(
+                    frame, unwrap_reference(machine, found->second));
                 break;
             }
             case Opcode::STORE_GLOBAL: {
                 const std::string& name = global_name_at(image, instruction);
-                frame.module->globals[name] =
+                const Value value =
                     copy_value(machine.arena, pop_value(frame));
+                frame.module->globals[name] = value;
+                sync_module_global(machine, *frame.module, name, value);
                 break;
             }
             case Opcode::LOAD_NAME: {
@@ -1565,9 +2168,10 @@ Value execute(Frame& frame, Machine& machine) {
                 const std::string& name = global_name_at(image, instruction);
                 Value value;
                 if (!try_resolve_free(machine, frame, name, value)) {
-                    runtime_fail("identifier '" + name + "' not found");
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "", name));
                 }
-                push_value(frame, value);
+                push_value(frame, unwrap_reference(machine, value));
                 break;
             }
             case Opcode::STORE_NAME:
@@ -1697,14 +2301,30 @@ Value execute(Frame& frame, Machine& machine) {
             case Opcode::LOAD_LOCAL:
                 push_value(
                     frame,
-                    frame.locals[operand_slot(instruction, code, "slot")]);
+                    unwrap_reference(
+                        machine,
+                        frame.locals[operand_slot(
+                            instruction, code, "slot")]));
                 break;
-            case Opcode::STORE_LOCAL:
-            case Opcode::ASSIGN_LOCAL: {
+            case Opcode::STORE_LOCAL: {
                 const std::uint32_t slot =
                     operand_slot(instruction, code, "slot");
                 frame.locals[slot] =
                     copy_value(machine.arena, pop_value(frame));
+                publish_module_local(frame, slot, frame.locals[slot]);
+                break;
+            }
+            case Opcode::ASSIGN_LOCAL: {
+                const std::uint32_t slot =
+                    operand_slot(instruction, code, "slot");
+                const Value value = pop_value(frame);
+                if (is_reference(frame.locals[slot])) {
+                    reference_set(
+                        machine, as_reference(frame.locals[slot]), value);
+                    break;
+                }
+                frame.locals[slot] =
+                    copy_value(machine.arena, value);
                 publish_module_local(frame, slot, frame.locals[slot]);
                 break;
             }
@@ -1809,8 +2429,14 @@ Value execute(Frame& frame, Machine& machine) {
                 const std::int64_t flags =
                     operand_integer(instruction, "flags");
                 const Value owner = pop_value(frame);
+                if (owner.tag == Tag::Arr) {
+                    if ((flags & 2) != 0) {
+                        as_array(owner)->elements_locked = true;
+                    }
+                    break;
+                }
                 if (owner.tag != Tag::Obj) {
-                    runtime_fail("locks require an object value");
+                    runtime_fail("locks require an object value or array");
                 }
                 ObjectObject* object = as_object(owner);
                 if ((flags & 1) != 0) {
@@ -2107,7 +2733,8 @@ Value execute(Frame& frame, Machine& machine) {
                         frame,
                         call_function(
                             machine, function, std::move(positional),
-                            std::move(named), "call: " + site.name));
+                            std::move(named), "call: " + site.name,
+                            nullptr, site.name));
                     break;
                 }
                 if (is_builtin_name(site.name)) {
@@ -2125,10 +2752,41 @@ Value execute(Frame& frame, Machine& machine) {
                         call_function(
                             machine, as_function(variable),
                             std::move(positional), std::move(named),
-                            "call: " + site.name));
+                            "call: " + site.name, nullptr, site.name));
                     break;
                 }
-                runtime_fail("identifier '" + site.name + "' not found");
+                if (frame.module->externs.count(site.name) != 0) {
+                    push_value(
+                        frame,
+                        call_extern_function(
+                            machine, frame, site.name, positional, named));
+                    break;
+                }
+                throw_error(error_identifier_not_found(
+                    machine.arena, "call: " + site.name, site.name));
+            }
+            case Opcode::CALL_EXTERN: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                push_value(
+                    frame,
+                    call_extern_function(
+                        machine, frame, site.name, positional, named));
+                break;
             }
             case Opcode::CALL_MODULE: {
                 const std::int64_t call_index =
@@ -2247,7 +2905,9 @@ Value execute(Frame& frame, Machine& machine) {
                         call_function(
                             machine, function, positional, named,
                             "method call: " + runtime->info->name + "."
-                                + site.name));
+                                + site.name,
+                            nullptr,
+                            runtime->info->name + "." + site.name));
                     break;
                 }
                 if (receiver.tag != Tag::Obj) {
@@ -2319,7 +2979,8 @@ Value execute(Frame& frame, Machine& machine) {
                     frame,
                     call_function(
                         machine, function, positional, {},
-                        "method call: " + site.name, &receiver));
+                        "method call: " + site.name, &receiver,
+                        runtime_type_name(receiver) + "." + site.name));
                 break;
             }
             case Opcode::CALL_STATIC: {
@@ -2368,7 +3029,9 @@ Value execute(Frame& frame, Machine& machine) {
                     call_function(
                         machine, function, positional, named,
                         "method call: " + *site.type_name + "."
-                        + site.name));
+                        + site.name,
+                        nullptr,
+                        *site.type_name + "." + site.name));
                 break;
             }
             case Opcode::CALL_TRAIT: {
@@ -2457,7 +3120,8 @@ Value execute(Frame& frame, Machine& machine) {
                     call_function(
                         machine, function, arguments, {},
                         "trait call: " + trait_name + "." + site.name,
-                        &receiver));
+                        &receiver,
+                        runtime_type_name(receiver) + "." + site.name));
                 break;
             }
             case Opcode::CALL_OPERATOR: {
@@ -2554,7 +3218,8 @@ Value execute(Frame& frame, Machine& machine) {
                     frame,
                     call_function(
                         machine, function, arguments, {},
-                        "operator call: " + site.name, &receiver));
+                        "operator call: " + site.name, &receiver,
+                        runtime_type_name(receiver) + "." + site.name));
                 break;
             }
             case Opcode::CONSTRUCT: {
@@ -2695,7 +3360,8 @@ Value execute(Frame& frame, Machine& machine) {
                         constructors->second, positional, *owner->meta);
                     const Value result = call_function(
                         machine, function, positional, {},
-                        "instantiation", &object_value);
+                        "instantiation", &object_value,
+                        type_name + ".constructor");
                     push_value(
                         frame,
                         result.tag == Tag::Nova ? object_value : result);
@@ -2705,14 +3371,287 @@ Value execute(Frame& frame, Machine& machine) {
                     machine.arena, "instantiation", site.name,
                     {"user type doesn't exists"}));
             }
-            case Opcode::RETURN:
-                return pop_value(frame);
+            case Opcode::MAKE_ERROR: {
+                const std::int64_t spec_index =
+                    operand_integer(instruction, "spec");
+                if (meta == nullptr) {
+                    throw RuntimeError("error metadata is required");
+                }
+                const std::uint32_t code_index = code_index_of(image, code);
+                const MetaDescriptor* descriptor = find_descriptor(
+                    *meta, code_index, static_cast<std::uint32_t>(spec_index));
+                if (descriptor == nullptr
+                    || descriptor->kind != MetaDescriptor::Kind::ErrorSpec) {
+                    throw RuntimeError("missing native error descriptor");
+                }
+                const std::vector<Value> arguments = collect_arguments(
+                    frame, descriptor->argument_count);
+                const std::size_t required =
+                    descriptor->has_kind ? 2u : 1u;
+                if (arguments.size() < required) {
+                    throw_error(error_argument(
+                        machine.arena, descriptor->where,
+                        "not enought arguments"));
+                }
+                auto text_argument = [&](const Value& value,
+                                         const std::string& where) {
+                    if (value.tag != Tag::Str) {
+                        throw_error(error_type_match(
+                            machine.arena, where, "str",
+                            runtime_type_name(value)));
+                    }
+                    return as_string_const(value)->utf8;
+                };
+                std::string kind = "USER";
+                std::string message;
+                std::size_t detail_start = 1;
+                if (descriptor->has_kind) {
+                    kind = text_argument(
+                        arguments[0], "builtin: fail, kind");
+                    message = text_argument(
+                        arguments[1], "builtin: fail, message");
+                    detail_start = 2;
+                } else {
+                    message = text_argument(
+                        arguments[0], "builtin: error, message");
+                }
+                std::vector<std::string> details;
+                for (std::size_t index = detail_start;
+                     index < arguments.size(); ++index) {
+                    details.push_back(text_argument(
+                        arguments[index],
+                        descriptor->has_kind
+                            ? "builtin: fail, argument"
+                            : "builtin: error, argument"));
+                }
+                ErrorObject* created = make_error(
+                    machine.arena, kind, descriptor->where,
+                    message, std::move(details));
+                if (descriptor->mode == "value") {
+                    push_value(frame, make_error_value(created));
+                    break;
+                }
+                throw_error(created);
+            }
+            case Opcode::ERROR_PROPERTY: {
+                const std::int64_t property =
+                    operand_integer(instruction, "property");
+                const Value value = pop_value(frame);
+                if (!is_error(value)) {
+                    throw_error(error_type_match(
+                        machine.arena, "error property", "error",
+                        runtime_type_name(value)));
+                }
+                static const char* kErrorProperties[] = {
+                    "kind", "message", "details", "where",
+                    "line", "column", "cause", "frames",
+                };
+                const char* name = "kind";
+                if (property >= 0
+                    && static_cast<std::size_t>(property)
+                        < sizeof(kErrorProperties)
+                            / sizeof(kErrorProperties[0])) {
+                    name = kErrorProperties[
+                        static_cast<std::size_t>(property)];
+                }
+                push_value(
+                    frame,
+                    error_property_value(
+                        machine, as_error(value), name));
+                break;
+            }
+            case Opcode::THROW:
+            case Opcode::RETHROW: {
+                const Value value = pop_value(frame);
+                if (!is_error(value)) {
+                    throw_error(error_type_match(
+                        machine.arena, "throw", "error",
+                        runtime_type_name(value)));
+                }
+                throw_error(as_error(value));
+            }
+            case Opcode::PROPAGATE: {
+                const Value value = pop_value(frame);
+                if (!is_error(value)) {
+                    push_value(frame, value);
+                    break;
+                }
+                if (!frame.is_function) {
+                    throw_error(make_error(
+                        machine.arena, "LOGIC", "postfix unwrap",
+                        "Trying to use the '?' operator outside a "
+                        "function scope",
+                        {"the scope you are trying to unwrap from it's "
+                         "global"}));
+                }
+                bool handled = false;
+                for (auto it = frame.handlers.rbegin();
+                     it != frame.handlers.rend(); ++it) {
+                    if (it->state == 2) {
+                        continue;
+                    }
+                    if (!(it->start_ip
+                              <= static_cast<std::int32_t>(
+                                  instruction.offset)
+                          && static_cast<std::int32_t>(instruction.offset)
+                              < it->end_ip)) {
+                        continue;
+                    }
+                    if (it->finally_ip >= 0) {
+                        it->state = 2;
+                        frame.pending_return =
+                            copy_value(machine.arena, value);
+                        frame.has_pending_return = true;
+                        frame.pending_error = nullptr;
+                        frame.transfer = Transfer{
+                            TransferKind::Return, -1};
+                        frame.ip = static_cast<std::uint32_t>(
+                            it->finally_ip);
+                        handled = true;
+                        break;
+                    }
+                }
+                if (!handled) {
+                    return copy_value(machine.arena, value);
+                }
+                break;
+            }
+            case Opcode::TRY_BEGIN: {
+                const std::int32_t next_ip =
+                    static_cast<std::int32_t>(frame.ip);
+                const ExceptionEntry* entry = nullptr;
+                for (const ExceptionEntry& candidate :
+                     code.exception_table) {
+                    if (candidate.start_ip == next_ip) {
+                        entry = &candidate;
+                        break;
+                    }
+                }
+                if (entry == nullptr) {
+                    throw RuntimeError(
+                        "TRY_BEGIN at "
+                        + std::to_string(instruction.offset)
+                        + " has no exception entry");
+                }
+                HandlerEntry handler;
+                handler.start_ip = entry->start_ip;
+                handler.end_ip = entry->end_ip;
+                handler.catch_ip = entry->catch_ip;
+                handler.finally_ip = entry->finally_ip;
+                handler.resume_ip = entry->resume_ip;
+                handler.stack_depth = static_cast<std::uint32_t>(
+                    frame.stack.size());
+                handler.local_watermark = entry->local_watermark;
+                handler.kind = entry->kind;
+                handler.state = 0;
+                frame.handlers.push_back(std::move(handler));
+                break;
+            }
+            case Opcode::TRY_END:
+                if (!frame.handlers.empty()) {
+                    frame.handlers.pop_back();
+                }
+                break;
+            case Opcode::FINALLY_END: {
+                HandlerEntry handler;
+                bool has_handler = false;
+                if (!frame.handlers.empty()) {
+                    handler = frame.handlers.back();
+                    frame.handlers.pop_back();
+                    has_handler = true;
+                }
+                if (frame.pending_error != nullptr) {
+                    ErrorObject* error = frame.pending_error;
+                    frame.pending_error = nullptr;
+                    throw_error(error);
+                }
+                if (has_handler && handler.resume_ip >= 0) {
+                    frame.ip = static_cast<std::uint32_t>(
+                        handler.resume_ip);
+                }
+                break;
+            }
+            case Opcode::SET_RETURN:
+                frame.pending_return = copy_value(
+                    machine.arena, pop_value(frame));
+                frame.has_pending_return = true;
+                frame.pending_error = nullptr;
+                frame.transfer = Transfer{TransferKind::Return, -1};
+                break;
+            case Opcode::SET_TRANSFER: {
+                const std::int64_t kind =
+                    operand_integer(instruction, "kind");
+                if (kind == 0) {
+                    frame.transfer = Transfer{
+                        TransferKind::Jump,
+                        operand_target(instruction, code)};
+                } else {
+                    frame.transfer =
+                        Transfer{TransferKind::Return, -1};
+                }
+                frame.pending_error = nullptr;
+                frame.pending_return = make_nova();
+                frame.has_pending_return = false;
+                break;
+            }
+            case Opcode::JUMP_IF_TRANSFER:
+                if (frame.transfer.kind != TransferKind::None
+                    || frame.has_pending_return) {
+                    frame.ip = operand_target(instruction, code);
+                }
+                break;
+            case Opcode::APPLY_TRANSFER: {
+                if (frame.transfer.kind == TransferKind::None
+                    && !frame.has_pending_return) {
+                    break;
+                }
+                const Transfer transfer = frame.transfer;
+                frame.transfer = Transfer{};
+                if (transfer.kind == TransferKind::Jump) {
+                    frame.ip = static_cast<std::uint32_t>(
+                        transfer.target);
+                    break;
+                }
+                Value value = frame.has_pending_return
+                    ? frame.pending_return : make_nova();
+                frame.pending_return = make_nova();
+                frame.has_pending_return = false;
+                if (frame.is_function) {
+                    return copy_value(machine.arena, value);
+                }
+                return value;
+            }
+            case Opcode::ABANDON_FINALLY:
+                if (!frame.handlers.empty()
+                    && frame.handlers.back().state == 2) {
+                    frame.handlers.pop_back();
+                }
+                frame.pending_error = nullptr;
+                frame.pending_return = make_nova();
+                frame.has_pending_return = false;
+                frame.transfer = Transfer{};
+                break;
+            case Opcode::RETURN: {
+                const Value value = pop_value(frame);
+                if (frame.is_function) {
+                    return copy_value(machine.arena, value);
+                }
+                return value;
+            }
             case Opcode::CHECK_CANCEL:
                 break;
             default:
                 runtime_fail(
                     std::string("native N0 does not implement opcode ")
                     + instruction.spec->name);
+        }
+        } catch (const UnwindSignal& signal) {
+            if (handle_error(
+                    frame, signal.error,
+                    static_cast<std::int32_t>(instruction.offset))) {
+                continue;
+            }
+            throw;
         }
     }
     runtime_fail(
@@ -3024,9 +3963,10 @@ Value resolve_name(
     Machine& machine, Frame& frame, const std::string& name) {
     Value value;
     if (try_resolve_name(machine, frame, name, value)) {
-        return value;
+        return unwrap_reference(machine, value);
     }
-    runtime_fail("identifier '" + name + "' not found");
+    throw_error(error_identifier_not_found(
+        machine.arena, "", name));
 }
 
 void assign_name(
@@ -3036,7 +3976,15 @@ void assign_name(
     const Value& value) {
     const auto local = frame.local_slots.find(name);
     if (local != frame.local_slots.end()) {
+        if (is_reference(frame.locals[local->second])) {
+            reference_set(
+                machine, as_reference(frame.locals[local->second]),
+                value);
+            return;
+        }
         frame.locals[local->second] = value;
+        publish_module_local(
+            frame, static_cast<std::uint32_t>(local->second), value);
         return;
     }
     if (frame.function != nullptr) {
@@ -3055,6 +4003,7 @@ void assign_name(
     const auto global = frame.module->globals.find(name);
     if (global != frame.module->globals.end()) {
         global->second = value;
+        sync_module_global(machine, *frame.module, name, value);
         return;
     }
     runtime_fail("identifier '" + name + "' not found");
@@ -3100,12 +4049,56 @@ void set_parameter(
     Machine& machine,
     Frame& frame,
     const std::string& name,
-    const Value& value) {
+    const Value& value,
+    bool reference = false) {
     const auto slot = frame.local_slots.find(name);
     if (slot == frame.local_slots.end()) {
         runtime_fail("parameter slot not found: " + name);
     }
-    frame.locals[slot->second] = copy_value(machine.arena, value);
+    frame.locals[slot->second] = reference
+        ? value
+        : copy_value(machine.arena, value);
+}
+
+void check_reference_parameter(
+    Machine& machine,
+    FunctionObject* function,
+    const MetaParameter& parameter,
+    const Value& value) {
+    std::string expected = "any";
+    if (function->module != nullptr
+        && function->module->meta != nullptr) {
+        const Meta& meta = *function->module->meta;
+        if (parameter.type_index < meta.types.size()) {
+            expected = meta.types[parameter.type_index].name;
+            if (expected.empty()) {
+                expected = "any";
+            }
+        }
+    }
+    if (!is_reference(value)) {
+        throw_error(error_reference(
+            machine.arena, "function call",
+            "Expected a reference argument",
+            {
+                "parameter '" + parameter.name
+                    + "' is declared as &" + expected,
+                "pass it as &variable",
+                "but " + runtime_type_name(value) + " was encountered",
+            }));
+    }
+    RefObject* reference = as_reference(value);
+    if (expected != "any"
+        && reference->target_type != expected) {
+        throw_error(error_reference(
+            machine.arena, "function call",
+            "Reference type does not match",
+            {
+                "expected &" + expected,
+                "but &" + reference->target_type
+                    + " was encountered",
+            }));
+    }
 }
 
 Value run_default(
@@ -3132,9 +4125,11 @@ Value run_default(
     try {
         const Value value = execute(frame, machine);
         --machine.frame_depth;
+        close_frame(frame);
         return value;
     } catch (...) {
         --machine.frame_depth;
+        close_frame(frame);
         throw;
     }
 }
@@ -3181,9 +4176,17 @@ void bind_function(
         }
     }
     for (std::size_t index = 0; index < fixed; ++index) {
+        const bool reference =
+            meta_flag(spec.parameters[index], MetaParameterFlag::Reference);
         if (resolved[index].has_value()) {
+            if (reference) {
+                check_reference_parameter(
+                    machine, function, spec.parameters[index],
+                    *resolved[index]);
+            }
             set_parameter(
-                machine, frame, spec.parameters[index].name, *resolved[index]);
+                machine, frame, spec.parameters[index].name,
+                *resolved[index], reference);
             continue;
         }
         if (index < spec.min_argc) {
@@ -3192,11 +4195,17 @@ void bind_function(
                 + spec.parameters[index].name + "'");
         }
         if (spec.parameters[index].default_index >= 0) {
+            const Value default_value = run_default(
+                machine, *function->module,
+                spec.parameters[index].default_index, where);
+            if (reference) {
+                check_reference_parameter(
+                    machine, function, spec.parameters[index],
+                    default_value);
+            }
             set_parameter(
                 machine, frame, spec.parameters[index].name,
-                run_default(
-                    machine, *function->module,
-                    spec.parameters[index].default_index, where));
+                default_value, reference);
             continue;
         }
         runtime_fail(
@@ -3221,7 +4230,8 @@ Value call_function(
     std::vector<Value> positional,
     std::vector<std::pair<std::string, Value>> named,
     const std::string& where,
-    const Value* receiver) {
+    const Value* receiver,
+    const std::string& frame_name) {
     if (function == nullptr || function->metadata == nullptr
         || function->module == nullptr
         || function->module->image == nullptr
@@ -3236,7 +4246,12 @@ Value call_function(
     const CodeObject& code =
         module.image->codes[spec.code_index];
     if (machine.frame_depth >= machine.max_frames) {
-        runtime_fail("maximum frame depth exceeded");
+        throw_error(error_recursion(
+            machine.arena, "", "Maximum evaluation depth exceeded",
+            {
+                "depth limit: 900",
+                "check for unbounded or deeply nested recursion",
+            }));
     }
     Frame frame = make_frame(code, module, function, false, true);
     if (receiver == nullptr && function->has_receiver) {
@@ -3248,13 +4263,41 @@ Value call_function(
     }
     bind_function(
         machine, frame, function, positional, named, where);
+    FrameRecord record;
+    record.name = !frame_name.empty()
+        ? frame_name
+        : (function->metadata != nullptr
+               && !function->metadata->name.empty()
+           ? function->metadata->name : where);
+    record.file = machine.entry_path;
+    if (machine.current_frame != nullptr
+        && machine.current_frame->code != nullptr) {
+        const Frame& caller = *machine.current_frame;
+        if (caller.span_index < caller.code->spans.size()) {
+            const SourceSpan& span = caller.code->spans[caller.span_index];
+            record.line = static_cast<std::int32_t>(span.start_line);
+            record.column = static_cast<std::int32_t>(
+                span.start_column);
+        }
+    }
+    machine.call_frames.push_back(std::move(record));
     ++machine.frame_depth;
     try {
         const Value value = execute(frame, machine);
         --machine.frame_depth;
+        machine.call_frames.pop_back();
+        close_frame(frame);
         return value;
+    } catch (const UnwindSignal& signal) {
+        --machine.frame_depth;
+        attach_frames(machine, signal.error);
+        machine.call_frames.pop_back();
+        close_frame(frame);
+        throw;
     } catch (...) {
         --machine.frame_depth;
+        machine.call_frames.pop_back();
+        close_frame(frame);
         throw;
     }
 }
@@ -3287,16 +4330,24 @@ std::int64_t value_as_int(const Value& value, const char* what) {
 }
 
 std::int64_t resolved_index(
-    const Value& index, std::size_t size, const char* what) {
-    std::int64_t value = value_as_int(index, what);
+    Machine& machine,
+    const Value& index,
+    std::size_t size,
+    const char* what) {
+    if (index.tag != Tag::Int && index.tag != Tag::BigInt) {
+        throw_error(error_type_match(
+            machine.arena, std::string(what) + " indexing",
+            "int", runtime_type_name(index)));
+    }
+    const std::int64_t original = value_as_int(index, what);
+    std::int64_t value = original;
     const std::int64_t length = static_cast<std::int64_t>(size);
     if (value < 0) {
         value += length;
     }
     if (value < 0 || value >= length) {
-        runtime_fail(
-            std::string(what) + " index out of range: "
-            + std::to_string(value));
+        throw_error(error_index_out_of_range(
+            machine.arena, original, length));
     }
     return value;
 }
@@ -3337,33 +4388,54 @@ std::size_t slice_end(const Value& value, std::size_t size) {
     return static_cast<std::size_t>(index);
 }
 
+std::string python_value_repr(const Value& value) {
+    std::string data;
+    switch (value.tag) {
+        case Tag::Int: data = std::to_string(value.i); break;
+        case Tag::BigInt:
+            data = as_bigint_const(value)->value.format_decimal();
+            break;
+        case Tag::Num: data = format_number(value.d); break;
+        case Tag::Bool: data = value.b ? "True" : "False"; break;
+        case Tag::Str: data = as_string_const(value)->utf8; break;
+        case Tag::Char: {
+            append_utf8(data, value.c);
+            break;
+        }
+        case Tag::Nova: data = "None"; break;
+        default: data = format_value(value); break;
+    }
+    return "PowangType(" + runtime_type_name(value)
+        + " | defined: " + data + ")";
+}
+
 Value index_get(
     Machine& machine, const Value& container, const Value& index) {
-    (void)machine;
     switch (container.tag) {
         case Tag::Map: {
             const Value* found = map_get(*as_map(container), index);
             if (found == nullptr) {
-                runtime_fail("map key was not found");
+                throw_error(error_key(
+                    machine.arena, python_value_repr(index)));
             }
             return *found;
         }
         case Tag::Arr: {
             const auto& items = as_array(container)->items;
             const std::int64_t position =
-                resolved_index(index, items.size(), "arr");
+                resolved_index(machine, index, items.size(), "arr");
             return items[static_cast<std::size_t>(position)];
         }
         case Tag::Tup: {
             const auto& items = as_tuple(container)->items;
             const std::int64_t position =
-                resolved_index(index, items.size(), "tup");
+                resolved_index(machine, index, items.size(), "tup");
             return items[static_cast<std::size_t>(position)];
         }
         case Tag::Str: {
             const auto& points = as_string_const(container)->code_points;
             const std::int64_t position =
-                resolved_index(index, points.size(), "str");
+                resolved_index(machine, index, points.size(), "str");
             return make_char(points[static_cast<std::size_t>(position)]);
         }
         default:
@@ -3388,7 +4460,7 @@ Value index_set(
         case Tag::Arr: {
             auto& items = as_array(container)->items;
             const std::int64_t position =
-                resolved_index(index, items.size(), "arr");
+                resolved_index(machine, index, items.size(), "arr");
             items[static_cast<std::size_t>(position)] = stored;
             return stored;
         }
@@ -3654,7 +4726,7 @@ Value array_method(
         const Value index =
             arguments.size() > 1 ? arguments[1] : make_int(-1);
         const std::int64_t position =
-            resolved_index(index, size, "arr");
+            resolved_index(machine, index, size, "arr");
         return copy_value(
             machine.arena,
             source->items[static_cast<std::size_t>(position)]);
@@ -3744,7 +4816,7 @@ Value array_method(
             items.push_back(copy_value(machine.arena, item));
         }
         const std::int64_t position =
-            resolved_index(arguments[1], size, "arr");
+            resolved_index(machine, arguments[1], size, "arr");
         items[static_cast<std::size_t>(position)] =
             copy_value(machine.arena, arguments[2]);
         return make_array(
@@ -3782,7 +4854,7 @@ Value string_method(
         const Value index =
             arguments.size() > 1 ? arguments[1] : make_int(-1);
         const std::int64_t position =
-            resolved_index(index, source.size(), "str");
+            resolved_index(machine, index, source.size(), "str");
         return make_char(source[static_cast<std::size_t>(position)]);
     }
     if (name == "add") {
@@ -4076,7 +5148,7 @@ Value tuple_method(
         const Value index =
             arguments.size() > 1 ? arguments[1] : make_int(-1);
         const std::int64_t position =
-            resolved_index(index, source->items.size(), "tup");
+            resolved_index(machine, index, source->items.size(), "tup");
         return copy_value(
             machine.arena,
             source->items[static_cast<std::size_t>(position)]);
@@ -4313,6 +5385,86 @@ void build_export_table(
     }
 }
 
+Value project_member_value(
+    Machine& machine,
+    ProjectObject* project,
+    const std::string& name) {
+    if (project == nullptr) {
+        throw RuntimeError("null project value");
+    }
+    auto strings = [&](const std::vector<std::string>& items) {
+        std::vector<Value> values;
+        values.reserve(items.size());
+        for (const std::string& item : items) {
+            values.push_back(string_from_utf8(machine, item));
+        }
+        return make_array(
+            machine.arena.allocate_array(std::move(values)));
+    };
+    if (name == "modules") {
+        return strings(project->module_names);
+    }
+    if (name == "paths") {
+        return strings(project->paths);
+    }
+    if (name == "logLevel") {
+        return string_from_utf8(machine, project->log_level);
+    }
+    if (name == "allowSystem") {
+        return make_bool(project->allow_system);
+    }
+    if (name == "engine") {
+        return string_from_utf8(machine, project->engine);
+    }
+    throw_error(error_identifier_not_found(
+        machine.arena, "access expression", name,
+        {"fields: modules, paths, logLevel, allowSystem, engine"}));
+}
+
+Value call_extern_function(
+    Machine& machine,
+    Frame& frame,
+    const std::string& name,
+    const std::vector<Value>& positional,
+    const std::vector<std::pair<std::string, Value>>& named) {
+    const auto found = frame.module->externs.find(name);
+    if (found == frame.module->externs.end()) {
+        throw_error(error_identifier_not_found(
+            machine.arena, "extern", name));
+    }
+    const MetaDescriptor& descriptor = found->second;
+    if (!named.empty()) {
+        throw_error(error_argument(
+            machine.arena, "extern call",
+            "Named arguments are not supported for external functions"));
+    }
+    if (positional.size() < descriptor.min_argc) {
+        throw_error(error_argument(
+            machine.arena, "extern call", "not enought arguments"));
+    }
+    const bool variadic = !descriptor.parameters.empty()
+        && (descriptor.parameters.back().flags & 4) != 0;
+    if (!variadic
+        && positional.size() > descriptor.parameters.size()) {
+        throw_error(error_argument(
+            machine.arena, "extern call", "too many arguments"));
+    }
+    Value result;
+    try {
+        result = machine.host.call_extern(
+            descriptor.python_target,
+            positional.data(), positional.size());
+    } catch (const std::runtime_error& error) {
+        throw_error(error_development(
+            machine.arena, "extern function: " + name,
+            error.what(), {"extern '" + name + "'"}));
+    }
+    if (is_error(result)) {
+        throw_error(as_error(result));
+    }
+    return result;
+}
+
 Value module_member_value(
     Machine& machine,
     ModuleRuntime& module,
@@ -4381,12 +5533,13 @@ Value call_module_member(
             select_overload(entry.functions, positional, *module.meta);
         return call_function(
             machine, function, positional, {},
-            where.empty() ? site.name : where);
+            where.empty() ? site.name : where, nullptr, site.name);
     }
     const Value member = entry.value;
     if (is_function(member)) {
         return call_function(
-            machine, as_function(member), positional, {}, where);
+            machine, as_function(member), positional, {}, where,
+            nullptr, site.name);
     }
     throw_error(error_module(
         machine.arena, where, "Module member is not callable",
@@ -4545,14 +5698,27 @@ void initialize_module(ModuleRuntime& module, Machine& machine) {
     }
     module.init = ModuleRuntime::Init::Initializing;
     machine.module_stack.push_back(&module);
+    bool frame_pushed = false;
     try {
         const CodeObject& code =
             module.image->codes[info.code_index];
         Frame frame = make_frame(code, module, nullptr, true, false);
+        if (module.bind_project && machine.has_project) {
+            module.globals["project"] =
+                make_project(&machine.project);
+            module.declared_globals.insert("project");
+        }
+        machine.module_frames.push_back(&frame);
+        frame_pushed = true;
         (void)execute(frame, machine);
+        machine.module_frames.pop_back();
+        frame_pushed = false;
         build_export_table(module, machine, is_entry);
         module.init = ModuleRuntime::Init::Ready;
     } catch (const UnwindSignal& signal) {
+        if (frame_pushed) {
+            machine.module_frames.pop_back();
+        }
         machine.module_stack.pop_back();
         reset_module_runtime(module);
         if (!is_entry && signal.error != nullptr
@@ -4566,6 +5732,9 @@ void initialize_module(ModuleRuntime& module, Machine& machine) {
         }
         throw;
     } catch (...) {
+        if (frame_pushed) {
+            machine.module_frames.pop_back();
+        }
         machine.module_stack.pop_back();
         reset_module_runtime(module);
         throw;
@@ -4677,6 +5846,9 @@ Value load_object_member(
     if (owner.tag == Tag::Error) {
         return error_property_value(machine, as_error(owner), name);
     }
+    if (owner.tag == Tag::Project) {
+        return project_member_value(machine, as_project(owner), name);
+    }
     if (owner.tag == Tag::Map) {
         const Value key = string_from_utf8(machine, name);
         const Value* found = map_get(*as_map(owner), key);
@@ -4776,6 +5948,12 @@ Value store_object_member(
                  + (runtime != nullptr ? runtime->name
                                        : std::string("module"))
                  + "." + name + "'"}));
+    }
+    if (owner.tag == Tag::Project) {
+        throw_error(make_error(
+            machine.arena, "ASSIGN", "member assignment",
+            "Project values are read only",
+            {"cannot assign to 'project." + name + "'"}));
     }
     if (owner.tag != Tag::Obj) {
         runtime_fail("member assignment requires an object value");
@@ -4877,7 +6055,8 @@ Value call_type_method(
     FunctionObject* function = select_overload(
         methods->second, arguments, *module->meta);
     return call_function(
-        machine, function, arguments, {}, where, &receiver);
+        machine, function, arguments, {}, where, &receiver,
+        runtime_type_name(receiver) + "." + name);
 }
 
 Comparison compare_object_values(
@@ -4905,7 +6084,8 @@ Comparison compare_object_values(
                     methods->second, {right}, *module->meta);
                 const Value result = call_function(
                     machine, function, {right}, {},
-                    "operator compare", &left);
+                    "operator compare", &left,
+                    runtime_type_name(left) + ".compare");
                 const std::int64_t order =
                     value_as_int(result, "compare");
                 return {
@@ -5046,13 +6226,15 @@ int run_embedded_image_with_meta(
         const CodeObject& code = image.codes[image.entry_code];
         Frame frame = make_frame(
             code, machine.modules.entry(), nullptr, true, false);
-        (void)execute(frame, machine);
-        return 0;
-    } catch (const UnwindSignal& signal) {
-        if (signal.error != nullptr) {
-            host.write(signal.error->text() + "\n");
+        try {
+            (void)execute(frame, machine);
+        } catch (const UnwindSignal& signal) {
+            if (signal.error != nullptr) {
+                host.write(signal.error->text() + "\n");
+            }
+            return 1;
         }
-        return 1;
+        return 0;
     } catch (const ImageError& error) {
         host.write_error(
             std::string("native image error: ") + error.what() + "\n");
@@ -5094,19 +6276,30 @@ int run_embedded_bundle_with_meta(
         entry_line_count = bundle.entry_source_line_count;
         Machine machine{host};
         machine.bundle = &bundle;
-        machine.modules = ModuleTable(bundle, machine.arena);
-        initialize_module(machine.modules.entry(), machine);
-        return 0;
-    } catch (const UnwindSignal& signal) {
-        ErrorObject* error = signal.error;
-        if (error != nullptr) {
-            if (error->line == 0) {
-                error->line = static_cast<std::int32_t>(
-                    entry_line_count + 1);
-            }
-            host.write(error->text() + "\n");
+        machine.entry_path = bundle.entry_path;
+        machine.has_project = bundle.has_project;
+        if (bundle.has_project) {
+            machine.project.module_names = bundle.project.modules;
+            machine.project.paths = bundle.project.paths;
+            machine.project.log_level = bundle.project.log_level;
+            machine.project.allow_system = bundle.project.allow_system;
+            machine.project.engine = bundle.project.engine;
         }
-        return 1;
+        machine.modules = ModuleTable(bundle, machine.arena);
+        try {
+            initialize_module(machine.modules.entry(), machine);
+        } catch (const UnwindSignal& signal) {
+            ErrorObject* error = signal.error;
+            if (error != nullptr) {
+                if (error->line == 0) {
+                    error->line = static_cast<std::int32_t>(
+                        entry_line_count == 0 ? 1 : entry_line_count);
+                }
+                host.write(error->text() + "\n");
+            }
+            return 1;
+        }
+        return 0;
     } catch (const BundleError& error) {
         host.write_error(
             std::string("native bundle error: ") + error.what() + "\n");

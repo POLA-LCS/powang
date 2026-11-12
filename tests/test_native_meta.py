@@ -104,6 +104,26 @@ class NativeMetaTests(unittest.TestCase):
         self.assertEqual(type_names[add.parameters[0].type_index], "int")
         self.assertEqual(type_names[greet.parameters[0].type_index], "str")
 
+    def test_meta_version_two_descriptors(self) -> None:
+        image = self._image('value: int = 1;\nprint(fail("USER", "boom"));\n')
+        block = parse_meta(build_meta(image))
+        self.assertEqual(block.version, 2)
+        self.assertEqual(len(block.spec_map), len(image.type_specs))
+        errors = [
+            descriptor for descriptor in block.descriptors
+            if descriptor.kind == 0
+        ]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].mode, "value")
+        self.assertEqual(errors[0].where, "builtin: fail")
+        self.assertTrue(errors[0].has_kind)
+        self.assertEqual(errors[0].argument_count, 2)
+        self.assertTrue(
+            errors[0].code_index < len(image.codes)
+            and errors[0].constant_index
+            < len(image.codes[errors[0].code_index].constants)
+        )
+
     def test_meta_cpp_roundtrip(self) -> None:
         image = self._image()
         data = build_meta(image)

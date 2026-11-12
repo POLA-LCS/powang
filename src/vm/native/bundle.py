@@ -310,7 +310,7 @@ def collect_module_graph(image: ProgramImage, state: Any) -> Bundle:
     entry_node.image_bytes = image.to_bytes()
     entry_node.meta_bytes = build_meta(image)
     entry_node.exports = tuple(entry_info.exports)
-    entry_node.bind_project = bool(
+    entry_node.bind_project = not (
         isinstance(entry_ast, list) and _has_project_declaration(entry_ast)
     )
     _scan_image(
@@ -450,7 +450,7 @@ def _compile_imported_module(
     node.image_module_index = imported.entry_module
     module_info = imported.module_info(imported.entry_module)
     node.exports = tuple(module_info.exports)
-    node.bind_project = _has_project_declaration(ast)
+    node.bind_project = not _has_project_declaration(ast)
 
 
 def _serialize_graph(

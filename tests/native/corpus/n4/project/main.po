@@ -1,0 +1,5 @@
+use "./helper.po" as h;
+print(project.logLevel); print(" ");
+print(project.allowSystem); print(" ");
+print(project.engine); print(" ");
+print(h.level()); print("\n");

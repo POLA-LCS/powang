@@ -17,6 +17,7 @@
 #include "pwb/bigint.hpp"
 #include "pwb/image.hpp"
 #include "pwb/meta.hpp"
+#include "pwb/references.hpp"
 #include "pwb/value.hpp"
 
 namespace pwb {
@@ -73,6 +74,7 @@ struct TypeRuntime {
 
 struct ArrayObject {
     std::vector<Value> items;
+    bool elements_locked = false;
 };
 
 struct StringObject {
@@ -117,6 +119,7 @@ public:
         bool is_enum = false,
         std::string variant = "");
     ErrorObject* allocate_error();
+    RefObject* allocate_reference();
 
     std::size_t bigint_count() const noexcept;
     std::size_t array_count() const noexcept;
@@ -140,6 +143,7 @@ private:
     std::deque<SetObject> sets_;
     std::deque<ObjectObject> objects_;
     std::deque<ErrorObject> errors_;
+    std::deque<RefObject> references_;
 };
 
 std::string format_heap_value(const Value& value);

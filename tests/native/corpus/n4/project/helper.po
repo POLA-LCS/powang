@@ -1,0 +1,2 @@
+module helper;
+export fun level(): str >> project.logLevel;

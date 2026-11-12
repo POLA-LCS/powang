@@ -1,0 +1,13 @@
+fun may_fail(v: int): int? {
+    if v < 0 {
+        return fail("VALUE", "negative");
+    }
+    return v;
+}
+fun read(v: int): int? {
+    checked := may_fail(v)?;
+    return checked + 1;
+}
+print(read(4)); print("\n");
+bad := read(-1);
+print(bad.kind); print(" "); print(bad.message); print("\n");

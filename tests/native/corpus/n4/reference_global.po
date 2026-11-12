@@ -1,0 +1,5 @@
+fun bump(value: &int) { value += 1; }
+base := 1;
+fun bump_base() { &base :> bump; }
+bump_base();
+print(base); print("\n");

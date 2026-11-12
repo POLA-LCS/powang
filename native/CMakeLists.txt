@@ -43,7 +43,8 @@ enable_testing()
 add_executable(pwb_native_tests
     tests/test_bigint.cpp
     tests/test_value.cpp
-    tests/test_bundle.cpp)
+    tests/test_bundle.cpp
+    tests/test_errors.cpp)
 target_link_libraries(pwb_native_tests PRIVATE pwb_runtime)
 
 if(MSVC)

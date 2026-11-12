@@ -1,0 +1,5 @@
+fun take(v: &int) {
+    &v;
+}
+x := 1;
+take(&x);

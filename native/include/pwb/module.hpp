@@ -69,6 +69,7 @@ struct ModuleRuntime {
     std::unordered_map<std::string, std::string> wildcard_sources;
 
     std::unordered_map<std::string, ExportEntry> exports;
+    std::unordered_map<std::string, MetaDescriptor> externs;
 
     const BundleImport* import_for(std::uint32_t image_module_index) const;
 };

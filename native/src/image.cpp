@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "pwb/error.hpp"
+#include "pwb/opcodes.hpp"
 
 namespace pwb {
 namespace {
@@ -222,6 +223,22 @@ CodeObject read_code(Reader& reader) {
         reader.u32("code span table count");
     for (std::uint32_t index = 0; index < span_table_count; ++index) {
         code.span_table.push_back(reader.u32("code span index"));
+    }
+    code.offset_to_span.assign(bytecode_length, 0);
+    std::uint32_t span_offset = 0;
+    std::uint32_t span_instruction = 0;
+    while (span_offset < bytecode_length) {
+        try {
+            const DecodedInstruction instruction =
+                decode_instruction(code.bytecode, span_offset);
+            code.offset_to_span[span_offset] =
+                span_instruction < code.span_table.size()
+                ? code.span_table[span_instruction] : 0;
+            span_offset = instruction.next_offset;
+            ++span_instruction;
+        } catch (...) {
+            break;
+        }
     }
     const std::uint32_t exception_count = reader.u32("code exception count");
     for (std::uint32_t index = 0; index < exception_count; ++index) {

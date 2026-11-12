@@ -1,0 +1,45 @@
+fun increment(value: &int) { value += 1; }
+fun swap(a: &int, b: &int) {
+    temp := a;
+    a = b;
+    b = temp;
+}
+fun doubled(value: &int): int { return value * 2; }
+fun bump(value: &int) { value += 1; }
+
+type Point[+] {
+    | x: int;
+}
+type Box[+] {
+    | item: Point;
+}
+type Counter[+] {
+    | value: int;
+    fun this.bump_sugar() { this.value &> bump; }
+    fun this.bump_explicit() { &this.value :> bump; }
+}
+
+fun replace(value: &Point) { value = Point.[9]; }
+
+x := 10;
+increment(&x);
+print(x); print(" ");
+left := 1;
+right := 2;
+swap(&left, &right);
+print(left); print(" "); print(right); print(" ");
+print(doubled(&x)); print(" ");
+&left :> bump;
+print(left); print(" ");
+right &> bump;
+print(right); print(" ");
+counter := Counter.[1];
+counter.bump_sugar();
+counter.bump_explicit();
+print(counter.value); print(" ");
+values := [10, 20];
+values[0] &> bump;
+print(values[0]); print(" ");
+box := Box.[Point.[1]];
+&box.item :> replace;
+print(box.item.x); print("\n");

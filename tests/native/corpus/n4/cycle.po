@@ -1,0 +1,2 @@
+use "./fixtures/a.po" as a;
+print(a.fa());

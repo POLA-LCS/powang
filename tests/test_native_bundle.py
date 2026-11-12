@@ -7,6 +7,7 @@ import hashlib
 import struct
 import unittest
 
+from src.state import set_state
 from src.vm.compiler import compile_source
 from src.vm.native.bundle import (
     build_bundle,
@@ -17,10 +18,15 @@ from src.vm.native.build import ensure_runtime
 from src.vm.native.compiler import NativeBuildError
 from src.vm.native.loader import run_native
 from src.vm.native.meta import build_meta
+from src.vm.native.session import (
+    compile_native_file,
+    prepare_state,
+)
 from src.vm.native.source_gen import (
     render_bundle_cpp,
     render_temp_cpp,
 )
+from tests.helpers import ROOT
 
 
 SOURCE = "print(1 + 2);\n"
@@ -127,6 +133,59 @@ class NativeBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "3")
         self.assertEqual(result.stderr, "")
+
+    def test_bundle_module_graph(self) -> None:
+        path = ROOT / "tests" / "native" / "corpus" / "n4" / "modules.po"
+        state = prepare_state(path)
+        set_state(state)
+        try:
+            image = compile_source(
+                path.read_text(encoding="utf-8"),
+                path=str(path),
+                module_name="modules",
+                check=False,
+                state=state,
+            )
+            bundle = build_bundle_from_image(image, state)
+            again = build_bundle_from_image(image, state)
+        finally:
+            state.close()
+        self.assertEqual(bundle.entry_module, 0)
+        names = {module.name: module for module in bundle.modules}
+        self.assertIn("mathlib", names)
+        self.assertIn("legacy", names)
+        mathlib = names["mathlib"]
+        self.assertEqual(mathlib.status, 0)
+        self.assertEqual(
+            mathlib.exports,
+            (
+                ("version", "variable"),
+                ("add", "function"),
+                ("scaled", "function"),
+            ),
+        )
+        entry = bundle.modules[0]
+        targets = {item.target_module_id for item in entry.imports}
+        self.assertIn(mathlib.module_id, targets)
+        self.assertIn(names["legacy"].module_id, targets)
+        self.assertEqual(bundle.to_bytes(), again.to_bytes())
+        parsed = parse_bundle(bundle.to_bytes())
+        self.assertEqual(parsed.modules[0].imports, entry.imports)
+        self.assertEqual(parsed.modules[1].exports, mathlib.exports)
+
+    def test_bundle_project_block(self) -> None:
+        path = (
+            ROOT / "tests" / "native" / "corpus" / "n4"
+            / "project" / "main.po"
+        )
+        session = compile_native_file(path)
+        bundle = parse_bundle(session.bundle)
+        self.assertIsNotNone(bundle.project)
+        assert bundle.project is not None
+        self.assertEqual(bundle.project.log_level, "warning")
+        self.assertEqual(bundle.project.paths, (".",))
+        self.assertTrue(bundle.modules[0].bind_project)
+        self.assertTrue(bundle.modules[1].bind_project)
 
     def test_sha256_vectors(self) -> None:
         self.assertEqual(

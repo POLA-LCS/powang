@@ -179,6 +179,11 @@ ErrorObject* Arena::allocate_error() {
     return &errors_.back();
 }
 
+RefObject* Arena::allocate_reference() {
+    references_.push_back(RefObject{});
+    return &references_.back();
+}
+
 std::size_t Arena::bigint_count() const noexcept {
     return bigints_.size();
 }
@@ -467,6 +472,7 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
             ArrayObject* copy = arena.allocate_array();
             Value result = make_array(copy);
             result.flags = value.flags | ValueDefined;
+            copy->elements_locked = as_array(value)->elements_locked;
             memo.seen[value.ref] = result;
             const ArrayObject* source = as_array(value);
             copy->items.reserve(source->items.size());

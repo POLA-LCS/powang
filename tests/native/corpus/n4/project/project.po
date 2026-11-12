@@ -1,0 +1,7 @@
+module project;
+export project: Project = Project.[
+    modules >> [],
+    paths >> ["."],
+    logLevel >> "warning",
+    allowSystem >> false
+];

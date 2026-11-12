@@ -1,0 +1,14 @@
+e := fail("USER", "boom", "detail one");
+print(e.kind); print(" "); print(e.message); print(" ");
+print(size(e.details)); print("\n");
+try {
+    error("boom", "first detail");
+} catch problem {
+    print(problem.kind); print(" "); print(problem.message); print(" ");
+    print(size(problem.details)); print("\n");
+}
+fun raiser(): int? {
+    return fail("VALUE", "negative");
+}
+r := raiser();
+print(r.kind); print(" "); print(r.message); print("\n");

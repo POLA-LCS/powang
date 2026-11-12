@@ -31,9 +31,12 @@ from ..image import ProgramImage
 
 
 MAGIC = b"PWBM"
-VERSION = 1
+VERSION = 2
 FLAGS = 0
 ABSENT_INDEX = 0xFFFFFFFF
+
+DESCRIPTOR_ERROR_SPEC = 0
+DESCRIPTOR_EXTERN = 1
 
 KIND_NAMED = 0
 KIND_UNION = 1
@@ -108,6 +111,24 @@ class MetaFunction:
 
 
 @dataclass(frozen=True)
+class MetaDescriptor:
+    """One MAKE_ERROR or DECLARE_EXTERN descriptor record."""
+
+    kind: int
+    code_index: int
+    constant_index: int
+    mode: str = ""
+    where: str = ""
+    has_kind: bool = False
+    argument_count: int = 0
+    name: str = ""
+    python_target: str = ""
+    min_argc: int = 0
+    parameters: tuple[tuple[str, str, int], ...] = ()
+    return_type: str = ""
+
+
+@dataclass(frozen=True)
 class MetaBlock:
     """A fully parsed PWBM block."""
 
@@ -116,6 +137,8 @@ class MetaBlock:
     image_hash: bytes
     types: tuple[MetaTypeSpec, ...]
     functions: tuple[MetaFunction, ...]
+    spec_map: tuple[tuple[int, int], ...] = ()
+    descriptors: tuple[MetaDescriptor, ...] = ()
 
 
 def _u8(out: bytearray, value: int) -> None:
@@ -333,11 +356,148 @@ def _write_function(
         _i32(out, index)
 
 
+def _descriptor_name(value: Any) -> str:
+    """Extract a name from the compiler's extern reference descriptors."""
+    if isinstance(value, dict):
+        inner = value.get("value")
+        if isinstance(inner, dict):
+            name = inner.get("value")
+            return "" if name is None else str(name)
+        if isinstance(inner, str):
+            return inner
+        name = value.get("name")
+        return "" if name is None else str(name)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _collect_descriptors(image: ProgramImage) -> list[MetaDescriptor]:
+    descriptors: list[MetaDescriptor] = []
+    for code_index, code in enumerate(image.codes):
+        for constant_index, constant in enumerate(code.constants):
+            if constant.kind != "descriptor":
+                continue
+            value = constant.value
+            if not isinstance(value, dict):
+                continue
+            kind = value.get("kind")
+            if kind == "error_spec":
+                descriptors.append(MetaDescriptor(
+                    kind=DESCRIPTOR_ERROR_SPEC,
+                    code_index=code_index,
+                    constant_index=constant_index,
+                    mode=str(value.get("mode", "raise")),
+                    where=str(value.get("where", "builtin: error")),
+                    has_kind=bool(value.get("has_kind")),
+                    argument_count=int(value.get("argument_count", 1)),
+                ))
+            elif kind == "extern":
+                powang = value.get("powang")
+                declaration = (
+                    powang.get("value")
+                    if isinstance(powang, dict) else None
+                )
+                name = ""
+                min_argc = 0
+                parameters: list[tuple[str, str, int]] = []
+                return_type = "any"
+                if isinstance(declaration, dict):
+                    identifier = declaration.get("identifier")
+                    if isinstance(identifier, dict):
+                        name = str(identifier.get("value", ""))
+                    min_argc = int(declaration.get("min_argc", 0))
+                    raw_arguments = declaration.get("args")
+                    if isinstance(raw_arguments, list):
+                        for argument in raw_arguments:
+                            parameter = (
+                                argument.get("value")
+                                if isinstance(argument, dict) else None
+                            )
+                            if not isinstance(parameter, dict):
+                                continue
+                            parameter_identifier = parameter.get(
+                                "identifier")
+                            parameter_name = (
+                                str(parameter_identifier.get("value", ""))
+                                if isinstance(parameter_identifier, dict)
+                                else ""
+                            )
+                            spec = from_ast_node(parameter.get("type"))
+                            flags = 0
+                            if spec.reference:
+                                flags |= 1
+                            if spec.weak:
+                                flags |= 2
+                            if parameter.get("variadic"):
+                                flags |= 4
+                            parameters.append((
+                                parameter_name,
+                                spec.name or "any",
+                                flags,
+                            ))
+                    return_spec = from_ast_node(
+                        declaration.get("return"))
+                    return_type = return_spec.name or "any"
+                elif isinstance(value.get("parameters"), list):
+                    for parameter in value["parameters"]:
+                        if not isinstance(parameter, dict):
+                            continue
+                        flags = 0
+                        if parameter.get("reference"):
+                            flags |= 1
+                        if parameter.get("weak"):
+                            flags |= 2
+                        if parameter.get("variadic"):
+                            flags |= 4
+                        parameters.append((
+                            str(parameter.get("name", "")),
+                            str(parameter.get("type", "any")),
+                            flags,
+                        ))
+                descriptors.append(MetaDescriptor(
+                    kind=DESCRIPTOR_EXTERN,
+                    code_index=code_index,
+                    constant_index=constant_index,
+                    name=name or _descriptor_name(value.get("powang")),
+                    python_target=_descriptor_name(value.get("python")),
+                    min_argc=min_argc or int(value.get("min_argc", 0)),
+                    parameters=tuple(parameters),
+                    return_type=return_type
+                        or str(value.get("return_type", "any")),
+                ))
+    return descriptors
+
+
+def _write_descriptor(out: bytearray, descriptor: MetaDescriptor) -> None:
+    _u8(out, descriptor.kind)
+    _u32(out, descriptor.code_index)
+    _u32(out, descriptor.constant_index)
+    if descriptor.kind == DESCRIPTOR_ERROR_SPEC:
+        _string(out, descriptor.mode)
+        _string(out, descriptor.where)
+        _u8(out, 1 if descriptor.has_kind else 0)
+        _u32(out, descriptor.argument_count)
+        return
+    _string(out, descriptor.name)
+    _string(out, descriptor.python_target)
+    _u32(out, descriptor.min_argc)
+    _u32(out, len(descriptor.parameters))
+    for name, type_name, flags in descriptor.parameters:
+        _string(out, name)
+        _string(out, type_name)
+        _u8(out, flags)
+    _string(out, descriptor.return_type)
+
+
 def build_meta(image: ProgramImage) -> bytes:
     """Return the deterministic PWBM block for ``image``."""
     table = _TypeTable()
-    for node in image.type_specs:
-        table.add(from_ast_node(node))
+    image_specs = [from_ast_node(node) for node in image.type_specs]
+    spec_map = [
+        (index, table.add(spec))
+        for index, spec in enumerate(image_specs)
+    ]
 
     records: list[
         tuple[Any, dict[str, Any], list[int], list[tuple[str, int, int, int]]]
@@ -359,6 +519,8 @@ def build_meta(image: ProgramImage) -> bytes:
     for info, flags, defaults, parameters in records:
         _write_function(functions, info, flags, defaults, parameters)
 
+    descriptors = _collect_descriptors(image)
+
     out = bytearray()
     out += MAGIC
     _u16(out, VERSION)
@@ -368,6 +530,13 @@ def build_meta(image: ProgramImage) -> bytes:
     out += hashlib.sha256(image.to_bytes()).digest()
     out += body
     out += functions
+    _u32(out, len(spec_map))
+    for image_index, meta_index in spec_map:
+        _u32(out, image_index)
+        _u32(out, meta_index)
+    _u32(out, len(descriptors))
+    for descriptor in descriptors:
+        _write_descriptor(out, descriptor)
     return bytes(out)
 
 
@@ -419,7 +588,7 @@ def parse_meta(data: bytes) -> MetaBlock:
     if magic != MAGIC:
         raise ValueError(f"invalid PWBM magic: {magic!r}")
     version = reader.u16("version")
-    if version != VERSION:
+    if version not in (1, VERSION):
         raise ValueError(f"unsupported PWBM version: {version}")
     flags = reader.u16("flags")
     function_count = reader.u32("function count")
@@ -519,6 +688,20 @@ def parse_meta(data: bytes) -> MetaBlock:
             defaults=defaults,
         ))
 
+    spec_map: tuple[tuple[int, int], ...] = ()
+    descriptors: tuple[MetaDescriptor, ...] = ()
+    if version >= 2:
+        spec_map = tuple(
+            (
+                reader.u32("spec map image index"),
+                reader.u32("spec map meta index"),
+            )
+            for _ in range(reader.u32("spec map count"))
+        )
+        descriptors = tuple(
+            _read_descriptor(reader)
+            for _ in range(reader.u32("descriptor count"))
+        )
     if reader.remaining() != 0:
         raise ValueError(
             f"trailing bytes in PWBM metadata: {reader.remaining()}"
@@ -529,4 +712,45 @@ def parse_meta(data: bytes) -> MetaBlock:
         image_hash=image_hash,
         types=tuple(types),
         functions=tuple(functions),
+        spec_map=spec_map,
+        descriptors=descriptors,
     )
+
+
+def _read_descriptor(reader: _MetaReader) -> MetaDescriptor:
+    kind = reader.u8("descriptor kind")
+    code_index = reader.u32("descriptor code index")
+    constant_index = reader.u32("descriptor constant index")
+    if kind == DESCRIPTOR_ERROR_SPEC:
+        return MetaDescriptor(
+            kind=kind,
+            code_index=code_index,
+            constant_index=constant_index,
+            mode=reader.string("descriptor mode"),
+            where=reader.string("descriptor where"),
+            has_kind=bool(reader.u8("descriptor has kind")),
+            argument_count=reader.u32("descriptor argument count"),
+        )
+    if kind == DESCRIPTOR_EXTERN:
+        name = reader.string("descriptor name")
+        python_target = reader.string("descriptor python target")
+        min_argc = reader.u32("descriptor min argc")
+        parameters = tuple(
+            (
+                reader.string("descriptor parameter name"),
+                reader.string("descriptor parameter type"),
+                reader.u8("descriptor parameter flags"),
+            )
+            for _ in range(reader.u32("descriptor parameter count"))
+        )
+        return MetaDescriptor(
+            kind=kind,
+            code_index=code_index,
+            constant_index=constant_index,
+            name=name,
+            python_target=python_target,
+            min_argc=min_argc,
+            parameters=parameters,
+            return_type=reader.string("descriptor return type"),
+        )
+    raise ValueError(f"unknown PWBM descriptor kind: {kind}")
