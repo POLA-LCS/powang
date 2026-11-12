@@ -13,6 +13,7 @@ import zlib
 from dataclasses import dataclass
 
 from ..image import ProgramImage
+from .bundle import build_bundle
 from .meta import build_meta
 
 
@@ -32,6 +33,7 @@ class SourceOptions:
     entry_label: str = "program"
     emit_crc: bool = True
     emit_meta: bool = True
+    emit_bundle: bool = True
 
 
 def _write_byte_array(buffer: io.StringIO, name: str, data: bytes) -> None:
@@ -53,6 +55,7 @@ def render_temp_cpp_into(
         options = SourceOptions()
     data = image.to_bytes()
     meta = build_meta(image) if options.emit_meta else b""
+    bundle = build_bundle(image) if options.emit_bundle else b""
     buffer.write(HEADER_COMMENT)
     buffer.write("\n\n")
     buffer.write("#include <cstddef>\n")
@@ -72,10 +75,26 @@ def render_temp_cpp_into(
         buffer.write("\n")
         _write_byte_array(buffer, "kPwbMeta", meta)
         buffer.write("\nconstexpr std::size_t kPwbMetaSize = sizeof(kPwbMeta);\n")
+    if options.emit_bundle:
+        buffer.write("\n")
+        _write_byte_array(buffer, "kPwbBundle", bundle)
+        buffer.write(
+            "\nconstexpr std::size_t kPwbBundleSize = "
+            "sizeof(kPwbBundle);\n"
+        )
+        buffer.write(
+            "\n[[maybe_unused]] constexpr auto kPwbLegacyEntry = "
+            "&pwb::run_embedded_image_with_meta;\n"
+        )
     buffer.write("\n} // namespace\n\n")
     buffer.write("int main() {\n")
     buffer.write("    pwb::StdoutHost host;\n")
-    if options.emit_meta:
+    if options.emit_bundle:
+        buffer.write(
+            "    return pwb::run_embedded_bundle_with_meta("
+            "kPwbBundle, kPwbBundleSize, host);\n"
+        )
+    elif options.emit_meta:
         buffer.write(
             "    return pwb::run_embedded_image_with_meta("
             "kPwbImage, kPwbImageSize, kPwbMeta, kPwbMetaSize, host);\n"
@@ -105,3 +124,33 @@ def render_temp_cpp(
 ) -> str:
     """Return the complete translation unit as text."""
     return render_temp_cpp_buffer(image, options).getvalue()
+
+
+def render_bundle_cpp(
+    bundle: bytes,
+    options: SourceOptions | None = None,
+) -> str:
+    """Render a translation unit for a prebuilt PWBB bundle."""
+    if options is None:
+        options = SourceOptions()
+    buffer = io.StringIO()
+    buffer.write(HEADER_COMMENT)
+    buffer.write("\n\n")
+    buffer.write("#include <cstddef>\n")
+    buffer.write("#include <cstdint>\n")
+    buffer.write('\n#include "pwb/host.hpp"\n')
+    buffer.write('#include "pwb/vm.hpp"\n')
+    buffer.write("\nnamespace {\n\n")
+    _write_byte_array(buffer, "kPwbBundle", bundle)
+    buffer.write(
+        "\nconstexpr std::size_t kPwbBundleSize = sizeof(kPwbBundle);\n"
+    )
+    buffer.write("\n} // namespace\n\n")
+    buffer.write("int main() {\n")
+    buffer.write("    pwb::StdoutHost host;\n")
+    buffer.write(
+        "    return pwb::run_embedded_bundle_with_meta("
+        "kPwbBundle, kPwbBundleSize, host);\n"
+    )
+    buffer.write("}\n")
+    return buffer.getvalue()

@@ -25,4 +25,10 @@ int run_embedded_image_with_meta(
     std::size_t meta_size,
     Host& host);
 
+// Run the entry module of an embedded PWBB bundle.
+int run_embedded_bundle_with_meta(
+    const std::uint8_t* bundle_data,
+    std::size_t bundle_size,
+    Host& host);
+
 } // namespace pwb

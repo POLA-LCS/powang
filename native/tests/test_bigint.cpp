@@ -106,6 +106,7 @@ void test_large_division() {
 } // namespace
 
 void run_value_tests();
+void run_bundle_tests();
 
 int main() {
     test_parse_and_format();
@@ -115,5 +116,6 @@ int main() {
     test_division();
     test_large_division();
     run_value_tests();
+    run_bundle_tests();
     return pwb::test::failures() == 0 ? 0 : 1;
 }

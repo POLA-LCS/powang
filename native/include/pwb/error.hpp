@@ -37,4 +37,9 @@ public:
     explicit MetadataError(const std::string& message) : std::runtime_error(message) {}
 };
 
+class BundleError : public std::runtime_error {
+public:
+    explicit BundleError(const std::string& message) : std::runtime_error(message) {}
+};
+
 } // namespace pwb

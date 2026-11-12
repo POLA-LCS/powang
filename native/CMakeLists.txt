@@ -12,6 +12,8 @@ add_library(pwb_runtime STATIC
     src/disasm.cpp
     src/bigint.cpp
     src/meta.cpp
+    src/sha256.cpp
+    src/bundle.cpp
     src/object.cpp
     src/vm.cpp
     src/host.cpp)
@@ -38,7 +40,8 @@ enable_testing()
 
 add_executable(pwb_native_tests
     tests/test_bigint.cpp
-    tests/test_value.cpp)
+    tests/test_value.cpp
+    tests/test_bundle.cpp)
 target_link_libraries(pwb_native_tests PRIVATE pwb_runtime)
 
 if(MSVC)

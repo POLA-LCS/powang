@@ -10,6 +10,7 @@
 #include <io.h>
 #endif
 
+#include "pwb/bundle.hpp"
 #include "pwb/disasm.hpp"
 #include "pwb/error.hpp"
 #include "pwb/host.hpp"
@@ -29,6 +30,7 @@ void usage() {
         << "  disasm <image.pwb>  print the entry code disassembly\n"
         << "  verify <image.pwb>  verify the image\n"
         << "  meta <meta.pwbm>    print the PWBM metadata summary\n"
+        << "  bundle <file.pwbb>  print the PWBB bundle summary\n"
         << "  version             print the runtime version\n";
 }
 
@@ -68,7 +70,8 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (command != "run" && command != "disasm"
-        && command != "verify" && command != "meta") {
+        && command != "verify" && command != "meta"
+        && command != "bundle") {
         usage();
         return 2;
     }
@@ -91,6 +94,26 @@ int main(int argc, char** argv) {
             return 1;
         } catch (const std::exception& error) {
             std::cerr << "native metadata error: " << error.what() << "\n";
+            return 1;
+        }
+    }
+    if (command == "bundle") {
+        try {
+            const pwb::Bundle bundle =
+                pwb::parse_bundle(bytes.data(), bytes.size());
+            std::cout << pwb::format_bundle_summary(bundle);
+            return 0;
+        } catch (const pwb::BundleError& error) {
+            std::cerr << "native bundle error: " << error.what() << "\n";
+            return 1;
+        } catch (const pwb::ImageError& error) {
+            std::cerr << "native image error: " << error.what() << "\n";
+            return 1;
+        } catch (const pwb::MetadataError& error) {
+            std::cerr << "native metadata error: " << error.what() << "\n";
+            return 1;
+        } catch (const std::exception& error) {
+            std::cerr << "native internal error: " << error.what() << "\n";
             return 1;
         }
     }

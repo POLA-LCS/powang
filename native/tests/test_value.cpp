@@ -65,13 +65,7 @@ void run_value_tests() {
     check(array_value.tag == Tag::Arr, "array tag");
     check(pwb::is_array(array_value), "array predicate");
     check(pwb::truthy(array_value), "array truthy");
-    bool array_print_threw = false;
-    try {
-        (void)pwb::format_value(array_value);
-    } catch (const RuntimeError&) {
-        array_print_threw = true;
-    }
-    check(array_print_threw, "array print is not implemented in N1");
+    check_equal(pwb::format_value(array_value), "[1]", "array print");
 
     const Value spread_value = pwb::make_spread(&array);
     check(spread_value.tag == Tag::Spread, "spread tag");

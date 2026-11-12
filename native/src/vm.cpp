@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "pwb/bundle.hpp"
 #include "pwb/error.hpp"
 #include "pwb/image.hpp"
 #include "pwb/meta.hpp"
@@ -4092,6 +4093,42 @@ int run_embedded_image_with_meta(
 int run_embedded_image(
     const std::uint8_t* data, std::size_t size, Host& host) {
     return run_embedded_image_with_meta(data, size, nullptr, 0, host);
+}
+
+int run_embedded_bundle_with_meta(
+    const std::uint8_t* bundle_data,
+    std::size_t bundle_size,
+    Host& host) {
+    try {
+        const Bundle bundle = parse_bundle(bundle_data, bundle_size);
+        const BundleModule& entry =
+            bundle.modules[bundle.entry_module];
+        if (entry.status != 0) {
+            host.write_error(
+                "native bundle error: module '" + entry.name
+                + "' failed to load: " + entry.error_message + "\n");
+            return 1;
+        }
+        return run_embedded_image_with_meta(
+            entry.image.data(), entry.image.size(),
+            entry.meta.data(), entry.meta.size(), host);
+    } catch (const BundleError& error) {
+        host.write_error(
+            std::string("native bundle error: ") + error.what() + "\n");
+        return 1;
+    } catch (const ImageError& error) {
+        host.write_error(
+            std::string("native image error: ") + error.what() + "\n");
+        return 1;
+    } catch (const MetadataError& error) {
+        host.write_error(
+            std::string("native metadata error: ") + error.what() + "\n");
+        return 1;
+    } catch (const std::exception& error) {
+        host.write_error(
+            std::string("native internal error: ") + error.what() + "\n");
+        return 1;
+    }
 }
 
 } // namespace pwb
