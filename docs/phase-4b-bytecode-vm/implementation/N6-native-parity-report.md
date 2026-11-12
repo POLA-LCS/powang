@@ -50,8 +50,9 @@ Small program runs are dominated by the integrated `g++` compile. The warm
 executable cache keys on the generated source and the runtime library
 timestamp. A small program measured 1.12 seconds cold and 0.29 seconds warm,
 against 0.24 seconds for the tree walker, a warm ratio of 1.23 times. The
-`native clean` command removes the cache. A 50 KB image timing is still to be
-recorded.
+`native clean` command removes the cache. A 50 KB source program with a 50,000
+character string compiled in 1.12 seconds cold and 0.46 seconds warm, below the
+ten second cold and five second warm compile gates.
 
 ## N6 features delivered
 
@@ -90,7 +91,6 @@ zero, every task settles, no process leaks and the expected task sums match.
 
 1. Seeded native fuzz differential over 1000 programs on two seeds. The first
    mismatch on seed 2026 is recorded above.
-2. A 50 KB image compile timing record.
-3. Optional inline caches and threaded dispatch.
-4. The default engine decision and the `0.25.0` release.
-5. Native method access-control and ambiguity error text parity.
+2. Optional inline caches and threaded dispatch.
+3. The default engine decision and the `0.25.0` release.
+4. Native method access-control and ambiguity error text parity.
