@@ -30,11 +30,17 @@ def print_usage():
     print('    --no-warnings           Do not print non-fatal warnings.')
     print('    --debug                 Print a full traceback for internal errors.')
     print('    --allow-system          Allow system() while an HTTP server is running.')
-    print('    --engine=tree|vm        Select the execution engine. Default: vm.')
+    print('    --engine=tree|vm|native Select the execution engine. Default: vm.')
     ## `--help` intentionally exits with status 1, as documented above.
     return 1
 
 def initialize_repl(state=None, engine: str = 'tree'):
+    if engine == 'native':
+        raise powang_throw(powang_error_format(
+            'USAGE', 'repl',
+            'the native engine requires an input file',
+            ['start the REPL with --engine=tree or --engine=vm'],
+        ))
     ## The REPL owns one state for the whole session so variables declared on
     ## one line stay visible on the next. File runs never pass a state and
     ## therefore start fresh on every invocation.
@@ -154,6 +160,20 @@ def run_project(engine_args: list[str] | None = None) -> int:
     entry = find_entry_module(root)
     set_state(state)
     set_argv([])
+    if engine == 'native':
+        from src.vm.native.compiler import NativeBuildError
+        from src.vm.native.session import run_native_file
+        try:
+            result = run_native_file(entry)
+        except PowangError as error:
+            print(str(error))
+            return 1
+        except NativeBuildError as error:
+            print(f"native build error: {error}", file=_sys.stderr)
+            return 1
+        _sys.stdout.write(result.stdout)
+        _sys.stderr.write(result.stderr)
+        return result.returncode
     content = get_file_content(str(entry))
     if engine == 'vm':
         from src.vm.interpreter import run_program
@@ -173,7 +193,8 @@ def main(args: list[str]):
         engine_args = [argument for argument in args[1:] if argument.startswith('--engine=')]
         if len(args) - 1 != len(engine_args):
             raise powang_throw(powang_error_format(
-                'USAGE', 'run', 'powang run accepts only --engine=tree or --engine=vm',
+                'USAGE', 'run',
+                'powang run accepts only --engine=tree, --engine=vm or --engine=native',
             ))
         return run_project(engine_args)
     result = arguments_handler(args)
@@ -252,6 +273,27 @@ def main(args: list[str]):
                     print(str(type_error))
                 return 1
             return 0
+        if engine == 'native':
+            if ast_output:
+                raise powang_throw(powang_error_format(
+                    'USAGE', None,
+                    '--ast is not supported with --engine=native',
+                ))
+            from src.vm.native.compiler import NativeBuildError
+            from src.vm.native.session import run_native_file
+            try:
+                result = run_native_file(
+                    input_file, script_args, timeout=60.0,
+                )
+            except PowangError as error:
+                print(str(error))
+                return 1
+            except NativeBuildError as error:
+                print(f"native build error: {error}", file=_sys.stderr)
+                return 1
+            _sys.stdout.write(result.stdout)
+            _sys.stderr.write(result.stderr)
+            return result.returncode
         if engine == 'vm':
             if ast_output:
                 import json
@@ -299,11 +341,11 @@ def resolve_engine(args: list[str], project_value=None) -> str:
     if engine is None:
         engine = 'vm'
     engine = engine.strip().lower()
-    if engine not in {'tree', 'vm'}:
+    if engine not in {'tree', 'vm', 'native'}:
         raise powang_throw(powang_error_format(
             'USAGE', None, 'Invalid engine', [
                 f"engine: {engine}",
-                "expected tree or vm",
+                "expected tree, vm or native",
             ]))
     return engine
 

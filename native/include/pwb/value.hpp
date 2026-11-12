@@ -556,6 +556,7 @@ inline std::string format_number(double value) {
 
 std::string format_heap_value(const Value& value);
 bool heap_truthy(const Value& value);
+std::string format_undef_value(const Value& value);
 
 // Format one value using the print rules for the native scalars and heap
 // values.
@@ -564,8 +565,7 @@ inline std::string format_value(const Value& value) {
         case Tag::Nova:
             return "nova";
         case Tag::Undef:
-            throw RuntimeError(
-                "native N0 cannot print an undefined value");
+            return format_undef_value(value);
         case Tag::Bool:
             return value.b ? "true" : "false";
         case Tag::Int:

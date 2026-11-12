@@ -10,6 +10,8 @@
 
 namespace pwb {
 
+class Arena;
+
 class Host {
 public:
     virtual ~Host() = default;
@@ -23,7 +25,8 @@ public:
     virtual Value call_extern(
         std::string_view name,
         const Value* arguments,
-        std::size_t argument_count);
+        std::size_t argument_count,
+        Arena& arena);
 };
 
 // Host that writes output to standard output and diagnostics to standard
@@ -32,6 +35,11 @@ class StdoutHost : public Host {
 public:
     void write(const std::string& text) override;
     void write_error(const std::string& text) override;
+    Value call_extern(
+        std::string_view name,
+        const Value* arguments,
+        std::size_t argument_count,
+        Arena& arena) override;
 };
 
 } // namespace pwb

@@ -237,6 +237,14 @@ std::size_t Arena::error_count() const noexcept {
     return errors_.size();
 }
 
+std::string format_undef_value(const Value& value) {
+    if (value.ref != nullptr) {
+        const StringObject* text = as_string_const(value);
+        return "<" + text->utf8 + ": undefined>";
+    }
+    return "<any: undefined>";
+}
+
 std::string format_heap_value(const Value& value) {
     switch (value.tag) {
         case Tag::Str: {

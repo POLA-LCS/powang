@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -70,6 +71,7 @@ struct ModuleRuntime {
 
     std::unordered_map<std::string, ExportEntry> exports;
     std::unordered_map<std::string, MetaDescriptor> externs;
+    std::deque<FunctionMetadata> extern_metadata;
 
     const BundleImport* import_for(std::uint32_t image_module_index) const;
 };

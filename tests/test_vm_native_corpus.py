@@ -6,12 +6,10 @@ import unittest
 from pathlib import Path
 
 from src.error import PowangError
-from src.vm.compiler import compile_source
 from src.vm.native.build import ensure_runtime
 from src.vm.native.compiler import NativeBuildError
-from src.vm.native.loader import run_native
 from src.vm.native.session import run_native_file
-from tests.helpers import ROOT, run_file, run_source
+from tests.helpers import ROOT, run_file
 
 
 class NativeCorpusTests(unittest.TestCase):
@@ -27,15 +25,8 @@ class NativeCorpusTests(unittest.TestCase):
         self.assertTrue(programs)
         for path in programs:
             with self.subTest(program=path.name):
-                source = path.read_text(encoding="utf-8")
-                image = compile_source(
-                    source,
-                    path=str(path),
-                    module_name=path.stem,
-                    check=False,
-                )
-                native = run_native(image)
-                python = run_source(source, engine="vm")
+                native = run_native_file(path)
+                python = run_file(path, engine="vm")
                 self.assertEqual(
                     native.returncode, python.returncode, path.name,
                 )

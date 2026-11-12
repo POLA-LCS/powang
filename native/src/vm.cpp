@@ -152,6 +152,36 @@ Value call_extern_function(
     const std::string& name,
     const std::vector<Value>& positional,
     const std::vector<std::pair<std::string, Value>>& named);
+Value call_extern_descriptor(
+    Machine& machine,
+    const MetaDescriptor& descriptor,
+    const std::string& name,
+    const std::vector<Value>& positional,
+    const std::vector<std::pair<std::string, Value>>& named);
+Value cast_value(
+    Machine& machine,
+    Frame& frame,
+    const Value& value,
+    const std::string& target);
+bool match_pattern(
+    Machine& machine,
+    Frame& frame,
+    const PatternDescriptor& pattern,
+    const Value& subject);
+Value destructure_value(
+    Machine& machine,
+    Frame& frame,
+    const std::string& descriptor,
+    const Value& source);
+Value property_default_value(
+    Machine& machine, const TypeRuntime& type, const TypeProperty& property);
+void initialize_object_fields(
+    Machine& machine, ObjectObject* object, const TypeRuntime& type);
+Value coerce_declared_value(
+    Machine& machine,
+    Frame& frame,
+    const std::string& type_name,
+    const Value& value);
 bool function_is_async(const FunctionObject* function);
 void run_task(Machine& machine, TaskObject* task);
 TaskObject* create_task(
@@ -328,7 +358,7 @@ const std::string& global_name_at(
 
 bool is_numeric_operand(const Value& value) {
     return value.tag == Tag::Int || value.tag == Tag::BigInt
-        || value.tag == Tag::Num;
+        || value.tag == Tag::Num || value.tag == Tag::Bool;
 }
 
 void require_numeric_pair(
@@ -425,6 +455,21 @@ Value make_integer_result(Machine& machine, const BigInt& value) {
 }
 
 Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
+    if (left.tag == Tag::Bool && right.tag == Tag::Bool) {
+        return make_bool(left.b || right.b);
+    }
+    if (left.tag == Tag::Char && right.tag == Tag::Str) {
+        std::u32string text(1, left.c);
+        text += as_string_const(right)->code_points;
+        return make_string(
+            machine.arena.allocate_string(std::move(text)));
+    }
+    if (left.tag == Tag::Char && right.tag == Tag::Char) {
+        std::u32string text(1, left.c);
+        text.push_back(right.c);
+        return make_string(
+            machine.arena.allocate_string(std::move(text)));
+    }
     if (left.tag == Tag::Str) {
         std::u32string text = as_string_const(left)->code_points;
         if (right.tag == Tag::Str) {
@@ -443,6 +488,22 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
             as_array(right)->items.begin(),
             as_array(right)->items.end());
         return make_array(machine.arena.allocate_array(std::move(items)));
+    }
+    if (left.tag == Tag::Map && right.tag == Tag::Map) {
+        MapObject* result = machine.arena.allocate_map();
+        for (const auto& entry : as_map(left)->entries) {
+            map_set(
+                *result,
+                copy_value(machine.arena, entry.first),
+                copy_value(machine.arena, entry.second));
+        }
+        for (const auto& entry : as_map(right)->entries) {
+            map_set(
+                *result,
+                copy_value(machine.arena, entry.first),
+                copy_value(machine.arena, entry.second));
+        }
+        return make_map(result);
     }
     require_numeric_pair(machine, left, right, "+");
     if (is_integer_value(left) && is_integer_value(right)) {
@@ -475,6 +536,9 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
+    if (left.tag == Tag::Bool && right.tag == Tag::Bool) {
+        return make_bool(left.b && !right.b);
+    }
     if (left.tag == Tag::Str && right.tag == Tag::Str) {
         std::u32string text = as_string_const(left)->code_points;
         const std::u32string needle =
@@ -544,6 +608,9 @@ Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_mul(Machine& machine, const Value& left, const Value& right) {
+    if (left.tag == Tag::Bool && right.tag == Tag::Bool) {
+        return make_bool(left.b && right.b);
+    }
     if (left.tag == Tag::Str && right.tag == Tag::Str) {
         const std::u32string& text = as_string_const(left)->code_points;
         const std::u32string& needle =
@@ -635,7 +702,73 @@ Value integer_divmod(
         machine, want_remainder ? remainder : quotient);
 }
 
+Value chunk_size_error(
+    Machine& machine, const char* type_name, std::int64_t size) {
+    throw_error(make_error(
+        machine.arena, "VALUE", std::string(type_name) + " chunking",
+        "Chunk size must be positive",
+        {std::string(type_name)
+             + " cannot be divided into chunks of non-positive size "
+             + std::to_string(size)}));
+}
+
 Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
+    if (left.tag == Tag::Str && is_integer_value(right)) {
+        const std::int64_t size = value_as_int(right, "string chunking");
+        if (size <= 0) {
+            return chunk_size_error(machine, "str", size);
+        }
+        const std::u32string& text = as_string_const(left)->code_points;
+        std::vector<Value> chunks;
+        std::size_t end = text.size();
+        while (end > 0) {
+            const std::size_t start =
+                end > static_cast<std::size_t>(size)
+                ? end - static_cast<std::size_t>(size) : 0;
+            chunks.push_back(make_string(
+                machine.arena.allocate_string(
+                    text.substr(start, end - start))));
+            end = start;
+        }
+        std::reverse(chunks.begin(), chunks.end());
+        return make_array(
+            machine.arena.allocate_array(std::move(chunks)));
+    }
+    if (is_integer_value(left) && right.tag == Tag::Str) {
+        const std::int64_t size = value_as_int(left, "str chunking");
+        if (size <= 0) {
+            return chunk_size_error(machine, "str", size);
+        }
+        const std::u32string& text = as_string_const(right)->code_points;
+        std::vector<Value> chunks;
+        for (std::size_t start = 0; start < text.size();
+             start += static_cast<std::size_t>(size)) {
+            chunks.push_back(make_string(
+                machine.arena.allocate_string(text.substr(
+                    start, static_cast<std::size_t>(size)))));
+        }
+        return make_array(
+            machine.arena.allocate_array(std::move(chunks)));
+    }
+    if (is_integer_value(left) && right.tag == Tag::Arr) {
+        const std::int64_t size = value_as_int(left, "arr chunking");
+        if (size <= 0) {
+            return chunk_size_error(machine, "arr", size);
+        }
+        const std::vector<Value>& items = as_array(right)->items;
+        std::vector<Value> chunks;
+        for (std::size_t start = 0; start < items.size();
+             start += static_cast<std::size_t>(size)) {
+            const std::size_t end = std::min(
+                items.size(), start + static_cast<std::size_t>(size));
+            chunks.push_back(make_array(machine.arena.allocate_array(
+                std::vector<Value>(
+                    items.begin() + static_cast<std::ptrdiff_t>(start),
+                    items.begin() + static_cast<std::ptrdiff_t>(end)))));
+        }
+        return make_array(
+            machine.arena.allocate_array(std::move(chunks)));
+    }
     if (left.tag == Tag::Str && right.tag == Tag::Str) {
         const std::u32string& text = as_string_const(left)->code_points;
         const std::u32string& separator =
@@ -929,6 +1062,29 @@ Value load_constant(
     }
 }
 
+std::string constant_type_name(const Constant& constant) {
+    const std::size_t name_at =
+        constant.text.find("\"value\":\"");
+    if (name_at == std::string::npos) {
+        return "";
+    }
+    const std::size_t start = name_at + 9;
+    const std::size_t end = constant.text.find('"', start);
+    if (end == std::string::npos) {
+        return "";
+    }
+    return constant.text.substr(start, end - start);
+}
+
+Value make_typed_undef(
+    Machine& machine, const std::string& type_name) {
+    Value value = make_undef();
+    if (!type_name.empty()) {
+        value.ref = machine.arena.allocate_string_utf8(type_name);
+    }
+    return value;
+}
+
 void apply_declared_spec_flags(
     const CodeObject& code, std::int64_t spec_index, Value& value) {
     if (spec_index < 0
@@ -943,6 +1099,16 @@ void apply_declared_spec_flags(
     }
     if (spec.text.find("\"const\":true") != std::string::npos) {
         value.flags |= ValueConst;
+        if (value.tag == Tag::Obj) {
+            as_object(value)->structure_locked = true;
+        }
+    }
+    const std::size_t element_at =
+        spec.text.find("\"element_type\":");
+    if (value.tag == Tag::Arr && element_at != std::string::npos
+        && spec.text.find("\"const\":true", element_at)
+            != std::string::npos) {
+        as_array(value)->elements_locked = true;
     }
     if (spec.text.find("\"weak\":true") != std::string::npos) {
         value.flags |= ValueWeak;
@@ -1662,7 +1828,21 @@ Value execute(Frame& frame, Machine& machine) {
                     runtime_fail("Cannot redefine variables");
                 }
                 frame.declared[slot] = true;
-                frame.locals[slot] = make_undef();
+                Value undefined = make_undef();
+                if (instruction.find("spec") != nullptr) {
+                    const std::int64_t spec_index =
+                        operand_integer(instruction, "spec");
+                    if (spec_index >= 0
+                        && static_cast<std::uint64_t>(spec_index)
+                            < code.constants.size()) {
+                        undefined = make_typed_undef(
+                            machine,
+                            constant_type_name(
+                                code.constants[static_cast<std::size_t>(
+                                    spec_index)]));
+                    }
+                }
+                frame.locals[slot] = undefined;
                 publish_module_local(frame, slot, frame.locals[slot]);
                 push_value(frame, frame.locals[slot]);
                 break;
@@ -1674,9 +1854,52 @@ Value execute(Frame& frame, Machine& machine) {
                 frame.declared[slot] = true;
                 Value value = copy_value(machine.arena, pop_value(frame));
                 if (instruction.find("spec") != nullptr) {
+                    const std::int64_t spec_index =
+                        operand_integer(instruction, "spec");
                     apply_declared_spec_flags(
-                        code, operand_integer(instruction, "spec"),
-                        value);
+                        code, spec_index, value);
+                    if (spec_index >= 0
+                        && static_cast<std::uint64_t>(spec_index)
+                            < code.constants.size()) {
+                        const std::string& spec_text =
+                            code.constants[static_cast<std::size_t>(
+                                spec_index)].text;
+                        const std::size_t name_at =
+                            spec_text.find("\"value\":\"");
+                        if (name_at != std::string::npos) {
+                            const std::size_t start = name_at + 9;
+                            const std::size_t end =
+                                spec_text.find('"', start);
+                            if (end != std::string::npos) {
+                                const std::string type_name =
+                                    spec_text.substr(
+                                        start, end - start);
+                                const std::size_t alternatives_at =
+                                    spec_text.find("\"alternatives\":");
+                                const bool is_union =
+                                    alternatives_at != std::string::npos
+                                    && spec_text.compare(
+                                           alternatives_at + 15, 2, "[]")
+                                        != 0;
+                                const bool is_weak =
+                                    spec_text.find("\"weak\":true")
+                                    != std::string::npos;
+                                if (!type_name.empty()
+                                    && type_name != "any"
+                                    && type_name != "mixed"
+                                    && !is_union
+                                    && !(is_weak
+                                         && value.tag == Tag::Nova)) {
+                                    value = cast_value(
+                                        machine, frame, value,
+                                        type_name);
+                                    value = coerce_declared_value(
+                                        machine, frame, type_name,
+                                        value);
+                                }
+                            }
+                        }
+                    }
                 }
                 frame.locals[slot] = value;
                 publish_module_local(frame, slot, value);
@@ -1692,8 +1915,22 @@ Value execute(Frame& frame, Machine& machine) {
                     runtime_fail("Cannot redefine variables");
                 }
                 frame.module->declared_globals.insert(name);
-                frame.module->globals[name] = make_undef();
-                push_value(frame, make_undef());
+                Value undefined = make_undef();
+                if (instruction.find("spec") != nullptr) {
+                    const std::int64_t spec_index =
+                        operand_integer(instruction, "spec");
+                    if (spec_index >= 0
+                        && static_cast<std::uint64_t>(spec_index)
+                            < code.constants.size()) {
+                        undefined = make_typed_undef(
+                            machine,
+                            constant_type_name(
+                                code.constants[static_cast<std::size_t>(
+                                    spec_index)]));
+                    }
+                }
+                frame.module->globals[name] = undefined;
+                push_value(frame, undefined);
                 break;
             }
             case Opcode::DECLARE_TYPED_GLOBAL:
@@ -1716,8 +1953,22 @@ Value execute(Frame& frame, Machine& machine) {
             case Opcode::DECLARE_UNDEFINED_GLOBAL: {
                 const std::string& name = global_name_at(image, instruction);
                 frame.module->declared_globals.insert(name);
-                frame.module->globals[name] = make_undef();
-                push_value(frame, make_undef());
+                Value undefined = make_undef();
+                if (instruction.find("spec") != nullptr) {
+                    const std::int64_t spec_index =
+                        operand_integer(instruction, "spec");
+                    if (spec_index >= 0
+                        && static_cast<std::uint64_t>(spec_index)
+                            < code.constants.size()) {
+                        undefined = make_typed_undef(
+                            machine,
+                            constant_type_name(
+                                code.constants[static_cast<std::size_t>(
+                                    spec_index)]));
+                    }
+                }
+                frame.module->globals[name] = undefined;
+                push_value(frame, undefined);
                 break;
             }
             case Opcode::DECLARE_EXTERN: {
@@ -1739,8 +1990,17 @@ Value execute(Frame& frame, Machine& machine) {
                     dot == std::string::npos
                     ? descriptor->python_target
                     : descriptor->python_target.substr(0, dot);
-                bool allowed = false;
-                if (machine.has_project) {
+                static const std::unordered_set<std::string>
+                    kDefaultExternModules = {
+                        "math", "stdlib_strings", "stdlib_json",
+                        "stdlib_url", "stdlib_env", "stdlib_time",
+                        "stdlib_crypto", "stdlib_http",
+                        "stdlib_http_server", "stdlib_http_router",
+                        "stdlib_log", "stdlib_host",
+                    };
+                bool allowed =
+                    kDefaultExternModules.count(module_name) != 0;
+                if (!allowed && machine.has_project) {
                     for (const std::string& candidate :
                          machine.project.module_names) {
                         if (candidate == module_name) {
@@ -1762,6 +2022,18 @@ Value execute(Frame& frame, Machine& machine) {
                         {"python type: " + descriptor->python_target}));
                 }
                 frame.module->externs[descriptor->name] = *descriptor;
+                FunctionMetadata metadata;
+                metadata.name = descriptor->name;
+                metadata.min_argc = descriptor->min_argc;
+                frame.module->extern_metadata.push_back(
+                    std::move(metadata));
+                FunctionObject* function =
+                    machine.arena.allocate_function(
+                        &frame.module->extern_metadata.back());
+                function->module = frame.module;
+                function->extern_descriptor = descriptor;
+                frame.module->functions[descriptor->name].push_back(
+                    function);
                 break;
             }
             case Opcode::DECLARE_FUNCTION: {
@@ -2246,10 +2518,33 @@ Value execute(Frame& frame, Machine& machine) {
             }
             case Opcode::MAKE_SPREAD: {
                 const Value value = pop_value(frame);
-                if (value.tag != Tag::Arr) {
-                    runtime_fail("spread requires an array in N1");
+                std::vector<Value> items;
+                if (value.tag == Tag::Arr) {
+                    items = as_array(value)->items;
+                } else if (value.tag == Tag::Tup) {
+                    items = as_tuple(value)->items;
+                } else if (value.tag == Tag::Set) {
+                    items = as_set(value)->items;
+                } else if (value.tag == Tag::Map) {
+                    for (const auto& entry :
+                         as_map(value)->entries) {
+                        items.push_back(make_tuple(
+                            machine.arena.allocate_tuple(
+                                {entry.first, entry.second})));
+                    }
+                } else if (value.tag == Tag::Str) {
+                    for (const char32_t code_point :
+                         as_string_const(value)->code_points) {
+                        items.push_back(make_char(code_point));
+                    }
+                } else {
+                    runtime_fail(
+                        "spread requires a container or string");
                 }
-                push_value(frame, make_spread(as_array(value)));
+                push_value(
+                    frame,
+                    make_spread(machine.arena.allocate_array(
+                        std::move(items))));
                 break;
             }
             case Opcode::COPY:
@@ -2309,6 +2604,32 @@ Value execute(Frame& frame, Machine& machine) {
                     ++iterator->index;
                     push_value(frame, item);
                 }
+                break;
+            }
+            case Opcode::CAST: {
+                const std::int64_t spec_index =
+                    operand_integer(instruction, "spec");
+                if (spec_index < 0
+                    || static_cast<std::uint64_t>(spec_index)
+                        >= code.constants.size()) {
+                    runtime_fail("cast spec index out of range");
+                }
+                const Constant& spec =
+                    code.constants[static_cast<std::size_t>(spec_index)];
+                std::string target;
+                const std::size_t name_at =
+                    spec.text.find("\"value\":\"");
+                if (name_at != std::string::npos) {
+                    const std::size_t start = name_at + 9;
+                    const std::size_t end = spec.text.find('"', start);
+                    if (end != std::string::npos) {
+                        target = spec.text.substr(start, end - start);
+                    }
+                }
+                push_value(
+                    frame,
+                    cast_value(
+                        machine, frame, pop_value(frame), target));
                 break;
             }
             case Opcode::CAST_ASSIGN:
@@ -2526,9 +2847,19 @@ Value execute(Frame& frame, Machine& machine) {
                 push_value(frame, value);
                 break;
             }
-            case Opcode::ADD: {
+            case Opcode::ADD:
+            case Opcode::ADD_TYPED: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (instruction.opcode
+                        == static_cast<std::uint8_t>(Opcode::ADD_TYPED)
+                    && is_numeric_operand(left)
+                    && is_numeric_operand(right)) {
+                    push_value(
+                        frame,
+                        make_num(as_double(left) + as_double(right)));
+                    break;
+                }
                 if (left.tag == Tag::Obj) {
                     push_value(frame, call_type_method(
                         machine, left, "add", {right}, "operator +"));
@@ -2537,9 +2868,19 @@ Value execute(Frame& frame, Machine& machine) {
                 push_value(frame, arithmetic_add(machine, left, right));
                 break;
             }
-            case Opcode::SUB: {
+            case Opcode::SUB:
+            case Opcode::SUB_TYPED: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (instruction.opcode
+                        == static_cast<std::uint8_t>(Opcode::SUB_TYPED)
+                    && is_numeric_operand(left)
+                    && is_numeric_operand(right)) {
+                    push_value(
+                        frame,
+                        make_num(as_double(left) - as_double(right)));
+                    break;
+                }
                 if (left.tag == Tag::Obj) {
                     push_value(frame, call_type_method(
                         machine, left, "subtract", {right}, "operator -"));
@@ -2548,9 +2889,19 @@ Value execute(Frame& frame, Machine& machine) {
                 push_value(frame, arithmetic_sub(machine, left, right));
                 break;
             }
-            case Opcode::MUL: {
+            case Opcode::MUL:
+            case Opcode::MUL_TYPED: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (instruction.opcode
+                        == static_cast<std::uint8_t>(Opcode::MUL_TYPED)
+                    && is_numeric_operand(left)
+                    && is_numeric_operand(right)) {
+                    push_value(
+                        frame,
+                        make_num(as_double(left) * as_double(right)));
+                    break;
+                }
                 if (left.tag == Tag::Obj) {
                     push_value(frame, call_type_method(
                         machine, left, "multiply", {right}, "operator *"));
@@ -2559,9 +2910,24 @@ Value execute(Frame& frame, Machine& machine) {
                 push_value(frame, arithmetic_mul(machine, left, right));
                 break;
             }
-            case Opcode::DIV: {
+            case Opcode::DIV:
+            case Opcode::DIV_TYPED: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (instruction.opcode
+                        == static_cast<std::uint8_t>(Opcode::DIV_TYPED)
+                    && is_numeric_operand(left)
+                    && is_numeric_operand(right)) {
+                    const double divisor = as_double(right);
+                    if (divisor == 0.0) {
+                        push_value(frame, make_nova());
+                    } else {
+                        push_value(
+                            frame,
+                            make_num(as_double(left) / divisor));
+                    }
+                    break;
+                }
                 if (left.tag == Tag::Obj) {
                     push_value(frame, call_type_method(
                         machine, left, "divide", {right}, "operator /"));
@@ -2570,7 +2936,8 @@ Value execute(Frame& frame, Machine& machine) {
                 push_value(frame, arithmetic_div(machine, left, right));
                 break;
             }
-            case Opcode::MOD: {
+            case Opcode::MOD:
+            case Opcode::MOD_TYPED: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
                 if (left.tag == Tag::Obj) {
@@ -2598,11 +2965,17 @@ Value execute(Frame& frame, Machine& machine) {
                 push_value(frame, make_bool(truthy(pop_value(frame))));
                 break;
             case Opcode::EQ:
+            case Opcode::EQ_TYPED:
             case Opcode::NEQ:
+            case Opcode::NEQ_TYPED:
             case Opcode::LT:
+            case Opcode::LT_TYPED:
             case Opcode::LE:
+            case Opcode::LE_TYPED:
             case Opcode::GT:
-            case Opcode::GE: {
+            case Opcode::GT_TYPED:
+            case Opcode::GE:
+            case Opcode::GE_TYPED: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
                 const Comparison comparison =
@@ -2613,26 +2986,32 @@ Value execute(Frame& frame, Machine& machine) {
                 bool result = false;
                 switch (static_cast<Opcode>(instruction.opcode)) {
                     case Opcode::EQ:
+                    case Opcode::EQ_TYPED:
                         result = !comparison.unordered
                             && comparison.order == 0;
                         break;
                     case Opcode::NEQ:
+                    case Opcode::NEQ_TYPED:
                         result = comparison.unordered
                             || comparison.order != 0;
                         break;
                     case Opcode::LT:
+                    case Opcode::LT_TYPED:
                         result = !comparison.unordered
                             && comparison.order < 0;
                         break;
                     case Opcode::LE:
+                    case Opcode::LE_TYPED:
                         result = !comparison.unordered
                             && comparison.order <= 0;
                         break;
                     case Opcode::GT:
+                    case Opcode::GT_TYPED:
                         result = !comparison.unordered
                             && comparison.order > 0;
                         break;
                     case Opcode::GE:
+                    case Opcode::GE_TYPED:
                         result = !comparison.unordered
                             && comparison.order >= 0;
                         break;
@@ -2747,6 +3126,29 @@ Value execute(Frame& frame, Machine& machine) {
                     if (found != frame.module->functions.end()) {
                         candidates = &found->second;
                     }
+                }
+                std::vector<FunctionObject*> generic_candidates;
+                if (candidates != nullptr
+                    && site.type_argument_count > 0) {
+                    for (FunctionObject* candidate : *candidates) {
+                        if (candidate != nullptr
+                            && candidate->metadata != nullptr
+                            && candidate->metadata->type_parameters.size()
+                                == site.type_argument_count) {
+                            generic_candidates.push_back(candidate);
+                        }
+                    }
+                    if (generic_candidates.empty()) {
+                        throw_error(error_argument(
+                            machine.arena,
+                            "call: " + site.name,
+                            "No generic overload of '" + site.name
+                                + "' accepts "
+                                + std::to_string(
+                                    site.type_argument_count)
+                                + " type arguments"));
+                    }
+                    candidates = &generic_candidates;
                 }
                 if (candidates != nullptr) {
                     if (candidates->empty()) {
@@ -2951,7 +3353,13 @@ Value execute(Frame& frame, Machine& machine) {
                             runtime->info->name + "." + site.name));
                     break;
                 }
-                if (receiver.tag == Tag::Task
+                if (receiver.tag == Tag::Str
+                    || receiver.tag == Tag::Arr
+                    || receiver.tag == Tag::Map
+                    || receiver.tag == Tag::Set
+                    || receiver.tag == Tag::Tup
+                    || receiver.tag == Tag::Char
+                    || receiver.tag == Tag::Task
                     || receiver.tag == Tag::File) {
                     std::vector<Value> native_arguments;
                     native_arguments.reserve(positional.size() + 1);
@@ -2996,6 +3404,28 @@ Value execute(Frame& frame, Machine& machine) {
                     const auto found = type.methods.find(site.name);
                     if (found != type.methods.end()) {
                         candidates = &found->second;
+                    }
+                }
+                if (candidates == nullptr && frame.function != nullptr
+                    && !frame.function->trait_qualifier.empty()) {
+                    const auto trait = type.trait_methods.find(
+                        frame.function->trait_qualifier);
+                    if (trait != type.trait_methods.end()) {
+                        const auto found =
+                            trait->second.find(site.name);
+                        if (found != trait->second.end()) {
+                            candidates = &found->second;
+                        }
+                    }
+                }
+                if (candidates == nullptr) {
+                    for (const auto& entry : type.trait_methods) {
+                        const auto found =
+                            entry.second.find(site.name);
+                        if (found != entry.second.end()) {
+                            candidates = &found->second;
+                            break;
+                        }
                     }
                 }
                 if (candidates == nullptr && type.module != nullptr) {
@@ -3293,6 +3723,7 @@ Value execute(Frame& frame, Machine& machine) {
                     collect_arguments(frame, site.positional_count);
                 std::vector<Value> positional;
                 std::vector<std::pair<Value, Value>> pairs;
+                std::vector<std::pair<std::string, Value>> named;
                 std::size_t stack_index = 0;
                 std::size_t argument_index = 0;
                 while (argument_index < site.argument_kinds.size()
@@ -3320,9 +3751,15 @@ Value execute(Frame& frame, Machine& machine) {
                         continue;
                     }
                     if (kind == "named") {
-                        runtime_fail(
-                            "named arguments are only supported for user "
-                            "type constructors");
+                        const std::string name =
+                            argument_index
+                                < site.argument_names.size()
+                            ? site.argument_names[argument_index]
+                            : std::string();
+                        named.emplace_back(name, raw[stack_index]);
+                        ++stack_index;
+                        ++argument_index;
+                        continue;
                     }
                     positional.push_back(raw[stack_index]);
                     ++stack_index;
@@ -3331,6 +3768,18 @@ Value execute(Frame& frame, Machine& machine) {
                 while (stack_index < raw.size()) {
                     positional.push_back(raw[stack_index]);
                     ++stack_index;
+                }
+                const bool builtin_construction =
+                    site.name == "arr" || site.name == "tup"
+                    || site.name == "set" || site.name == "map"
+                    || site.name == "str" || site.name == "int"
+                    || site.name == "num" || site.name == "bool"
+                    || site.name == "char";
+                if (!named.empty() && builtin_construction) {
+                    throw_error(error_argument(
+                        machine.arena, "instantiation",
+                        "Named arguments are only supported for user "
+                        "type constructors"));
                 }
                 if (site.name == "arr") {
                     push_value(
@@ -3366,6 +3815,19 @@ Value execute(Frame& frame, Machine& machine) {
                     push_value(frame, make_map(map));
                     break;
                 }
+                if (site.name == "str" || site.name == "int"
+                    || site.name == "num" || site.name == "bool"
+                    || site.name == "char") {
+                    if (positional.size() != 1) {
+                        runtime_fail(
+                            "primitive construction requires one value");
+                    }
+                    push_value(
+                        frame,
+                        cast_value(
+                            machine, frame, positional[0], site.name));
+                    break;
+                }
                 TypeRuntime* type_runtime = resolve_qualified_type(
                     machine, frame, site.name, "instantiation");
                 if (type_runtime != nullptr && type_runtime->info != nullptr
@@ -3379,13 +3841,7 @@ Value execute(Frame& frame, Machine& machine) {
                             type_name, false, "");
                     object->type = &type;
                     object->module = type.module;
-                    for (const TypeProperty& property :
-                         type.info->properties) {
-                        object->fields[property.name] = make_undef();
-                        if (!property.is_private) {
-                            object->private_fields.insert(property.name);
-                        }
-                    }
+                    initialize_object_fields(machine, object, type);
                     const Value object_value = make_object(object);
                     const auto constructors =
                         type.constructors.find("constructor");
@@ -3404,6 +3860,24 @@ Value execute(Frame& frame, Machine& machine) {
                                 copy_value(
                                     machine.arena, positional[index]);
                         }
+                        for (const auto& [name, value] : named) {
+                            bool found = false;
+                            for (const TypeProperty& property :
+                                 type.info->properties) {
+                                if (property.name == name) {
+                                    object->fields[name] =
+                                        copy_value(
+                                            machine.arena, value);
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                throw_error(error_identifier_not_found(
+                                    machine.arena, "instantiation",
+                                    name));
+                            }
+                        }
                         push_value(frame, object_value);
                         break;
                     }
@@ -3414,7 +3888,7 @@ Value execute(Frame& frame, Machine& machine) {
                     FunctionObject* function = select_overload(
                         constructors->second, positional, *owner->meta);
                     const Value result = call_function(
-                        machine, function, positional, {},
+                        machine, function, positional, named,
                         "instantiation", &object_value,
                         type_name + ".constructor");
                     push_value(
@@ -3686,6 +4160,45 @@ Value execute(Frame& frame, Machine& machine) {
                 frame.has_pending_return = false;
                 frame.transfer = Transfer{};
                 break;
+            case Opcode::DESTRUCTURE: {
+                const std::int64_t descriptor_index =
+                    operand_integer(instruction, "descriptor");
+                if (descriptor_index < 0
+                    || static_cast<std::uint64_t>(descriptor_index)
+                        >= code.constants.size()) {
+                    runtime_fail("destructure descriptor out of range");
+                }
+                const std::uint32_t source_slot =
+                    operand_slot(instruction, code, "source_slot");
+                const Value source = unwrap_reference(
+                    machine, frame.locals[source_slot]);
+                push_value(
+                    frame,
+                    destructure_value(
+                        machine, frame,
+                        code.constants[static_cast<std::size_t>(
+                            descriptor_index)].text,
+                        source));
+                break;
+            }
+            case Opcode::MATCH: {
+                const std::int64_t pattern_index =
+                    operand_integer(instruction, "pattern");
+                if (pattern_index < 0
+                    || static_cast<std::uint64_t>(pattern_index)
+                        >= image.patterns.size()) {
+                    runtime_fail("match pattern index out of range");
+                }
+                const Value subject = pop_value(frame);
+                if (!match_pattern(
+                        machine, frame,
+                        image.patterns[
+                            static_cast<std::size_t>(pattern_index)],
+                        subject)) {
+                    frame.ip = operand_target(instruction, code);
+                }
+                break;
+            }
             case Opcode::AWAIT: {
                 const Value value = pop_value(frame);
                 if (!is_task(value)) {
@@ -4410,6 +4923,11 @@ Value call_function(
         || function->module->meta == nullptr) {
         runtime_fail("function metadata is required");
     }
+    if (function->extern_descriptor != nullptr) {
+        return call_extern_descriptor(
+            machine, *function->extern_descriptor,
+            function->metadata->name, positional, named);
+    }
     ModuleRuntime& module = *function->module;
     const FunctionMetadata& spec = *function->metadata;
     if (spec.code_index >= module.image->codes.size()) {
@@ -4726,6 +5244,818 @@ Value string_from_utf8(Machine& machine, const std::string& text) {
     return make_string(machine.arena.allocate_string_utf8(text));
 }
 
+[[noreturn]] void invalid_cast(
+    Machine& machine,
+    const std::string& target,
+    const std::string& source) {
+    throw_error(make_error(
+        machine.arena, "TYPE", "binary expression",
+        "Invalid explicit cast types",
+        {"unable to cast " + source + " to " + target}));
+}
+
+std::string cast_string(Machine& machine, const Value& value) {
+    switch (value.tag) {
+        case Tag::Nova:
+            return "nova";
+        case Tag::Undef:
+            return "<" + runtime_type_name(value) + ": undefined>";
+        case Tag::Str:
+            return as_string_const(value)->utf8;
+        case Tag::Char: {
+            std::string text;
+            append_utf8(text, value.c);
+            return text;
+        }
+        case Tag::Int:
+            return std::to_string(value.i);
+        case Tag::BigInt:
+            return as_bigint_const(value)->value.format_decimal();
+        case Tag::Num:
+            return format_number(value.d);
+        case Tag::Bool:
+            return value.b ? "true" : "false";
+        case Tag::Arr:
+        case Tag::Tup:
+        case Tag::Map:
+        case Tag::Set:
+            return format_value(value);
+        case Tag::Obj: {
+            const ObjectObject* object = as_object(value);
+            if (object != nullptr && object->is_enum) {
+                return format_value(value);
+            }
+            invalid_cast(
+                machine, "str", runtime_type_name(value));
+        }
+        case Tag::Project:
+            return "<Project>";
+        default:
+            invalid_cast(
+                machine, "str", runtime_type_name(value));
+    }
+}
+
+Value cast_value(
+    Machine& machine,
+    Frame& frame,
+    const Value& value,
+    const std::string& target) {
+    if (target.empty() || target == "any" || target == "mixed") {
+        return value;
+    }
+    if (target == runtime_type_name(value)) {
+        return value;
+    }
+    if (value.tag == Tag::Fun) {
+        return value;
+    }
+    if (value.tag == Tag::Obj) {
+        ObjectObject* object = as_object(value);
+        const std::string type_name =
+            object->type != nullptr && object->type->info != nullptr
+            ? object->type->info->name
+            : (object != nullptr ? object->type_name : std::string());
+        if (target == "obj" || target == type_name) {
+            return copy_value(machine.arena, value);
+        }
+    }
+    if (target == "obj") {
+        invalid_cast(machine, target, runtime_type_name(value));
+    }
+    if (target == "str") {
+        return string_from_utf8(machine, cast_string(machine, value));
+    }
+    if (target == "int") {
+        switch (value.tag) {
+            case Tag::Int:
+            case Tag::BigInt:
+                return value;
+            case Tag::Bool:
+                return make_int(value.b ? 1 : 0);
+            case Tag::Num: {
+                const std::int64_t converted =
+                    num_to_int(value.d, "explicit cast");
+                return make_int(converted);
+            }
+            case Tag::Str: {
+                const std::string text = as_string_const(value)->utf8;
+                try {
+                    std::size_t consumed = 0;
+                    const long long converted =
+                        std::stoll(text, &consumed);
+                    if (consumed != text.size()) {
+                        throw std::invalid_argument("trailing");
+                    }
+                    return make_int(converted);
+                } catch (const std::exception&) {
+                    throw_error(make_error(
+                        machine.arena, "RUNTIME", "explicit cast",
+                        "Invalid int string", {"\"" + text + "\""}));
+                }
+            }
+            case Tag::Nova:
+                return make_int(0);
+            default:
+                invalid_cast(
+                    machine, target, runtime_type_name(value));
+        }
+    }
+    if (target == "num") {
+        switch (value.tag) {
+            case Tag::Num:
+                return value;
+            case Tag::Int:
+                return make_num(static_cast<double>(value.i));
+            case Tag::BigInt:
+                return make_num(
+                    as_bigint_const(value)->value.to_double());
+            case Tag::Bool:
+                return make_num(value.b ? 1.0 : 0.0);
+            case Tag::Str: {
+                const std::string text = as_string_const(value)->utf8;
+                try {
+                    std::size_t consumed = 0;
+                    const double converted = std::stod(text, &consumed);
+                    if (consumed != text.size()) {
+                        throw std::invalid_argument("trailing");
+                    }
+                    return make_num(converted);
+                } catch (const std::exception&) {
+                    throw_error(make_error(
+                        machine.arena, "RUNTIME", "explicit cast",
+                        "Invalid num string", {"\"" + text + "\""}));
+                }
+            }
+            case Tag::Nova:
+                return make_num(0.0);
+            default:
+                invalid_cast(
+                    machine, target, runtime_type_name(value));
+        }
+    }
+    if (target == "bool") {
+        return make_bool(truthy(value));
+    }
+    if (target == "char") {
+        if (value.tag == Tag::Char) {
+            return value;
+        }
+        if (value.tag == Tag::Nova) {
+            return make_char(U'\0');
+        }
+        if (value.tag == Tag::Str) {
+            const std::u32string& text =
+                as_string_const(value)->code_points;
+            if (text.empty()) {
+                return make_char(U'\0');
+            }
+            if (text.size() == 1) {
+                return make_char(text.front());
+            }
+        }
+        invalid_cast(machine, target, runtime_type_name(value));
+    }
+    if (target == "arr") {
+        switch (value.tag) {
+            case Tag::Arr:
+                return copy_value(machine.arena, value);
+            case Tag::Tup:
+                return make_array(machine.arena.allocate_array(
+                    as_tuple(value)->items));
+            case Tag::Str: {
+                std::vector<Value> items;
+                for (const char32_t code_point :
+                     as_string_const(value)->code_points) {
+                    items.push_back(make_string(
+                        machine.arena.allocate_string(
+                            std::u32string(1, code_point))));
+                }
+                return make_array(
+                    machine.arena.allocate_array(std::move(items)));
+            }
+            case Tag::Map: {
+                std::vector<Value> items;
+                for (const auto& entry : as_map(value)->entries) {
+                    items.push_back(make_tuple(
+                        machine.arena.allocate_tuple(
+                            {entry.first, entry.second})));
+                }
+                return make_array(
+                    machine.arena.allocate_array(std::move(items)));
+            }
+            case Tag::Nova:
+                return make_array(machine.arena.allocate_array());
+            default:
+                invalid_cast(
+                    machine, target, runtime_type_name(value));
+        }
+    }
+    if (target == "tup") {
+        switch (value.tag) {
+            case Tag::Tup:
+                return copy_value(machine.arena, value);
+            case Tag::Arr:
+                return make_tuple(machine.arena.allocate_tuple(
+                    as_array(value)->items));
+            case Tag::Map: {
+                std::vector<Value> items;
+                for (const auto& entry : as_map(value)->entries) {
+                    items.push_back(make_tuple(
+                        machine.arena.allocate_tuple(
+                            {entry.first, entry.second})));
+                }
+                return make_tuple(
+                    machine.arena.allocate_tuple(std::move(items)));
+            }
+            case Tag::Nova:
+                return make_tuple(machine.arena.allocate_tuple());
+            default:
+                invalid_cast(
+                    machine, target, runtime_type_name(value));
+        }
+    }
+    if (target == "set") {
+        if (value.tag == Tag::Set) {
+            return copy_value(machine.arena, value);
+        }
+        if (value.tag == Tag::Nova) {
+            return make_set(machine.arena.allocate_set());
+        }
+        invalid_cast(machine, target, runtime_type_name(value));
+    }
+    if (target == "map") {
+        if (value.tag == Tag::Map) {
+            return copy_value(machine.arena, value);
+        }
+        if (value.tag == Tag::Nova) {
+            return make_map(machine.arena.allocate_map());
+        }
+        invalid_cast(machine, target, runtime_type_name(value));
+    }
+    if (value.tag == Tag::Tup || value.tag == Tag::Arr) {
+        TypeRuntime* type = nullptr;
+        const auto direct = frame.module->types.find(target);
+        if (direct != frame.module->types.end()) {
+            type = &direct->second;
+        } else {
+            const auto wildcard =
+                frame.module->wildcard_types.find(target);
+            if (wildcard != frame.module->wildcard_types.end()) {
+                type = wildcard->second;
+            }
+        }
+        if (type != nullptr && type->info != nullptr
+            && type->info->kind == "object") {
+            const std::vector<Value>& items = value.tag == Tag::Tup
+                ? as_tuple(value)->items : as_array(value)->items;
+            if (items.size() > type->info->properties.size()) {
+                invalid_cast(
+                    machine, target, runtime_type_name(value));
+            }
+            ObjectObject* object = machine.arena.allocate_object(
+                type->info->name, false, "");
+            object->type = type;
+            object->module = type->module;
+            initialize_object_fields(machine, object, *type);
+            for (std::size_t index = 0; index < items.size();
+                 ++index) {
+                object->fields[type->info->properties[index].name] =
+                    copy_value(machine.arena, items[index]);
+            }
+            return make_object(object);
+        }
+    }
+    {
+        const Value coerced = coerce_declared_value(
+            machine, frame, target, value);
+        if (coerced.tag == Tag::Obj) {
+            return coerced;
+        }
+    }
+    invalid_cast(machine, target, runtime_type_name(value));
+}
+
+struct DestructureEntry {
+    std::string name;
+    std::int32_t slot = -1;
+    bool reference = false;
+};
+
+std::vector<DestructureEntry> parse_destructure_entries(
+    const std::string& text) {
+    std::vector<DestructureEntry> entries;
+    const std::size_t key = text.find("\"entries\":[");
+    if (key == std::string::npos) {
+        return entries;
+    }
+    std::size_t position = key + 10;
+    while (position < text.size()) {
+        while (position < text.size()
+               && (std::isspace(
+                       static_cast<unsigned char>(text[position]))
+                   || text[position] == ',')) {
+            ++position;
+        }
+        if (position >= text.size() || text[position] == ']') {
+            break;
+        }
+        if (text[position] != '{') {
+            ++position;
+            continue;
+        }
+        const std::size_t start = position;
+        int depth = 0;
+        while (position < text.size()) {
+            if (text[position] == '{') {
+                ++depth;
+            } else if (text[position] == '}') {
+                --depth;
+                if (depth == 0) {
+                    ++position;
+                    break;
+                }
+            }
+            ++position;
+        }
+        const std::string entry =
+            text.substr(start, position - start);
+        DestructureEntry parsed;
+        const std::size_t name_at = entry.find("\"name\":\"");
+        if (name_at != std::string::npos) {
+            const std::size_t name_start = name_at + 8;
+            const std::size_t name_end =
+                entry.find('"', name_start);
+            if (name_end != std::string::npos) {
+                parsed.name = entry.substr(
+                    name_start, name_end - name_start);
+            }
+        }
+        const std::size_t slot_at = entry.find("\"slot\":");
+        if (slot_at != std::string::npos) {
+            try {
+                parsed.slot = static_cast<std::int32_t>(
+                    std::stoll(entry.substr(slot_at + 7)));
+            } catch (const std::exception&) {
+                parsed.slot = -1;
+            }
+        }
+        parsed.reference =
+            entry.find("\"reference\":true") != std::string::npos;
+        entries.push_back(std::move(parsed));
+    }
+    return entries;
+}
+
+Value destructure_value(
+    Machine& machine,
+    Frame& frame,
+    const std::string& descriptor,
+    const Value& source) {
+    const std::vector<DestructureEntry> entries =
+        parse_destructure_entries(descriptor);
+    if (source.tag == Tag::Arr || source.tag == Tag::Tup) {
+        const std::vector<Value>& items = source.tag == Tag::Arr
+            ? as_array(source)->items : as_tuple(source)->items;
+        for (std::size_t index = 0; index < entries.size(); ++index) {
+            if (index >= items.size()) {
+                throw_error(error_index_out_of_range(
+                    machine.arena,
+                    static_cast<std::int64_t>(index),
+                    static_cast<std::int64_t>(items.size())));
+            }
+            const DestructureEntry& entry = entries[index];
+            if (entry.slot < 0
+                || static_cast<std::size_t>(entry.slot)
+                    >= frame.locals.size()) {
+                continue;
+            }
+            Value bound;
+            if (entry.reference && source.tag == Tag::Arr) {
+                RefObject* reference =
+                    machine.arena.allocate_reference();
+                reference->kind = RefObject::Kind::Index;
+                reference->array = as_array(source);
+                reference->index = index;
+                reference->target_type =
+                    runtime_type_name(items[index]);
+                bound = make_reference(reference);
+            } else {
+                bound = copy_value(machine.arena, items[index]);
+            }
+            frame.locals[static_cast<std::size_t>(entry.slot)] = bound;
+            publish_module_local(
+                frame, static_cast<std::uint32_t>(entry.slot), bound);
+        }
+        return source;
+    }
+    if (source.tag == Tag::Obj) {
+        ObjectObject* object = as_object(source);
+        for (const DestructureEntry& entry : entries) {
+            const auto found = object->fields.find(entry.name);
+            if (found == object->fields.end()) {
+                throw_error(error_identifier_not_found(
+                    machine.arena, "destructure declaration",
+                    entry.name));
+            }
+            if (entry.slot < 0
+                || static_cast<std::size_t>(entry.slot)
+                    >= frame.locals.size()) {
+                continue;
+            }
+            Value bound;
+            if (entry.reference) {
+                RefObject* reference =
+                    machine.arena.allocate_reference();
+                reference->kind = RefObject::Kind::Field;
+                reference->object = object;
+                reference->name = entry.name;
+                reference->target_type =
+                    runtime_type_name(found->second);
+                bound = make_reference(reference);
+            } else {
+                bound = copy_value(machine.arena, found->second);
+            }
+            frame.locals[static_cast<std::size_t>(entry.slot)] = bound;
+            publish_module_local(
+                frame, static_cast<std::uint32_t>(entry.slot), bound);
+        }
+        return source;
+    }
+    throw_error(error_type_match(
+        machine.arena, "destructure declaration",
+        "array or object", runtime_type_name(source)));
+}
+
+std::string unescape_pattern_text(const std::string& raw) {
+    std::string out;
+    for (std::size_t index = 0; index < raw.size(); ++index) {
+        if (raw[index] != '\\' || index + 1 >= raw.size()) {
+            out.push_back(raw[index]);
+            continue;
+        }
+        const char next = raw[++index];
+        switch (next) {
+            case 'n': out.push_back('\n'); break;
+            case 'r': out.push_back('\r'); break;
+            case 't': out.push_back('\t'); break;
+            case '\\': out.push_back('\\'); break;
+            case '"': out.push_back('"'); break;
+            default: out.push_back(next); break;
+        }
+    }
+    return out;
+}
+
+bool pattern_scalar(
+    Machine& machine, const std::string& text, Value& out) {
+    if (text.find("UNARY_EXPRESSION") != std::string::npos) {
+        const std::size_t last = text.rfind("\"value\":");
+        if (last == std::string::npos) {
+            return false;
+        }
+        std::size_t position = last + 8;
+        while (position < text.size()
+               && std::isspace(
+                   static_cast<unsigned char>(text[position]))) {
+            ++position;
+        }
+        const std::size_t end = text.find_first_of(",}", position);
+        if (end == std::string::npos || end == position) {
+            return false;
+        }
+        const std::string number =
+            text.substr(position, end - position);
+        try {
+            if (number.find_first_of(".eE") != std::string::npos) {
+                out = make_num(-std::stod(number));
+            } else {
+                out = make_int(-std::stoll(number));
+            }
+            return true;
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+    const std::size_t key = text.find("\"value\":");
+    if (key == std::string::npos) {
+        return false;
+    }
+    std::size_t position = key + 8;
+    while (position < text.size()
+           && std::isspace(
+               static_cast<unsigned char>(text[position]))) {
+        ++position;
+    }
+    if (position >= text.size()) {
+        return false;
+    }
+    if (text[position] == '"') {
+        ++position;
+        std::string raw;
+        while (position < text.size()) {
+            if (text[position] == '\\' && position + 1 < text.size()) {
+                raw.push_back(text[position]);
+                raw.push_back(text[position + 1]);
+                position += 2;
+                continue;
+            }
+            if (text[position] == '"') {
+                break;
+            }
+            raw.push_back(text[position]);
+            ++position;
+        }
+        const std::string value = unescape_pattern_text(raw);
+        if (text.find("CHAR_LITERAL") != std::string::npos) {
+            StringObject* object =
+                machine.arena.allocate_string_utf8(value);
+            if (object->code_points.size() == 1) {
+                out = make_char(object->code_points.front());
+                return true;
+            }
+            return false;
+        }
+        out = make_string(
+            machine.arena.allocate_string_utf8(value));
+        return true;
+    }
+    if (text.compare(position, 4, "true") == 0) {
+        out = make_bool(true);
+        return true;
+    }
+    if (text.compare(position, 5, "false") == 0) {
+        out = make_bool(false);
+        return true;
+    }
+    if (text.compare(position, 4, "null") == 0) {
+        out = make_nova();
+        return true;
+    }
+    const std::size_t end = text.find_first_of(",}", position);
+    if (end == std::string::npos || end == position) {
+        return false;
+    }
+    const std::string number = text.substr(position, end - position);
+    try {
+        if (number.find_first_of(".eE") != std::string::npos) {
+            out = make_num(std::stod(number));
+        } else {
+            out = make_int(std::stoll(number));
+        }
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+Value property_default_value(
+    Machine& machine, const TypeRuntime& type, const TypeProperty& property) {
+    if (type.module == nullptr || type.module->image == nullptr) {
+        return make_undef();
+    }
+    const Image& image = *type.module->image;
+    if (property.index >= image.type_specs.size()) {
+        return make_undef();
+    }
+    const std::string& spec = image.type_specs[property.index];
+    const std::size_t expression_at = spec.find("\"expression\":");
+    if (expression_at == std::string::npos) {
+        return make_undef();
+    }
+    const std::size_t start = spec.find('{', expression_at);
+    if (start == std::string::npos) {
+        return make_undef();
+    }
+    int depth = 0;
+    std::size_t end = start;
+    while (end < spec.size()) {
+        if (spec[end] == '{') {
+            ++depth;
+        } else if (spec[end] == '}') {
+            --depth;
+            if (depth == 0) {
+                ++end;
+                break;
+            }
+        }
+        ++end;
+    }
+    const std::string expression = spec.substr(start, end - start);
+    Value value;
+    if (pattern_scalar(machine, expression, value)) {
+        return copy_value(machine.arena, value);
+    }
+    return make_undef();
+}
+
+void initialize_object_fields(
+    Machine& machine, ObjectObject* object, const TypeRuntime& type) {
+    if (type.info == nullptr) {
+        return;
+    }
+    for (const TypeProperty& property : type.info->properties) {
+        object->fields[property.name] =
+            property_default_value(machine, type, property);
+        if (!property.is_private) {
+            object->private_fields.insert(property.name);
+        }
+    }
+}
+
+Value coerce_declared_value(
+    Machine& machine,
+    Frame& frame,
+    const std::string& type_name,
+    const Value& value) {
+    TypeRuntime* type = nullptr;
+    const auto direct = frame.module->types.find(type_name);
+    if (direct != frame.module->types.end()) {
+        type = &direct->second;
+    } else {
+        const auto wildcard =
+            frame.module->wildcard_types.find(type_name);
+        if (wildcard != frame.module->wildcard_types.end()) {
+            type = wildcard->second;
+        }
+    }
+    if (type == nullptr || type->info == nullptr
+        || type->info->kind != "object") {
+        return value;
+    }
+    if (value.tag == Tag::Obj) {
+        ObjectObject* object = as_object(value);
+        const std::string current =
+            object->type != nullptr && object->type->info != nullptr
+            ? object->type->info->name : object->type_name;
+        if (current == type->info->name) {
+            return copy_value(machine.arena, value);
+        }
+    }
+    if (type->info->properties.empty()) {
+        return value;
+    }
+    ObjectObject* object = machine.arena.allocate_object(
+        type->info->name, false, "");
+    object->type = type;
+    object->module = type->module;
+    initialize_object_fields(machine, object, *type);
+    if (value.tag == Tag::Tup || value.tag == Tag::Arr) {
+        const std::vector<Value>& items = value.tag == Tag::Tup
+            ? as_tuple(value)->items : as_array(value)->items;
+        if (items.size() > type->info->properties.size()) {
+            return value;
+        }
+        for (std::size_t index = 0; index < items.size(); ++index) {
+            object->fields[type->info->properties[index].name] =
+                copy_value(machine.arena, items[index]);
+        }
+        return make_object(object);
+    }
+    object->fields[type->info->properties.front().name] =
+        copy_value(machine.arena, value);
+    return make_object(object);
+}
+
+bool match_pattern(
+    Machine& machine,
+    Frame& frame,
+    const PatternDescriptor& pattern,
+    const Value& subject) {
+    if (pattern.kind == "wildcard") {
+        return true;
+    }
+    if (pattern.kind == "binding") {
+        for (const auto& [name, slot] : pattern.bindings) {
+            (void)name;
+            if (slot < frame.locals.size()) {
+                const Value bound =
+                    copy_value(machine.arena, subject);
+                frame.locals[slot] = bound;
+                publish_module_local(frame, slot, bound);
+            }
+        }
+        return true;
+    }
+    if (pattern.kind == "literal") {
+        if (pattern.literal.find("ACCESS_EXPRESSION")
+            != std::string::npos) {
+            const std::size_t key =
+                pattern.literal.rfind("\"value\":\"");
+            if (key == std::string::npos
+                || subject.tag != Tag::Obj) {
+                return false;
+            }
+            const std::size_t start = key + 9;
+            const std::size_t end =
+                pattern.literal.find('"', start);
+            if (end == std::string::npos) {
+                return false;
+            }
+            const std::string member =
+                pattern.literal.substr(start, end - start);
+            return as_object(subject)->variant == member;
+        }
+        Value literal;
+        if (!pattern_scalar(machine, pattern.literal, literal)) {
+            return false;
+        }
+        if (subject.tag == Tag::Char && literal.tag == Tag::Str) {
+            const StringObject* text = as_string_const(literal);
+            return text->code_points.size() == 1
+                && text->code_points.front() == subject.c;
+        }
+        return value_equal(subject, literal);
+    }
+    if (pattern.kind == "range") {
+        Value start;
+        Value end;
+        if (!pattern_scalar(machine, pattern.start_ast, start)
+            || !pattern_scalar(machine, pattern.end_ast, end)) {
+            return false;
+        }
+        if (!is_numeric_operand(subject)
+            || !is_numeric_operand(start)
+            || !is_numeric_operand(end)) {
+            return false;
+        }
+        const double value = as_double(subject);
+        return as_double(start) <= value && value < as_double(end);
+    }
+    if (pattern.kind == "array" || pattern.kind == "tuple") {
+        if (pattern.kind == "tuple") {
+            if (subject.tag != Tag::Tup) {
+                return false;
+            }
+        } else if (subject.tag != Tag::Arr
+                   && subject.tag != Tag::Tup) {
+            return false;
+        }
+        const std::vector<Value>& items = subject.tag == Tag::Arr
+            ? as_array(subject)->items
+            : as_tuple(subject)->items;
+        const bool has_rest = pattern.rest_slot != -1;
+        if ((!has_rest && items.size() != pattern.nested.size())
+            || (has_rest && items.size() < pattern.nested.size())) {
+            return false;
+        }
+        for (std::size_t index = 0; index < pattern.nested.size();
+             ++index) {
+            if (!match_pattern(
+                    machine, frame, pattern.nested[index],
+                    items[index])) {
+                return false;
+            }
+        }
+        if (pattern.rest_slot >= 0
+            && static_cast<std::size_t>(pattern.rest_slot)
+                < frame.locals.size()) {
+            std::vector<Value> tail;
+            for (std::size_t index = pattern.nested.size();
+                 index < items.size(); ++index) {
+                tail.push_back(
+                    copy_value(machine.arena, items[index]));
+            }
+            const Value rest = subject.tag == Tag::Tup
+                ? make_tuple(
+                    machine.arena.allocate_tuple(std::move(tail)))
+                : make_array(
+                    machine.arena.allocate_array(std::move(tail)));
+            frame.locals[
+                static_cast<std::size_t>(pattern.rest_slot)] = rest;
+            publish_module_local(
+                frame,
+                static_cast<std::uint32_t>(pattern.rest_slot), rest);
+        }
+        return true;
+    }
+    if (pattern.kind == "object") {
+        if (subject.tag != Tag::Obj) {
+            return false;
+        }
+        ObjectObject* object = as_object(subject);
+        const std::string type_name =
+            object->type != nullptr && object->type->info != nullptr
+            ? object->type->info->name : object->type_name;
+        if (!pattern.type_name.has_value()
+            || *pattern.type_name != type_name) {
+            return false;
+        }
+        for (const auto& [name, nested] : pattern.fields) {
+            const auto found = object->fields.find(name);
+            if (found == object->fields.end()) {
+                return false;
+            }
+            if (!match_pattern(
+                    machine, frame, nested, found->second)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 std::string string_to_utf8(const Value& value) {
     if (value.tag != Tag::Str) {
         runtime_fail(
@@ -4878,7 +6208,14 @@ Value index_set(
             return stored;
         }
         case Tag::Arr: {
-            auto& items = as_array(container)->items;
+            ArrayObject* array = as_array(container);
+            if (array->elements_locked) {
+                throw_error(error_const(
+                    machine.arena, "assignment",
+                    "array elements are locked",
+                    {"the element type ends with '!'"}));
+            }
+            auto& items = array->items;
             const std::int64_t position =
                 resolved_index(machine, index, items.size(), "arr");
             items[static_cast<std::size_t>(position)] = stored;
@@ -4984,6 +6321,8 @@ std::int64_t value_size(const Value& value) {
             return static_cast<std::int64_t>(as_map(value)->entries.size());
         case Tag::Set:
             return static_cast<std::int64_t>(as_set(value)->items.size());
+        case Tag::Char:
+            return 1;
         default:
             runtime_fail(
                 std::string("value of type ") + tag_name(value.tag)
@@ -5871,32 +7210,46 @@ Value call_native_method(
     if (positional.empty()) {
         runtime_fail("missing receiver argument");
     }
+    std::vector<Value> resolved;
+    const std::vector<Value>* values = &positional;
+    const bool receiver_reference = is_reference(positional[0]);
+    if (receiver_reference) {
+        resolved = positional;
+        resolved[0] = unwrap_reference(machine, positional[0]);
+        values = &resolved;
+    }
     const std::string type = site.native_type.has_value()
         ? *site.native_type
-        : runtime_type_name(positional[0]);
+        : runtime_type_name((*values)[0]);
     if (type == "arr") {
-        return array_method(machine, site.name, positional);
+        const Value result = array_method(machine, site.name, *values);
+        if (receiver_reference && result.tag == Tag::Arr) {
+            reference_set(
+                machine, as_reference(positional[0]), result);
+            return positional[0];
+        }
+        return result;
     }
     if (type == "str") {
-        return string_method(machine, site.name, positional);
+        return string_method(machine, site.name, *values);
     }
     if (type == "map") {
-        return map_method(machine, site.name, positional);
+        return map_method(machine, site.name, *values);
     }
     if (type == "set") {
-        return set_method(machine, site.name, positional);
+        return set_method(machine, site.name, *values);
     }
     if (type == "tup") {
-        return tuple_method(machine, site.name, positional);
+        return tuple_method(machine, site.name, *values);
     }
     if (type == "char") {
-        return char_method(machine, site.name, positional);
+        return char_method(machine, site.name, *values);
     }
     if (type == "task") {
-        return task_method(machine, site.name, positional);
+        return task_method(machine, site.name, *values);
     }
     if (type == "file") {
-        return file_method(machine, site.name, positional);
+        return file_method(machine, site.name, *values);
     }
     runtime_fail("native method type not implemented: " + type);
 }
@@ -6067,7 +7420,16 @@ Value call_extern_function(
         throw_error(error_identifier_not_found(
             machine.arena, "extern", name));
     }
-    const MetaDescriptor& descriptor = found->second;
+    return call_extern_descriptor(
+        machine, found->second, name, positional, named);
+}
+
+Value call_extern_descriptor(
+    Machine& machine,
+    const MetaDescriptor& descriptor,
+    const std::string& name,
+    const std::vector<Value>& positional,
+    const std::vector<std::pair<std::string, Value>>& named) {
     if (!named.empty()) {
         throw_error(error_argument(
             machine.arena, "extern call",
@@ -6088,7 +7450,7 @@ Value call_extern_function(
     try {
         result = machine.host.call_extern(
             descriptor.python_target,
-            positional.data(), positional.size());
+            positional.data(), positional.size(), machine.arena);
     } catch (const std::runtime_error& error) {
         throw_error(error_development(
             machine.arena, "extern function: " + name,
@@ -6297,6 +7659,26 @@ bool resolve_pending_call(
         const auto direct = type->methods.find(site.name);
         if (direct != type->methods.end() && !direct->second.empty()) {
             candidates = &direct->second;
+        }
+        if (candidates == nullptr && frame.function != nullptr
+            && !frame.function->trait_qualifier.empty()) {
+            const auto trait = type->trait_methods.find(
+                frame.function->trait_qualifier);
+            if (trait != type->trait_methods.end()) {
+                const auto found = trait->second.find(site.name);
+                if (found != trait->second.end()) {
+                    candidates = &found->second;
+                }
+            }
+        }
+        if (candidates == nullptr) {
+            for (const auto& entry : type->trait_methods) {
+                const auto found = entry.second.find(site.name);
+                if (found != entry.second.end()) {
+                    candidates = &found->second;
+                    break;
+                }
+            }
         }
         if (candidates == nullptr && site.trait_name.has_value()) {
             const auto trait =
@@ -6774,6 +8156,11 @@ Value store_object_member(
         runtime_fail("member assignment requires an object value");
     }
     ObjectObject* object = as_object(owner);
+    if (object->structure_locked) {
+        throw_error(error_const(
+            machine.arena, "assignment", "object fields are locked",
+            {"the object type ends with '!'"}));
+    }
     const auto field = object->fields.find(name);
     if (field == object->fields.end()) {
         runtime_fail("object has no field '" + name + "'");
@@ -6917,6 +8304,86 @@ Comparison compare_object_values(
     runtime_fail("ordering is not supported for object values");
 }
 
+std::string deep_type_name(const Value& value) {
+    if (value.tag == Tag::Arr) {
+        std::vector<std::string> names;
+        for (const Value& item : as_array(value)->items) {
+            const std::string name = deep_type_name(item);
+            bool seen = false;
+            for (const std::string& existing : names) {
+                if (existing == name) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                names.push_back(name);
+            }
+        }
+        if (names.empty()) {
+            return "arr[any]";
+        }
+        std::string joined;
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            if (index != 0) {
+                joined += " | ";
+            }
+            joined += names[index];
+        }
+        return "arr[" + joined + "]";
+    }
+    if (value.tag == Tag::Tup) {
+        const std::vector<Value>& items = as_tuple(value)->items;
+        if (items.empty()) {
+            return "tup";
+        }
+        std::string joined;
+        for (std::size_t index = 0; index < items.size(); ++index) {
+            if (index != 0) {
+                joined += ", ";
+            }
+            joined += deep_type_name(items[index]);
+        }
+        return "tup[" + joined + "]";
+    }
+    if (value.tag == Tag::Set) {
+        std::vector<std::string> names;
+        for (const Value& item : as_set(value)->items) {
+            const std::string name = deep_type_name(item);
+            bool seen = false;
+            for (const std::string& existing : names) {
+                if (existing == name) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                names.push_back(name);
+            }
+        }
+        if (names.empty()) {
+            return "set[any]";
+        }
+        std::string joined;
+        for (std::size_t index = 0; index < names.size(); ++index) {
+            if (index != 0) {
+                joined += " | ";
+            }
+            joined += names[index];
+        }
+        return "set[" + joined + "]";
+    }
+    if (value.tag == Tag::Fun) {
+        const FunctionObject* function = as_function(value);
+        if (function != nullptr && function->metadata != nullptr
+            && !function->metadata->function_type.empty()) {
+            return function->metadata->function_type;
+        }
+        return "function";
+    }
+    return runtime_type_name(value);
+}
+
 Value call_builtin(
     Machine& machine,
     const std::string& name,
@@ -6971,7 +8438,9 @@ Value call_builtin(
         const char32_t value =
             character_value(positional[0], "digit_value");
         return make_int(
-            char_is_digit(value) ? value - U'0' : -1);
+            char_is_digit(value)
+                ? static_cast<std::int64_t>(value - U'0')
+                : static_cast<std::int64_t>(-1));
     }
     if (name == "is_digit" || name == "is_alpha" || name == "is_alnum"
         || name == "is_space" || name == "is_upper" || name == "is_lower"
@@ -7019,7 +8488,10 @@ Value call_builtin(
             runtime_fail(name + " expects one argument");
         }
         return string_from_utf8(
-            machine, runtime_type_name(positional[0]));
+            machine,
+            name == "typeof"
+                ? runtime_type_name(positional[0])
+                : deep_type_name(positional[0]));
     }
     if (name == "wait") {
         if (positional.empty()) {

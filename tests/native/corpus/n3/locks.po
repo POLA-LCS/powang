@@ -1,0 +1,15 @@
+type Point[+] {
+    | x: int;
+}
+point: Point! = Point.[1];
+try {
+    point.x = 2;
+} catch error {
+    print(error.kind); print(" "); print(error.message); print("\n");
+}
+values: arr[int]! = [1, 2];
+try {
+    values[0] = 3;
+} catch error {
+    print(error.kind); print(" "); print(error.message); print("\n");
+}

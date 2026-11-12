@@ -40,6 +40,7 @@ struct CapturedScope {
 struct FunctionObject {
     const FunctionMetadata* metadata = nullptr;
     ModuleRuntime* module = nullptr;
+    const MetaDescriptor* extern_descriptor = nullptr;
     std::vector<Value> captures;
     CapturedScope captured;
     Value receiver = make_nova();

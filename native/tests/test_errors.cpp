@@ -23,11 +23,13 @@ public:
     Value call_extern(
         std::string_view name,
         const Value* arguments,
-        std::size_t argument_count) override {
+        std::size_t argument_count,
+        pwb::Arena& arena) override {
         if (name == "add" && argument_count == 2) {
             return pwb::make_int(arguments[0].i + arguments[1].i);
         }
-        return pwb::Host::call_extern(name, arguments, argument_count);
+        return pwb::Host::call_extern(
+            name, arguments, argument_count, arena);
     }
 
     std::string output;
@@ -116,12 +118,12 @@ void run_error_tests() {
         pwb::make_int(2), pwb::make_int(3),
     };
     const Value extern_result = host.call_extern(
-        "add", extern_arguments, 2);
+        "add", extern_arguments, 2, arena);
     check_equal(
         extern_result.i, 5, "scalar extern host boundary");
     bool threw = false;
     try {
-        (void)host.call_extern("missing", nullptr, 0);
+        (void)host.call_extern("missing", nullptr, 0, arena);
     } catch (const std::runtime_error&) {
         threw = true;
     }

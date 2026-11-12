@@ -184,6 +184,10 @@ def _abi(args: list[str]) -> int:
 _NATIVE_USAGE_LINES: tuple[str, ...] = (
     "    powang vm native run <file.po> [args...]",
     "    powang vm native compile [--output PATH] [--keep-source] <file.po>",
+    "    powang vm native diff [--corpus DIR] [--examples PATH] [--json] [--fail-fast]",
+    "    powang vm native bench [--runs N] [--json] [file.po...]",
+    "    powang vm native clean [--all]",
+    "    powang vm native pack [--output DIR]",
     "    powang vm native info",
 )
 
@@ -297,6 +301,203 @@ def _native_run(args: list[str]) -> int:
     return result.returncode
 
 
+def _native_diff(args: list[str]) -> int:
+    from .native.differential import run
+
+    corpora: list[Path] = []
+    examples: list[Path] = []
+    fail_fast = False
+    as_json = False
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == '--corpus' and index + 1 < len(args):
+            corpora.append(Path(args[index + 1]))
+            index += 2
+            continue
+        if argument == '--examples' and index + 1 < len(args):
+            examples.append(Path(args[index + 1]))
+            index += 2
+            continue
+        if argument == '--fail-fast':
+            fail_fast = True
+        elif argument == '--json':
+            as_json = True
+        elif argument.startswith('-'):
+            _native_usage()
+            return 2
+        else:
+            path = Path(argument)
+            if path.is_dir():
+                corpora.append(path)
+            else:
+                examples.append(path)
+        index += 1
+    if not corpora and not examples:
+        _native_usage()
+        return 2
+    return run(
+        corpora, examples, fail_fast=fail_fast, as_json=as_json,
+    )
+
+
+def _native_bench(args: list[str]) -> int:
+    import json
+    import statistics
+    import subprocess
+    import time
+
+    from .native.loader import compile_image
+    from .native.session import compile_native_file
+
+    runs = 3
+    as_json = False
+    paths: list[Path] = []
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == '--runs' and index + 1 < len(args):
+            runs = max(1, int(args[index + 1]))
+            index += 2
+            continue
+        if argument == '--json':
+            as_json = True
+            index += 1
+            continue
+        if argument.startswith('-'):
+            _native_usage()
+            return 2
+        paths.append(Path(argument))
+        index += 1
+    root = Path(__file__).resolve().parents[2]
+    if not paths:
+        paths = sorted((root / 'tests' / 'native' / 'corpus' / 'n1').glob('*.po'))
+    if not paths:
+        print('no benchmark programs selected', file=sys.stderr)
+        return 2
+
+    records = []
+    for path in paths:
+        try:
+            session = compile_native_file(path)
+            program = compile_image(
+                session.image, bundle=session.bundle,
+            )
+        except Exception as error:
+            print(f"native build error: {error}", file=sys.stderr)
+            return 1
+        try:
+            native_times = []
+            for _ in range(runs):
+                started = time.perf_counter()
+                subprocess.run(
+                    [str(program.executable)],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=120,
+                )
+                native_times.append(time.perf_counter() - started)
+            python_times = []
+            for _ in range(runs):
+                started = time.perf_counter()
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(root / 'powang.py'),
+                        '--engine=vm',
+                        str(path),
+                    ],
+                    cwd=str(root),
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=120,
+                )
+                python_times.append(time.perf_counter() - started)
+        finally:
+            program.cleanup()
+        native_median = statistics.median(native_times)
+        python_median = statistics.median(python_times)
+        records.append({
+            'program': str(path),
+            'runs': runs,
+            'python_seconds': python_median,
+            'native_seconds': native_median,
+            'speedup': (
+                python_median / native_median
+                if native_median > 0 else 0.0
+            ),
+        })
+    if as_json:
+        print(json.dumps(records, indent=2))
+    else:
+        for record in records:
+            print(
+                f"{record['program']}: "
+                f"vm {record['python_seconds'] * 1000:.2f} ms, "
+                f"native {record['native_seconds'] * 1000:.2f} ms, "
+                f"{record['speedup']:.2f}x"
+            )
+    return 0
+
+
+def _native_clean(args: list[str]) -> int:
+    import shutil
+
+    remove_all = '--all' in args
+    root = Path(__file__).resolve().parents[2]
+    targets = [root / '.powang' / 'cache']
+    if remove_all:
+        targets.append(root / 'build' / 'native')
+    for target in targets:
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            print(f"removed {target}")
+        else:
+            print(f"absent {target}")
+    return 0
+
+
+def _native_pack(args: list[str]) -> int:
+    import shutil
+
+    from .native.build import ensure_runtime
+
+    output: Path | None = None
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == '--output' and index + 1 < len(args):
+            output = Path(args[index + 1])
+            index += 2
+            continue
+        if argument.startswith('-'):
+            _native_usage()
+            return 2
+        output = Path(argument)
+        index += 1
+    try:
+        paths = ensure_runtime()
+    except Exception as error:
+        print(f"native build error: {error}", file=sys.stderr)
+        return 1
+    destination = output or (
+        Path(__file__).resolve().parents[2] / 'dist' / 'native'
+    )
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(paths.library, destination / paths.library.name)
+    shutil.copy2(paths.executable, destination / paths.executable.name)
+    shutil.copytree(
+        paths.include_dir, destination / 'include',
+        dirs_exist_ok=True,
+    )
+    print(destination)
+    return 0
+
+
 def _native(args: list[str]) -> int:
     if not args:
         _native_usage()
@@ -312,6 +513,14 @@ def _native(args: list[str]) -> int:
         return _native_compile(rest)
     if command == 'run':
         return _native_run(rest)
+    if command == 'diff':
+        return _native_diff(rest)
+    if command == 'bench':
+        return _native_bench(rest)
+    if command == 'clean':
+        return _native_clean(rest)
+    if command == 'pack':
+        return _native_pack(rest)
     _native_usage()
     return 2
 
