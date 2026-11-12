@@ -346,6 +346,11 @@ def _u32(out: bytearray, value: int) -> None:
     out += struct.pack("<I", value)
 
 
+def _signed_index(value: int) -> int:
+    """Decode the 0xFFFFFFFF absent marker back to -1."""
+    return -1 if value == 0xFFFFFFFF else value
+
+
 def _i32(out: bytearray, value: int) -> None:
     out += struct.pack("<i", value)
 
@@ -678,7 +683,7 @@ def _write_type(out: bytearray, info: TypeInfo) -> None:
     for is_private, name, index, type_name, is_static in info.methods:
         _u8(out, 1 if is_private else 0)
         _string(out, name)
-        _u32(out, index)
+        _u32(out, index if index >= 0 else 0xFFFFFFFF)
         _optional_string(out, type_name)
         _u8(out, 1 if is_static else 0)
     _u32(out, len(info.variants))
@@ -706,7 +711,7 @@ def _read_type(reader: _Reader) -> TypeInfo:
         (
             bool(reader.u8("method private")),
             reader.string("method name"),
-            reader.u32("method index"),
+            _signed_index(reader.u32("method index")),
             _read_optional_string(reader, "method type name"),
             bool(reader.u8("method static")),
         )
@@ -726,7 +731,7 @@ def _write_trait(out: bytearray, info: TraitInfo) -> None:
     _u32(out, len(info.methods))
     for name, index, is_static in info.methods:
         _string(out, name)
-        _u32(out, index)
+        _u32(out, index if index >= 0 else 0xFFFFFFFF)
         _u8(out, 1 if is_static else 0)
 
 
@@ -738,7 +743,7 @@ def _read_trait(reader: _Reader) -> TraitInfo:
     methods = tuple(
         (
             reader.string("trait method name"),
-            reader.u32("trait method index"),
+            _signed_index(reader.u32("trait method index")),
             bool(reader.u8("trait method static")),
         )
         for _ in range(reader.u32("trait method count"))
