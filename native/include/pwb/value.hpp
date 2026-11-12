@@ -14,9 +14,13 @@
 #include <system_error>
 #include <type_traits>
 
+#include "pwb/bigint.hpp"
 #include "pwb/error.hpp"
 
 namespace pwb {
+
+struct FunctionObject;
+struct ArrayObject;
 
 enum class Tag : std::uint8_t {
     Nova = 0,
@@ -26,6 +30,10 @@ enum class Tag : std::uint8_t {
     Num = 4,
     Char = 5,
     Str = 6,
+    BigInt = 7,
+    Fun = 8,
+    Arr = 9,
+    Spread = 10,
 };
 
 struct Value {
@@ -36,6 +44,7 @@ struct Value {
         double d;
         bool b;
         char32_t c;
+        void* ref;
     };
 };
 
@@ -52,6 +61,10 @@ inline const char* tag_name(Tag tag) noexcept {
         case Tag::Num: return "num";
         case Tag::Char: return "char";
         case Tag::Str: return "str";
+        case Tag::BigInt: return "bigint";
+        case Tag::Fun: return "fun";
+        case Tag::Arr: return "arr";
+        case Tag::Spread: return "spread";
     }
     return "unknown";
 }
@@ -96,8 +109,68 @@ inline Value make_char(char32_t code_point) {
     return value;
 }
 
+inline Value make_bigint(BigIntObject* object) {
+    Value value{};
+    value.tag = Tag::BigInt;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_function(FunctionObject* object) {
+    Value value{};
+    value.tag = Tag::Fun;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_array(ArrayObject* object) {
+    Value value{};
+    value.tag = Tag::Arr;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_spread(ArrayObject* object) {
+    Value value{};
+    value.tag = Tag::Spread;
+    value.ref = object;
+    return value;
+}
+
 inline bool is_nova(const Value& value) noexcept {
     return value.tag == Tag::Nova;
+}
+
+inline bool is_bigint(const Value& value) noexcept {
+    return value.tag == Tag::BigInt;
+}
+
+inline bool is_function(const Value& value) noexcept {
+    return value.tag == Tag::Fun;
+}
+
+inline bool is_array(const Value& value) noexcept {
+    return value.tag == Tag::Arr;
+}
+
+inline bool is_spread(const Value& value) noexcept {
+    return value.tag == Tag::Spread;
+}
+
+inline BigIntObject* as_bigint(const Value& value) {
+    return static_cast<BigIntObject*>(value.ref);
+}
+
+inline const BigIntObject* as_bigint_const(const Value& value) {
+    return static_cast<const BigIntObject*>(value.ref);
+}
+
+inline FunctionObject* as_function(const Value& value) {
+    return static_cast<FunctionObject*>(value.ref);
+}
+
+inline ArrayObject* as_array(const Value& value) {
+    return static_cast<ArrayObject*>(value.ref);
 }
 
 inline bool is_scalar_value(char32_t code_point) noexcept {
@@ -222,8 +295,20 @@ inline std::string format_value(const Value& value) {
         }
         case Tag::Str:
             throw RuntimeError("native N0 does not implement string values");
+        case Tag::BigInt: {
+            const BigIntObject* object = as_bigint_const(value);
+            if (object == nullptr) {
+                throw RuntimeError("native N1 encountered a null bigint");
+            }
+            return object->value.format_decimal();
+        }
+        case Tag::Fun:
+        case Tag::Arr:
+        case Tag::Spread:
+            throw RuntimeError(
+                "native N1 does not implement function or container printing");
     }
-    throw RuntimeError("native N0 encountered an unknown value tag");
+    throw RuntimeError("native N1 encountered an unknown value tag");
 }
 
 // Language truth value for the N0 scalars. This mirrors PowangBoolean.cast,
@@ -242,6 +327,14 @@ inline bool truthy(const Value& value) {
             return value.d != 0.0;
         case Tag::Str:
             throw RuntimeError("native N0 does not implement string values");
+        case Tag::BigInt: {
+            const BigIntObject* object = as_bigint_const(value);
+            return object != nullptr && !object->value.is_zero();
+        }
+        case Tag::Fun:
+        case Tag::Arr:
+        case Tag::Spread:
+            return true;
     }
     return false;
 }

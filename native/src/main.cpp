@@ -14,6 +14,7 @@
 #include "pwb/error.hpp"
 #include "pwb/host.hpp"
 #include "pwb/image.hpp"
+#include "pwb/meta.hpp"
 #include "pwb/opcodes_generated.hpp"
 #include "pwb/verifier.hpp"
 #include "pwb/vm.hpp"
@@ -27,6 +28,7 @@ void usage() {
         << "  run <image.pwb>     run the embedded image\n"
         << "  disasm <image.pwb>  print the entry code disassembly\n"
         << "  verify <image.pwb>  verify the image\n"
+        << "  meta <meta.pwbm>    print the PWBM metadata summary\n"
         << "  version             print the runtime version\n";
 }
 
@@ -65,7 +67,8 @@ int main(int argc, char** argv) {
                   << pwb::generated::kLanguageVersion << "\n";
         return 0;
     }
-    if (command != "run" && command != "disasm" && command != "verify") {
+    if (command != "run" && command != "disasm"
+        && command != "verify" && command != "meta") {
         usage();
         return 2;
     }
@@ -77,6 +80,19 @@ int main(int argc, char** argv) {
     if (!read_file(argv[2], bytes)) {
         std::cerr << "native image error: cannot read " << argv[2] << "\n";
         return 1;
+    }
+    if (command == "meta") {
+        try {
+            const pwb::Meta meta = pwb::parse_meta(bytes.data(), bytes.size());
+            std::cout << pwb::format_meta_summary(meta);
+            return 0;
+        } catch (const pwb::MetadataError& error) {
+            std::cerr << "native metadata error: " << error.what() << "\n";
+            return 1;
+        } catch (const std::exception& error) {
+            std::cerr << "native metadata error: " << error.what() << "\n";
+            return 1;
+        }
     }
     if (command == "run") {
         pwb::StdoutHost host;

@@ -1,7 +1,8 @@
 """Render a complete ``temp.cpp`` translation unit for a program image.
 
-The generated source embeds the exact ``image.to_bytes()`` payload in a byte
-array and calls ``pwb::run_embedded_image``. The text lives in an in-memory
+The generated source embeds the exact ``image.to_bytes()`` payload and its
+PWBM metadata in byte arrays and calls
+``pwb::run_embedded_image_with_meta``. The text lives in an in-memory
 ``io.StringIO`` buffer and this module never writes a file.
 """
 
@@ -12,6 +13,7 @@ import zlib
 from dataclasses import dataclass
 
 from ..image import ProgramImage
+from .meta import build_meta
 
 
 HEADER_COMMENT = "// Generated from a Powang PWB1 image. Do not edit."
@@ -29,6 +31,16 @@ class SourceOptions:
 
     entry_label: str = "program"
     emit_crc: bool = True
+    emit_meta: bool = True
+
+
+def _write_byte_array(buffer: io.StringIO, name: str, data: bytes) -> None:
+    buffer.write(f"alignas(8) const std::uint8_t {name}[] = {{\n")
+    for start in range(0, len(data), BYTES_PER_LINE):
+        chunk = data[start : start + BYTES_PER_LINE]
+        tokens = ", ".join(f"0x{byte:02X}" for byte in chunk)
+        buffer.write(f"    {tokens},\n")
+    buffer.write("};\n")
 
 
 def render_temp_cpp_into(
@@ -40,6 +52,7 @@ def render_temp_cpp_into(
     if options is None:
         options = SourceOptions()
     data = image.to_bytes()
+    meta = build_meta(image) if options.emit_meta else b""
     buffer.write(HEADER_COMMENT)
     buffer.write("\n\n")
     buffer.write("#include <cstddef>\n")
@@ -47,25 +60,31 @@ def render_temp_cpp_into(
     buffer.write('\n#include "pwb/host.hpp"\n')
     buffer.write('#include "pwb/vm.hpp"\n')
     buffer.write("\nnamespace {\n\n")
-    buffer.write("alignas(8) const std::uint8_t kPwbImage[] = {\n")
-    for start in range(0, len(data), BYTES_PER_LINE):
-        chunk = data[start : start + BYTES_PER_LINE]
-        tokens = ", ".join(f"0x{byte:02X}" for byte in chunk)
-        buffer.write(f"    {tokens},\n")
-    buffer.write("};\n\n")
-    buffer.write("constexpr std::size_t kPwbImageSize = sizeof(kPwbImage);\n")
+    _write_byte_array(buffer, "kPwbImage", data)
+    buffer.write("\nconstexpr std::size_t kPwbImageSize = sizeof(kPwbImage);\n")
     if options.emit_crc:
         checksum = zlib.crc32(data) & 0xFFFFFFFF
         buffer.write(
             "[[maybe_unused]] constexpr std::uint32_t kPwbImageCrc = "
             f"0x{checksum:08X};\n"
         )
+    if options.emit_meta:
+        buffer.write("\n")
+        _write_byte_array(buffer, "kPwbMeta", meta)
+        buffer.write("\nconstexpr std::size_t kPwbMetaSize = sizeof(kPwbMeta);\n")
     buffer.write("\n} // namespace\n\n")
     buffer.write("int main() {\n")
     buffer.write("    pwb::StdoutHost host;\n")
-    buffer.write(
-        "    return pwb::run_embedded_image(kPwbImage, kPwbImageSize, host);\n"
-    )
+    if options.emit_meta:
+        buffer.write(
+            "    return pwb::run_embedded_image_with_meta("
+            "kPwbImage, kPwbImageSize, kPwbMeta, kPwbMetaSize, host);\n"
+        )
+    else:
+        buffer.write(
+            "    return pwb::run_embedded_image("
+            "kPwbImage, kPwbImageSize, host);\n"
+        )
     buffer.write("}\n")
 
 

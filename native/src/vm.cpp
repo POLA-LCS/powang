@@ -11,6 +11,8 @@
 
 #include "pwb/error.hpp"
 #include "pwb/image.hpp"
+#include "pwb/meta.hpp"
+#include "pwb/object.hpp"
 #include "pwb/opcodes.hpp"
 #include "pwb/opcodes_generated.hpp"
 #include "pwb/value.hpp"
@@ -24,6 +26,12 @@ struct Frame {
     std::vector<Value> locals;
     std::vector<Value> stack;
     std::uint32_t ip = 0;
+};
+
+struct Machine {
+    Host& host;
+    Arena arena;
+    const Meta* meta = nullptr;
 };
 
 [[noreturn]] void runtime_fail(const std::string& message) {
@@ -400,6 +408,10 @@ Comparison compare_values(
                     false,
                     left.c == right.c ? 0 : (left.c < right.c ? -1 : 1)};
             case Tag::Str:
+            case Tag::BigInt:
+            case Tag::Fun:
+            case Tag::Arr:
+            case Tag::Spread:
                 break;
             case Tag::Bool:
             case Tag::Int:
@@ -444,7 +456,7 @@ Value load_constant(const CodeObject& code, std::int64_t index) {
     }
 }
 
-void execute(const Image& image, Frame& frame, Host& host) {
+void execute(const Image& image, Frame& frame, Machine& machine) {
     const CodeObject& code = *frame.code;
     while (frame.ip < code.bytecode.size()) {
         const DecodedInstruction instruction =
@@ -733,7 +745,7 @@ void execute(const Image& image, Frame& frame, Host& host) {
                 if (site.name == "println") {
                     text.push_back('\n');
                 }
-                host.write(text);
+                machine.host.write(text);
                 push_value(frame, make_int(static_cast<std::int64_t>(count)));
                 break;
             }
@@ -755,18 +767,30 @@ void execute(const Image& image, Frame& frame, Host& host) {
 
 } // namespace
 
-int run_embedded_image(
-    const std::uint8_t* data, std::size_t size, Host& host) {
+int run_embedded_image_with_meta(
+    const std::uint8_t* data,
+    std::size_t size,
+    const std::uint8_t* meta_data,
+    std::size_t meta_size,
+    Host& host) {
     try {
         const Image image = parse_image(data, size);
         verify_image(image);
+        Meta meta_storage;
+        const Meta* meta = nullptr;
+        if (meta_data != nullptr && meta_size != 0) {
+            meta_storage = parse_meta(meta_data, meta_size);
+            validate_meta(meta_storage, image);
+            meta = &meta_storage;
+        }
         const CodeObject& code = image.codes[image.entry_code];
         Frame frame;
         frame.code = &code;
         frame.locals.assign(code.local_count, make_undef());
         frame.stack.reserve(code.max_stack);
         frame.ip = 0;
-        execute(image, frame, host);
+        Machine machine{host, {}, meta};
+        execute(image, frame, machine);
         return 0;
     } catch (const ImageError& error) {
         host.write_error(
@@ -775,6 +799,10 @@ int run_embedded_image(
     } catch (const VerificationError& error) {
         host.write_error(
             std::string("native verifier error: ") + error.what() + "\n");
+        return 1;
+    } catch (const MetadataError& error) {
+        host.write_error(
+            std::string("native metadata error: ") + error.what() + "\n");
         return 1;
     } catch (const RuntimeError& error) {
         host.write_error(
@@ -788,6 +816,11 @@ int run_embedded_image(
             std::string("native internal error: ") + error.what() + "\n");
         return 1;
     }
+}
+
+int run_embedded_image(
+    const std::uint8_t* data, std::size_t size, Host& host) {
+    return run_embedded_image_with_meta(data, size, nullptr, 0, host);
 }
 
 } // namespace pwb

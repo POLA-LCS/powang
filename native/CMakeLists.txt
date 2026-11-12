@@ -10,6 +10,9 @@ add_library(pwb_runtime STATIC
     src/image.cpp
     src/verifier.cpp
     src/disasm.cpp
+    src/bigint.cpp
+    src/meta.cpp
+    src/object.cpp
     src/vm.cpp
     src/host.cpp)
 
@@ -30,3 +33,18 @@ if(MSVC)
 else()
     target_compile_options(pwb_native PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+enable_testing()
+
+add_executable(pwb_native_tests
+    tests/test_bigint.cpp
+    tests/test_value.cpp)
+target_link_libraries(pwb_native_tests PRIVATE pwb_runtime)
+
+if(MSVC)
+    target_compile_options(pwb_native_tests PRIVATE /W4)
+else()
+    target_compile_options(pwb_native_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME pwb_native_tests COMMAND pwb_native_tests)
