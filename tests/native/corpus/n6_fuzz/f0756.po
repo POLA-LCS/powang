@@ -1,0 +1,20 @@
+fun generated_0(value: int): int {
+    return value * 0 + 0;
+}
+try {
+    match (size(typeof(false)) % (!$"value=2.80")) {
+    case 0 >> print(0);
+    case _ >> print(1);
+}
+} catch problem {
+    print(problem.kind);
+}
+try {
+    print(-2.33);
+} catch problem {
+    print(problem.kind);
+}
+values_2 := [0.34, true];
+values_3 := [("bc" + (typeof(15) * 'b')), nova];
+print(false);
+print(generated_0(4));

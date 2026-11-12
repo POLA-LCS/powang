@@ -92,6 +92,17 @@ class NativeCorpusTests(unittest.TestCase):
         self._run_file_corpus(
             ROOT / "tests" / "native" / "corpus" / "n5")
 
+    def test_n6_fuzz_regressions(self) -> None:
+        from src.vm.native.differential import compare_file
+        programs = sorted(
+            (ROOT / "tests" / "native" / "corpus" / "n6_fuzz").glob(
+                "*.po"))
+        self.assertTrue(programs)
+        for path in programs:
+            with self.subTest(program=path.name):
+                result = compare_file(path)
+                self.assertTrue(result.equal, result.report())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,16 @@
+fun generated_0(value: int): int {
+    return value * 0 + 2;
+}
+fun generated_1(value: int): int {
+    return value * 1 + 3;
+}
+try {
+    match (nova - (!(-13))) {
+    case 0 >> print(0);
+    case _ >> print(1);
+}
+} catch problem {
+    print(problem.kind);
+}
+values_1 := [size(size(typeof(false))), ($"value=size(nova)" == ((!false) == size("x y")))];
+print(generated_0(0));

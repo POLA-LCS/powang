@@ -1,0 +1,16 @@
+fun generated_0(value: int): int {
+    return value * 2 + 8;
+}
+fun generated_1(value: int): int {
+    return value * 2 + 4;
+}
+match $"value=-1.22" {
+    case 0 >> print(0);
+    case _ >> print(1);
+}
+if false {
+    print('b');
+} else {
+    print(($"value=(-nova)" > (-'z')));
+}
+print(generated_0(1));

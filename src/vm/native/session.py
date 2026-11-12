@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Sequence
@@ -72,6 +73,10 @@ def compile_native_file(
                 state=state,
             )
         except PowangError as error:
+            ## The Python CLI prints checker warnings before it reports the
+            ## compile or check error. The native path must do the same.
+            if warnings:
+                state.emit_warnings()
             ## run_program gives an entry compile or check error the same
             ## top-level line as a runtime error.
             if error.line is None:
@@ -103,8 +108,14 @@ def run_native_file(
     warning_text = ""
     if warnings:
         buffer = io.StringIO()
-        with contextlib.redirect_stderr(buffer):
-            session = compile_native_file(path, warnings=True)
+        try:
+            with contextlib.redirect_stderr(buffer):
+                session = compile_native_file(path, warnings=True)
+        except PowangError:
+            warning_text = buffer.getvalue()
+            if warning_text:
+                sys.stderr.write(warning_text)
+            raise
         warning_text = buffer.getvalue()
     else:
         session = compile_native_file(path, warnings=False)

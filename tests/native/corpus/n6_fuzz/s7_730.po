@@ -1,0 +1,18 @@
+fun generated_0(value: int): int {
+    return value * 0 + 6;
+}
+fun generated_1(value: int): int {
+    return value * 4 + 4;
+}
+for index >> 0 >> 1 {
+    if size("a") {
+    print(nova);
+} else {
+    print(7.06);
+}
+}
+values_1 := [nova, $"value=12"];
+print(typeof(size((false % 'b'))));
+print('b');
+print($"value=size(("bc" - "bc"))");
+print((--3));

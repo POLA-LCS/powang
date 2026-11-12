@@ -16,6 +16,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -92,8 +94,10 @@ def _python_run(path: Path) -> tuple[str, str, int]:
 
 def compare_file(path: Path) -> Comparison:
     python_stdout, python_stderr, python_code = _python_run(path)
+    warning_buffer = io.StringIO()
     try:
-        native = run_native_file(path)
+        with contextlib.redirect_stderr(warning_buffer):
+            native = run_native_file(path)
         return Comparison(
             path=path,
             python_stdout=python_stdout,
@@ -110,7 +114,7 @@ def compare_file(path: Path) -> Comparison:
             python_stderr=python_stderr,
             python_code=python_code,
             native_stdout=str(error) + "\n",
-            native_stderr="",
+            native_stderr=warning_buffer.getvalue(),
             native_code=1,
         )
     except NativeBuildError as error:

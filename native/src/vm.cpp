@@ -375,14 +375,22 @@ void require_numeric_pair(
     const Value& right,
     const char* symbol) {
     if (!is_numeric_operand(left) || !is_numeric_operand(right)) {
+        const bool char_operand =
+            left.tag == Tag::Char || right.tag == Tag::Char;
         const bool explicit_operation =
             left.tag == Tag::Nova || right.tag == Tag::Nova
-            || left.tag == Tag::Char || right.tag == Tag::Char
-            || is_weak(left) || is_weak(right);
+            || char_operand || is_weak(left) || is_weak(right);
+        std::string right_label = char_operand
+            ? runtime_type_name(right) : error_type_label(right);
+        if (left.tag == Tag::Nova && right.tag == Tag::Nova) {
+            right_label = "nova";
+        }
         throw_error(error_unsupported_operation(
             machine.arena,
             explicit_operation ? "operation" : "implicit operation",
-            error_type_label(left), symbol, error_type_label(right)));
+            char_operand ? runtime_type_name(left) : error_type_label(left),
+            symbol,
+            right_label));
     }
 }
 
@@ -468,6 +476,17 @@ Value make_integer_result(Machine& machine, const BigInt& value) {
 }
 
 Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
+    if ((left.tag == Tag::Bool && right.tag == Tag::Nova)
+        || (left.tag == Tag::Nova && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "+", error_type_label(right)));
+    }
+    if (left.tag == Tag::Char && right.tag == Tag::Bool) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "implicit operation",
+            "char", "+", "bool"));
+    }
     if (left.tag == Tag::Bool) {
         return make_bool(left.b || truthy(right));
     }
@@ -532,10 +551,14 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
         const bool explicit_operation =
             left.tag == Tag::Nova || right.tag == Tag::Nova
             || is_weak(left) || is_weak(right);
+        std::string right_label = error_type_label(right);
+        if (left.tag == Tag::Nova && right.tag == Tag::Nova) {
+            right_label = "nova";
+        }
         throw_error(error_unsupported_operation(
             machine.arena,
             explicit_operation ? "operation" : "implicit operation",
-            error_type_label(left), "+", error_type_label(right)));
+            error_type_label(left), "+", right_label));
     }
     if (is_integer_value(left) && is_integer_value(right)) {
         if (left.tag == Tag::BigInt || right.tag == Tag::BigInt
@@ -569,6 +592,12 @@ Value arithmetic_add(Machine& machine, const Value& left, const Value& right) {
 Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
     if ((left.tag == Tag::Bool && right.tag == Tag::Char)
         || (left.tag == Tag::Char && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "-", error_type_label(right)));
+    }
+    if ((left.tag == Tag::Bool && right.tag == Tag::Nova)
+        || (left.tag == Tag::Nova && right.tag == Tag::Bool)) {
         throw_error(error_unsupported_operation(
             machine.arena, "operation",
             error_type_label(left), "-", error_type_label(right)));
@@ -650,6 +679,12 @@ Value arithmetic_sub(Machine& machine, const Value& left, const Value& right) {
 Value arithmetic_mul(Machine& machine, const Value& left, const Value& right) {
     if ((left.tag == Tag::Bool && right.tag == Tag::Char)
         || (left.tag == Tag::Char && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "*", error_type_label(right)));
+    }
+    if ((left.tag == Tag::Bool && right.tag == Tag::Nova)
+        || (left.tag == Tag::Nova && right.tag == Tag::Bool)) {
         throw_error(error_unsupported_operation(
             machine.arena, "operation",
             error_type_label(left), "*", error_type_label(right)));
@@ -764,6 +799,12 @@ Value chunk_size_error(
 Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
     if ((left.tag == Tag::Bool && right.tag == Tag::Char)
         || (left.tag == Tag::Char && right.tag == Tag::Bool)) {
+        throw_error(error_unsupported_operation(
+            machine.arena, "operation",
+            error_type_label(left), "/", error_type_label(right)));
+    }
+    if ((left.tag == Tag::Bool && right.tag == Tag::Nova)
+        || (left.tag == Tag::Nova && right.tag == Tag::Bool)) {
         throw_error(error_unsupported_operation(
             machine.arena, "operation",
             error_type_label(left), "/", error_type_label(right)));
@@ -896,15 +937,37 @@ Value arithmetic_div(Machine& machine, const Value& left, const Value& right) {
 }
 
 Value arithmetic_mod(Machine& machine, const Value& left, const Value& right) {
-    if (left.tag == Tag::Bool || right.tag == Tag::Bool) {
-        if (is_numeric_operand(left) && is_numeric_operand(right)) {
+    if (left.tag == Tag::Bool) {
+        if (right.tag == Tag::Nova || is_weak(right)) {
             throw_error(error_unsupported_operation(
-                machine.arena, "implicit operation",
-                "bool", "%", "bool"));
+                machine.arena, "operation",
+                error_type_label(left), "%", error_type_label(right)));
+        }
+        if (right.tag == Tag::Char) {
+            throw_error(error_unsupported_operation(
+                machine.arena, "operation",
+                "bool", "%", "char"));
         }
         throw_error(error_unsupported_operation(
-            machine.arena, "operation",
-            error_type_label(left), "%", error_type_label(right)));
+            machine.arena, "implicit operation",
+            "bool", "%", "bool"));
+    }
+    if (right.tag == Tag::Bool) {
+        if (left.tag == Tag::Int || left.tag == Tag::BigInt) {
+            // Integer modulo accepts a bool divisor as 0 or 1.
+        } else if (left.tag == Tag::Char) {
+            throw_error(error_unsupported_operation(
+                machine.arena, "operation",
+                "char", "%", "bool"));
+        } else if (left.tag == Tag::Nova || is_weak(left)) {
+            throw_error(error_unsupported_operation(
+                machine.arena, "operation",
+                error_type_label(left), "%", "bool"));
+        } else {
+            throw_error(error_unsupported_operation(
+                machine.arena, "implicit operation",
+                runtime_type_name(left), "%", "bool"));
+        }
     }
     require_numeric_pair(machine, left, right, "%");
     if (is_integer_value(left) && is_integer_value(right)) {

@@ -1,0 +1,5 @@
+print('b');
+match (size((nova - false)) >= typeof(([-]0.06))) {
+    case 0 >> print(0);
+    case _ >> print(1);
+}

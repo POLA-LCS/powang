@@ -1,0 +1,7 @@
+match ($"value='z'" % (!size("a"))) {
+    case 0 >> print(0);
+    case _ >> print(1);
+}
+values_1 := [([-]((-nova) < 19)), (false + "x y")];
+values_2 := [typeof($"value=typeof('a')"), size(typeof(typeof('a')))];
+print(([-](-size(true))));

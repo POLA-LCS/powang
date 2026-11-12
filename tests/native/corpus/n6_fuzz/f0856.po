@@ -1,0 +1,15 @@
+if false {
+    try {
+    value_2 := typeof(typeof(typeof(nova)));
+} catch problem {
+    print(problem.kind);
+}
+} else {
+    print((size(("bc" + "bc")) < (!"hello")));
+}
+match nova {
+    case 0 >> print(0);
+    case _ >> print(1);
+}
+print((11 - typeof((3.99 == "bc"))));
+values_3 := [size((typeof(4) + (--1.84))), 'b'];

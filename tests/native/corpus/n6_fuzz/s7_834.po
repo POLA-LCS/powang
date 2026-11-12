@@ -1,0 +1,15 @@
+if nova {
+    print('b');
+} else {
+    try {
+    print($"value='b'");
+} catch problem {
+    print(problem.kind);
+}
+}
+for index >> 0 >> 0 {
+    print(-4);
+}
+value_2 := typeof(size((nova - nova)));
+print(size('z'));
+print(4.80);

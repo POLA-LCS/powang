@@ -1,0 +1,6 @@
+for index >> 0 >> 1 {
+    value_1 := ([-](false != false));
+}
+for index >> 0 >> 3 {
+    print((-('b' - ([-]'z'))));
+}

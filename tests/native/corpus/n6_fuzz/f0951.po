@@ -1,0 +1,9 @@
+fun generated_0(value: int): int {
+    return value * 3 + 1;
+}
+fun generated_1(value: int): int {
+    return value * 4 + 3;
+}
+print(18);
+value_1 := typeof((0 % (!13)));
+print(generated_0(8));

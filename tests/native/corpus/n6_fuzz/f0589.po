@@ -1,0 +1,13 @@
+fun generated_0(value: int): int {
+    return value * 5 + 3;
+}
+fun generated_1(value: int): int {
+    return value * 4 + 5;
+}
+value_0 := $"value=(size(1) - size(nova))";
+value_1 := true;
+print((nova * (nova != nova)));
+print(nova);
+print(size('a'));
+print($"value=size("bc")");
+print(generated_0(3));

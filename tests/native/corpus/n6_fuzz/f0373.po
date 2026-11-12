@@ -1,0 +1,11 @@
+fun generated_0(value: int): int {
+    return value * 4 + 5;
+}
+try {
+    values_1 := [size(typeof(nova)), $"value="x y""];
+} catch problem {
+    print(problem.kind);
+}
+value_1 := typeof(false);
+print((-(([-]"hello") < ('b' / nova))));
+values_3 := [nova, ("a" / size(typeof(16)))];

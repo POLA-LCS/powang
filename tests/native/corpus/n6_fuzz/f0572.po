@@ -1,0 +1,4 @@
+print('a');
+print(size(((true >= "a") % "bc")));
+print('a');
+print('b');
