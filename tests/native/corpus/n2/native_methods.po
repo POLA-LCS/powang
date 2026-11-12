@@ -1,0 +1,50 @@
+## N2 native methods for arrays, strings, maps, sets, tuples and chars.
+
+values := [1, 2, 3];
+println(arr.size(values));
+println(arr.get(values, 0));
+println(arr.reverse(values));
+println(arr.push(values, 4));
+println(arr.add(values, [4, 5]));
+println(arr.set(values, 0, 9));
+println(arr.popget(values));
+println(arr.get(values, -1));
+
+text := "abc";
+println(str.size(text));
+println(str.get(text, 0));
+println(str.reverse(text));
+println(str.chars(text));
+println(str.count(text, "a"));
+println(str.div(text, "b"));
+println(str.mul(text, 2));
+println(str.sub(text, "b"));
+
+m := ["a" >> 1, "b" >> 2];
+println(map.size(m));
+println(map.get(m, "a"));
+println(map.has(m, "a"));
+println(map.keys(m));
+println(map.values(m));
+println(map.merge(m, ["c" >> 3]));
+
+s := [/1, 2];
+println(set.size(s));
+println(set.has(s, 2));
+println(set.to_arr(s));
+println(set.union(s, [/2, 3]));
+println(set.intersection(s, [/2, 3]));
+println(set.difference(s, [/2, 3]));
+
+t := .[1, 2];
+println(tup.size(t));
+println(tup.get(t, 0));
+println(tup.reverse(t));
+println(tup.to_arr(t));
+println(tup.add(t, .[3, 4]));
+
+c := 'a';
+println(char.code(c));
+println(char.to_str(c));
+println(char.is_alpha(c));
+println(char.is_digit(c));

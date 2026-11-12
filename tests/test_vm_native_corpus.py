@@ -1,4 +1,4 @@
-"""Differential tests for the N1 native execution corpus."""
+"""Differential tests for the native execution corpora."""
 
 from __future__ import annotations
 
@@ -20,8 +20,7 @@ class NativeCorpusTests(unittest.TestCase):
         except NativeBuildError as error:
             raise unittest.SkipTest(str(error))
 
-    def test_n1_corpus_matches(self) -> None:
-        corpus = ROOT / "tests" / "native" / "corpus" / "n1"
+    def _run_corpus(self, corpus: Path) -> None:
         programs = sorted(corpus.glob("*.po"))
         self.assertTrue(programs)
         for path in programs:
@@ -40,6 +39,12 @@ class NativeCorpusTests(unittest.TestCase):
                 )
                 self.assertEqual(native.stdout, python.stdout, path.name)
                 self.assertEqual(native.stderr, python.stderr, path.name)
+
+    def test_n1_corpus_matches(self) -> None:
+        self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n1")
+
+    def test_n2_corpus_matches(self) -> None:
+        self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n2")
 
 
 if __name__ == "__main__":

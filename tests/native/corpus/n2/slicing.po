@@ -1,0 +1,17 @@
+## N2 slice bounds for arrays, strings and tuples.
+
+values := [0, 1, 2, 3, 4];
+println(values[1 >> 4]);
+println(values[-3 >> -1]);
+println(values[0 >> 10]);
+println(values[-10 >> 2]);
+println(values[3 >> 1]);
+
+text := "abcdef";
+println(text[1 >> 4]);
+println(text[-3 >> -1]);
+println(text[0 >> 10]);
+println(text[3 >> 1]);
+
+pair := .[1, 2, 3];
+println(pair[1 >> 3]);

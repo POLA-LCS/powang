@@ -1,0 +1,25 @@
+## N2 deep copy semantics for nested arrays, maps and tuples.
+
+first := [[1, 2], [3, 4]];
+second := first;
+second[0][0] = 9;
+println(first);
+println(second);
+
+base := [1, 2];
+alias := base;
+alias[1] = 8;
+println(base);
+println(alias);
+
+m := ["a" >> [1, 2]];
+n := m;
+n["a"][0] = 7;
+println(m);
+println(n);
+
+t := .[[1, 2], [3, 4]];
+u := t;
+u[0][1] = 5;
+println(t);
+println(u);

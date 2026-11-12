@@ -10,6 +10,7 @@
 #include <deque>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "pwb/bigint.hpp"
@@ -38,9 +39,30 @@ struct ArrayObject {
     std::vector<Value> items;
 };
 
+struct StringObject {
+    std::u32string code_points;
+    std::string utf8;
+};
+
+struct TupleObject {
+    std::vector<Value> items;
+};
+
+struct MapObject {
+    std::vector<std::pair<Value, Value>> entries;
+};
+
+struct SetObject {
+    std::vector<Value> items;
+};
+
 struct IteratorObject {
     std::vector<Value> values;
     std::size_t index = 0;
+};
+
+struct CopyMemo {
+    std::unordered_map<const void*, Value> seen;
 };
 
 class Arena {
@@ -49,17 +71,40 @@ public:
     ArrayObject* allocate_array(std::vector<Value> items = {});
     FunctionObject* allocate_function(const FunctionMetadata* metadata);
     IteratorObject* allocate_iterator(std::vector<Value> values);
+    StringObject* allocate_string(std::u32string code_points);
+    StringObject* allocate_string_utf8(const std::string& text);
+    TupleObject* allocate_tuple(std::vector<Value> items = {});
+    MapObject* allocate_map();
+    SetObject* allocate_set();
 
     std::size_t bigint_count() const noexcept;
     std::size_t array_count() const noexcept;
     std::size_t function_count() const noexcept;
     std::size_t iterator_count() const noexcept;
+    std::size_t string_count() const noexcept;
+    std::size_t tuple_count() const noexcept;
+    std::size_t map_count() const noexcept;
+    std::size_t set_count() const noexcept;
 
 private:
     std::deque<BigIntObject> bigints_;
     std::deque<ArrayObject> arrays_;
     std::deque<FunctionObject> functions_;
     std::deque<IteratorObject> iterators_;
+    std::deque<StringObject> strings_;
+    std::deque<TupleObject> tuples_;
+    std::deque<MapObject> maps_;
+    std::deque<SetObject> sets_;
 };
+
+std::string format_heap_value(const Value& value);
+bool heap_truthy(const Value& value);
+bool value_equal(const Value& left, const Value& right);
+Value copy_value(Arena& arena, const Value& value, CopyMemo& memo);
+Value copy_value(Arena& arena, const Value& value);
+void map_set(MapObject& map, const Value& key, const Value& value);
+const Value* map_get(const MapObject& map, const Value& key);
+void set_add(SetObject& set, const Value& value);
+bool set_has(const SetObject& set, const Value& value);
 
 } // namespace pwb

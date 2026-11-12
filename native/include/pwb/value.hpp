@@ -22,6 +22,10 @@ namespace pwb {
 struct FunctionObject;
 struct ArrayObject;
 struct IteratorObject;
+struct StringObject;
+struct TupleObject;
+struct MapObject;
+struct SetObject;
 
 enum class Tag : std::uint8_t {
     Nova = 0,
@@ -36,6 +40,9 @@ enum class Tag : std::uint8_t {
     Arr = 9,
     Spread = 10,
     Iter = 11,
+    Tup = 12,
+    Map = 13,
+    Set = 14,
 };
 
 struct Value {
@@ -68,6 +75,9 @@ inline const char* tag_name(Tag tag) noexcept {
         case Tag::Arr: return "arr";
         case Tag::Spread: return "spread";
         case Tag::Iter: return "iter";
+        case Tag::Tup: return "tup";
+        case Tag::Map: return "map";
+        case Tag::Set: return "set";
     }
     return "unknown";
 }
@@ -147,6 +157,34 @@ inline Value make_iterator(IteratorObject* object) {
     return value;
 }
 
+inline Value make_string(StringObject* object) {
+    Value value{};
+    value.tag = Tag::Str;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_tuple(TupleObject* object) {
+    Value value{};
+    value.tag = Tag::Tup;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_map(MapObject* object) {
+    Value value{};
+    value.tag = Tag::Map;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_set(SetObject* object) {
+    Value value{};
+    value.tag = Tag::Set;
+    value.ref = object;
+    return value;
+}
+
 inline bool is_nova(const Value& value) noexcept {
     return value.tag == Tag::Nova;
 }
@@ -171,6 +209,22 @@ inline bool is_iterator(const Value& value) noexcept {
     return value.tag == Tag::Iter;
 }
 
+inline bool is_string(const Value& value) noexcept {
+    return value.tag == Tag::Str;
+}
+
+inline bool is_tuple(const Value& value) noexcept {
+    return value.tag == Tag::Tup;
+}
+
+inline bool is_map(const Value& value) noexcept {
+    return value.tag == Tag::Map;
+}
+
+inline bool is_set(const Value& value) noexcept {
+    return value.tag == Tag::Set;
+}
+
 inline BigIntObject* as_bigint(const Value& value) {
     return static_cast<BigIntObject*>(value.ref);
 }
@@ -189,6 +243,26 @@ inline ArrayObject* as_array(const Value& value) {
 
 inline IteratorObject* as_iterator(const Value& value) {
     return static_cast<IteratorObject*>(value.ref);
+}
+
+inline StringObject* as_string(const Value& value) {
+    return static_cast<StringObject*>(value.ref);
+}
+
+inline const StringObject* as_string_const(const Value& value) {
+    return static_cast<const StringObject*>(value.ref);
+}
+
+inline TupleObject* as_tuple(const Value& value) {
+    return static_cast<TupleObject*>(value.ref);
+}
+
+inline MapObject* as_map(const Value& value) {
+    return static_cast<MapObject*>(value.ref);
+}
+
+inline SetObject* as_set(const Value& value) {
+    return static_cast<SetObject*>(value.ref);
 }
 
 inline bool is_scalar_value(char32_t code_point) noexcept {
@@ -292,7 +366,11 @@ inline std::string format_number(double value) {
     return out;
 }
 
-// Format one value using the print rules for N0 scalars.
+std::string format_heap_value(const Value& value);
+bool heap_truthy(const Value& value);
+
+// Format one value using the print rules for the native scalars and heap
+// values.
 inline std::string format_value(const Value& value) {
     switch (value.tag) {
         case Tag::Nova:
@@ -312,7 +390,11 @@ inline std::string format_value(const Value& value) {
             return out;
         }
         case Tag::Str:
-            throw RuntimeError("native N0 does not implement string values");
+        case Tag::Arr:
+        case Tag::Tup:
+        case Tag::Map:
+        case Tag::Set:
+            return format_heap_value(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);
             if (object == nullptr) {
@@ -321,11 +403,10 @@ inline std::string format_value(const Value& value) {
             return object->value.format_decimal();
         }
         case Tag::Fun:
-        case Tag::Arr:
         case Tag::Spread:
         case Tag::Iter:
             throw RuntimeError(
-                "native N1 does not implement function or container printing");
+                "native N1 does not implement function or iterator printing");
     }
     throw RuntimeError("native N1 encountered an unknown value tag");
 }
@@ -345,13 +426,16 @@ inline bool truthy(const Value& value) {
         case Tag::Num:
             return value.d != 0.0;
         case Tag::Str:
-            throw RuntimeError("native N0 does not implement string values");
+        case Tag::Arr:
+        case Tag::Tup:
+        case Tag::Map:
+        case Tag::Set:
+            return heap_truthy(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);
             return object != nullptr && !object->value.is_zero();
         }
         case Tag::Fun:
-        case Tag::Arr:
         case Tag::Spread:
         case Tag::Iter:
             return true;

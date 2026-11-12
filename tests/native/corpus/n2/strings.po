@@ -1,0 +1,22 @@
+## N2 strings, indexing, slicing, interpolation, operators and native methods.
+
+text := "Hello";
+println(text);
+println(text + "!");
+println(text + '!');
+println(text * "l");
+println("ab" * 3);
+println(3 * "ab");
+println("a,b,c" / ",");
+println([-]text);
+println(text[0]);
+println(text[-1]);
+println(text[0 >> 2]);
+println(text == "Hello");
+println(text < "World");
+println(str.size(text));
+println(str.count(text, "l"));
+println(str.chars(text));
+println(str.div("a,b,c", ","));
+println(str.mul("ab", 3));
+println(str.sub("banana", "na"));

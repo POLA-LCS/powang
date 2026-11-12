@@ -1,0 +1,10 @@
+## N2 interpolation and format builtins.
+
+name := "Ada";
+count := 3;
+value := 2.5;
+println($"hello {name} {count} {value}");
+println(format("x {0} y {1}", 7, 8));
+println(format("items {0/, }", [1, 2, 3]));
+printf("p {0}", 9);
+println();
