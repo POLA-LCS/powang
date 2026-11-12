@@ -16,8 +16,8 @@ remaining gates are listed at the end.
 
 | Gate | Result |
 |---|---|
-| Full Python VM suite | 644 tests, all pass |
-| Full tree walker suite (`POWANG_ENGINE=tree`) | 644 tests, all pass |
+| Full Python VM suite | 646 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 646 tests, all pass |
 | Native N1 corpus | 5 programs, zero mismatches |
 | Native N2 corpus | 6 programs, zero mismatches |
 | Native N3 corpus | 9 programs, zero mismatches |
@@ -77,12 +77,17 @@ weak `nova` multiplied by a string:
 The seeded fuzz gate is therefore open. The generator, the runner and the
 comparison path are implemented.
 
+## Stress results
+
+`tests/test_native_stress.py` starts the compiled native executable 100 times
+and runs 200 task lifecycles, 100 lazy and 100 worker. Every startup returns
+zero, every task settles, no process leaks and the expected task sums match.
+
 ## Remaining gates
 
 1. Seeded native fuzz differential over 1000 programs on two seeds. The first
    mismatch on seed 2026 is recorded above.
-2. The 100-start stress test.
-3. Warm executable cache and compile timing measurements.
-4. Optional inline caches and threaded dispatch.
-5. The default engine decision and the `0.25.0` release.
-6. Native method access-control and ambiguity error text parity.
+2. Warm executable cache and compile timing measurements.
+3. Optional inline caches and threaded dispatch.
+4. The default engine decision and the `0.25.0` release.
+5. Native method access-control and ambiguity error text parity.

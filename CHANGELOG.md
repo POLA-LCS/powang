@@ -30,8 +30,8 @@ All notable changes to powang are documented here.
 - The default scalar host bridge for `math`, `stdlib_strings`, `stdlib_json`, `stdlib_url`, `stdlib_crypto`, `stdlib_time` and `stdlib_env`, including JSON parsing and stringifying, URL encoding, query building, SHA-256, constant-time comparison, time helpers and argument counts.
 - All 32 programs under `examples/` match the Python VM on standard output, standard error and exit code. `tests/test_vm_native_examples.py` runs the full example differential.
 - `tests/native/corpus/n4` has the module, wildcard, legacy, error, try, finally, propagation, reference, project and extern differential programs. `tests/native/corpus/n5` has lazy task, worker task, cancellation, task error, file, cleanup, async trait, task isolation and pending limit programs. `tests/test_vm_native_corpus.py` runs the N1 to N5 corpora against the Python VM.
-- `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_native_meta.py` has 6 tests. `tests/test_native_tasks.py` has 2 host input and task status parity tests. `tests/test_vm_native_engine.py` has 5 tests for `--engine=native`, native imports, error stream parity and the differential module.
-- The full test suite now has 644 tests.
+- `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_native_meta.py` has 6 tests. `tests/test_native_tasks.py` has 2 host input and task status parity tests. `tests/test_native_stress.py` has 2 tests for 100 native startups and 200 task lifecycles. `tests/test_vm_native_engine.py` has 5 tests for `--engine=native`, native imports, error stream parity and the differential module.
+- The full test suite now has 646 tests.
 
 ### Notes
 
