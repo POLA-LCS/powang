@@ -1,0 +1,42 @@
+## N1 functions, defaults, named arguments, variadics and overloads.
+
+fun add(a: int, b: int): int {
+    return a + b;
+}
+println(add(2, 3));
+
+fun defaults(a: int = 3, b: int = 4): int {
+    return a + b;
+}
+println(defaults());
+println(defaults(10));
+println(defaults(10, 20));
+
+fun named(a: int, b: int): int {
+    return a * 10 + b;
+}
+println(named(b >> 2, a >> 1));
+
+fun sum(values: int...): int {
+    total := 0;
+    for value >> values {
+        total = total + value;
+    }
+    return total;
+}
+println(sum(1, 2, 3, 4));
+
+fun apply(function: fun[int, int], value: int): int {
+    return function(value);
+}
+println(apply(fun(value: int): int >> value * 3, 5));
+
+fun pick(a: int): int {
+    return 1;
+}
+
+fun pick(a: num): int {
+    return 2;
+}
+println(pick(5));
+println(pick(5.5));

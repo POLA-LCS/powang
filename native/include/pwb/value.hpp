@@ -21,6 +21,7 @@ namespace pwb {
 
 struct FunctionObject;
 struct ArrayObject;
+struct IteratorObject;
 
 enum class Tag : std::uint8_t {
     Nova = 0,
@@ -34,6 +35,7 @@ enum class Tag : std::uint8_t {
     Fun = 8,
     Arr = 9,
     Spread = 10,
+    Iter = 11,
 };
 
 struct Value {
@@ -65,6 +67,7 @@ inline const char* tag_name(Tag tag) noexcept {
         case Tag::Fun: return "fun";
         case Tag::Arr: return "arr";
         case Tag::Spread: return "spread";
+        case Tag::Iter: return "iter";
     }
     return "unknown";
 }
@@ -137,6 +140,13 @@ inline Value make_spread(ArrayObject* object) {
     return value;
 }
 
+inline Value make_iterator(IteratorObject* object) {
+    Value value{};
+    value.tag = Tag::Iter;
+    value.ref = object;
+    return value;
+}
+
 inline bool is_nova(const Value& value) noexcept {
     return value.tag == Tag::Nova;
 }
@@ -157,6 +167,10 @@ inline bool is_spread(const Value& value) noexcept {
     return value.tag == Tag::Spread;
 }
 
+inline bool is_iterator(const Value& value) noexcept {
+    return value.tag == Tag::Iter;
+}
+
 inline BigIntObject* as_bigint(const Value& value) {
     return static_cast<BigIntObject*>(value.ref);
 }
@@ -171,6 +185,10 @@ inline FunctionObject* as_function(const Value& value) {
 
 inline ArrayObject* as_array(const Value& value) {
     return static_cast<ArrayObject*>(value.ref);
+}
+
+inline IteratorObject* as_iterator(const Value& value) {
+    return static_cast<IteratorObject*>(value.ref);
 }
 
 inline bool is_scalar_value(char32_t code_point) noexcept {
@@ -305,6 +323,7 @@ inline std::string format_value(const Value& value) {
         case Tag::Fun:
         case Tag::Arr:
         case Tag::Spread:
+        case Tag::Iter:
             throw RuntimeError(
                 "native N1 does not implement function or container printing");
     }
@@ -334,6 +353,7 @@ inline bool truthy(const Value& value) {
         case Tag::Fun:
         case Tag::Arr:
         case Tag::Spread:
+        case Tag::Iter:
             return true;
     }
     return false;

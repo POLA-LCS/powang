@@ -1,0 +1,31 @@
+## N1 branches, range loops, loop, break and continue.
+
+total := 0;
+for index >> 0 >> 6 {
+    total = total + index;
+}
+println(total);
+
+counter := 0;
+loop {
+    counter = counter + 1;
+    if counter >= 3 {
+        break;
+    }
+}
+println(counter);
+
+odd_sum := 0;
+for value >> 0 >> 10 {
+    if value % 2 == 0 {
+        continue;
+    }
+    odd_sum = odd_sum + value;
+}
+println(odd_sum);
+
+if 3 < 4 {
+    println(10);
+} else {
+    println(20);
+}

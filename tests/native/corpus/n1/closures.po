@@ -1,0 +1,28 @@
+## N1 closures by value, by reference and named lambda recursion.
+
+base := 10;
+add_base := fun(value: int): int >> value + base;
+base = 20;
+println(add_base(1));
+
+counter := 0;
+bump := fun &(value: int) {
+    counter += value;
+};
+bump(3);
+bump(4);
+println(counter);
+
+fun make_adder(amount: int): fun[int, int] {
+    return fun(value: int): int >> value + amount;
+}
+add_seven := make_adder(7);
+println(add_seven(5));
+
+factorial := fun recur(value: int): int {
+    if value <= 1 {
+        return 1;
+    }
+    return recur(value - 1) * value;
+};
+println(factorial(5));

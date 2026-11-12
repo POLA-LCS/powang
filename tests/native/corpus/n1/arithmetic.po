@@ -1,0 +1,17 @@
+## N1 arithmetic, big integers and Python cast order.
+
+big := 123456789012345678901234567890;
+println(big);
+println(big + 1);
+println(big - 1);
+println(big * 2);
+println(big / 7);
+println(big % 7);
+println(9223372036854775807 + 1);
+println(-9223372036854775808 - 1);
+println(5 + 2.5);
+println(5 / 2.0);
+println(-1.0 % 3.0);
+println(1 == 1.5);
+println(true == 1);
+println(3 < 4);

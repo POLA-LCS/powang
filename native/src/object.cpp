@@ -21,6 +21,13 @@ FunctionObject* Arena::allocate_function(const FunctionMetadata* metadata) {
     return &functions_.back();
 }
 
+IteratorObject* Arena::allocate_iterator(std::vector<Value> values) {
+    IteratorObject iterator;
+    iterator.values = std::move(values);
+    iterators_.push_back(std::move(iterator));
+    return &iterators_.back();
+}
+
 std::size_t Arena::bigint_count() const noexcept {
     return bigints_.size();
 }
@@ -31,6 +38,10 @@ std::size_t Arena::array_count() const noexcept {
 
 std::size_t Arena::function_count() const noexcept {
     return functions_.size();
+}
+
+std::size_t Arena::iterator_count() const noexcept {
+    return iterators_.size();
 }
 
 } // namespace pwb
