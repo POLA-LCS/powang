@@ -16,14 +16,16 @@ remaining gates are listed at the end.
 
 | Gate | Result |
 |---|---|
-| Full Python VM suite | 647 tests, all pass |
-| Full tree walker suite (`POWANG_ENGINE=tree`) | 647 tests, all pass |
+| Full Python VM suite | 648 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 648 tests, all pass |
 | Native N1 corpus | 5 programs, zero mismatches |
 | Native N2 corpus | 6 programs, zero mismatches |
 | Native N3 corpus | 9 programs, zero mismatches |
 | Native N4 corpus | 30 programs, zero mismatches |
 | Native N5 corpus | 9 programs, zero mismatches |
 | Examples corpus | 32 programs, zero mismatches |
+| Seeded fuzz seed 7 | 1000 programs, zero mismatches |
+| Seeded fuzz seed 2026 | 1000 programs, zero mismatches |
 | Native C++ tests | 1 of 1 CTest target passes |
 
 The differential comparison covers standard output, standard error and exit
@@ -71,15 +73,17 @@ ten second cold and five second warm compile gates.
 ## Seeded fuzz status
 
 The native differential runner accepts `--fuzz --seed N --count N` and
-compares generated programs against the Python VM. Seed 7 passes 100 of 100
-generated programs. Seed 2026 passes 988 of 1000. The remaining 12 programs
-are concentrated in:
+compares generated programs against the Python VM. Both gates pass with zero
+mismatches:
 
-- Weak type ordering and error text for mixed weak `nova` operands.
-- Mixed bool operand casting in modulo and one prefix case.
-- One checker warning path that the native file path does not reproduce.
+| Seed | Programs | Passed | Failed |
+|---|---|---|---|
+| 7 | 1000 | 1000 | 0 |
+| 2026 | 1000 | 1000 | 0 |
 
-The seeded fuzz gate is therefore open. The generator, the runner, the cache
+The fuzz pass covers weak `nova` ordering and error text, mixed bool and char
+arithmetic, modulo cast rules, negative number reversal and checker warnings
+emitted before a compile or check error. The generator, the runner, the cache
 and the comparison path are implemented.
 
 ## Stress results
@@ -90,8 +94,6 @@ zero, every task settles, no process leaks and the expected task sums match.
 
 ## Remaining gates
 
-1. Seeded native fuzz differential over 1000 programs on two seeds. The first
-   mismatch on seed 2026 is recorded above.
-2. Optional inline caches and threaded dispatch.
-3. The default engine decision and the `0.25.0` release.
-4. Native method access-control and ambiguity error text parity.
+1. Optional inline caches and threaded dispatch.
+2. The default engine decision and the `0.25.0` release.
+3. Native method access-control and ambiguity error text parity.
