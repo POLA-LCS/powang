@@ -69,6 +69,16 @@ N3 core is gate green for user types, constructors, fields, instance methods, st
 
 N4 is gate green. It adds the deterministic `PWBB` bundle, the Python import-graph builder, `ModuleLoader.read_sources`, `ModuleRuntime`, the `ModuleTable`, per-module symbol tables, `IMPORT`, `IMPORT_WILDCARD`, `LOAD_MODULE_MEMBER`, `EXPORT`, `CALL_MODULE`, module member values, the export table, the legacy warning, imported types and module-qualified construction, deferred import errors and the cyclic-import guard. It adds the language error model with `Tag::Error`, exact error text, `MAKE_ERROR`, `ERROR_PROPERTY`, `THROW`, `RETHROW`, `PROPAGATE`, try, catch, finally, the handler stack, call frame records, top-level standard output parity and PWBM version 2 descriptors. It adds references with value flags, `Tag::Ref`, `RefObject`, the reference opcodes, reference parameters, reference pipelines and frame lifetime tokens. It adds the project snapshot, `Tag::Project`, `LOAD_PROJECT`, implicit `project` binding, the extern descriptor table, `DECLARE_EXTERN`, `CALL_EXTERN`, the allowed-module check and the host scalar extern hook.
 
+N4 gate results, commit range `857b8f6..3fc8237`:
+
+- `tests.test_native_bundle`: 15 tests pass.
+- `tests.test_native_meta`: 6 tests pass.
+- `tests.test_native_build`: 18 tests pass.
+- `tests.test_vm_native_corpus`: 4 tests pass, including 29 N4 differential programs across the module, wildcard, legacy, error, try, finally, propagation, reference, project and extern cases.
+- `ctest --test-dir build/native`: 1 of 1 test passes.
+- Full Python suite: 635 tests pass.
+- The N4 corpus compares standard output, standard error and exit codes against the Python VM. Top-level language errors are written to standard output as in the Python CLI.
+
 `tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 6 tests for deterministic PWBM metadata, the image hash, parameter metadata, PWBM version 2 descriptors and the C++ metadata round trip. `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_vm_native_corpus.py` has 4 differential tests covering the N1, N2, N3 and N4 corpora. The full suite has 635 tests. Run them with:
 
 ```powershell
