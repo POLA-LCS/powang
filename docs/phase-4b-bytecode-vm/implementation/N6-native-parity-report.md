@@ -16,8 +16,8 @@ remaining gates are listed at the end.
 
 | Gate | Result |
 |---|---|
-| Full Python VM suite | 646 tests, all pass |
-| Full tree walker suite (`POWANG_ENGINE=tree`) | 646 tests, all pass |
+| Full Python VM suite | 647 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 647 tests, all pass |
 | Native N1 corpus | 5 programs, zero mismatches |
 | Native N2 corpus | 6 programs, zero mismatches |
 | Native N3 corpus | 9 programs, zero mismatches |
@@ -46,9 +46,12 @@ times faster than the Python VM on this loop. The N6 target of at least three
 times the tree walker is met on the CPU bound corpus without inline caches or
 threaded dispatch.
 
-Small program runs are dominated by the integrated `g++` compile. A warm
-executable cache is not implemented yet. Cold and warm compile timings for a
-50 KB image are still to be recorded.
+Small program runs are dominated by the integrated `g++` compile. The warm
+executable cache keys on the generated source and the runtime library
+timestamp. A small program measured 1.12 seconds cold and 0.29 seconds warm,
+against 0.24 seconds for the tree walker, a warm ratio of 1.23 times. The
+`native clean` command removes the cache. A 50 KB image timing is still to be
+recorded.
 
 ## N6 features delivered
 
@@ -87,7 +90,7 @@ zero, every task settles, no process leaks and the expected task sums match.
 
 1. Seeded native fuzz differential over 1000 programs on two seeds. The first
    mismatch on seed 2026 is recorded above.
-2. Warm executable cache and compile timing measurements.
+2. A 50 KB image compile timing record.
 3. Optional inline caches and threaded dispatch.
 4. The default engine decision and the `0.25.0` release.
 5. Native method access-control and ambiguity error text parity.
