@@ -1,0 +1,74 @@
+# N6 native parity report
+
+Status: in progress. This report records the N6 integration results. The
+remaining gates are listed at the end.
+
+## Environment
+
+- Platform: Windows, `win32`
+- Compiler: `g++` 16.1.0, C++17, `-O2`, static link
+- Python oracle: the Python VM (`--engine=vm`) and the tree walker
+  (`--engine=tree`)
+- Native runtime: `build/native/libpwb_runtime.a` and the generated
+  `temp.cpp` integrated executable
+
+## Correctness results
+
+| Gate | Result |
+|---|---|
+| Full Python VM suite | 644 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 644 tests, all pass |
+| Native N1 corpus | 5 programs, zero mismatches |
+| Native N2 corpus | 6 programs, zero mismatches |
+| Native N3 corpus | 9 programs, zero mismatches |
+| Native N4 corpus | 30 programs, zero mismatches |
+| Native N5 corpus | 9 programs, zero mismatches |
+| Examples corpus | 32 programs, zero mismatches |
+| Native C++ tests | 1 of 1 CTest target passes |
+
+The differential comparison covers standard output, standard error and exit
+code. Top-level language diagnostics are compared on standard output. Module
+warnings are compared on standard error.
+
+## Performance
+
+The CPU bound benchmark is a 200,000 iteration integer accumulation loop. Each
+engine ran three times and the median wall time is reported.
+
+| Engine | Median wall time |
+|---|---|
+| Native | about 66 ms |
+| Tree walker | about 7.8 s |
+| Python VM | about 8.5 s |
+
+The native runtime is about 117 times faster than the tree walker and about 128
+times faster than the Python VM on this loop. The N6 target of at least three
+times the tree walker is met on the CPU bound corpus without inline caches or
+threaded dispatch.
+
+Small program runs are dominated by the integrated `g++` compile. A warm
+executable cache is not implemented yet. Cold and warm compile timings for a
+50 KB image are still to be recorded.
+
+## N6 features delivered
+
+1. `--engine=native` file, project and check-only routing.
+2. `src.vm.native.differential` with `--corpus`, `--examples`, `--json` and
+   `--fail-fast`.
+3. `powang vm native diff`, `bench`, `clean` and `pack`.
+4. Casts, typed declaration coercion, field defaults, named user type
+   constructors, match patterns, destructuring, typed arithmetic, spreads from
+   all containers, generic overload filtering and `typedeep` for tuples and
+   sets.
+5. Structure and element lock enforcement.
+6. The default scalar host bridge for `math`, `strings`, `json`, `url`,
+   `crypto`, `time` and `env`.
+
+## Remaining gates
+
+1. Seeded native fuzz differential over 1000 programs on two seeds.
+2. The 100-start stress test.
+3. Warm executable cache and compile timing measurements.
+4. Optional inline caches and threaded dispatch.
+5. The default engine decision and the `0.25.0` release.
+6. Native method access-control and ambiguity error text parity.

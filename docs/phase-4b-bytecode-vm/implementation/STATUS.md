@@ -55,7 +55,7 @@ Recorded results for `0.22.0`:
 | N3 | User types, constructors, fields, methods, statics, enums, traits, operator dispatch and locks | in progress | 0.23.0 |
 | N4 | Modules, project, externs, errors and references | gate green | 0.23.0 |
 | N5 | Async, tasks, file I/O and the host bridge | gate green | 0.24.0 |
-| N6 | Full parity, performance and distribution | not started | 0.25.0 |
+| N6 | Full parity, performance and distribution | in progress | 0.25.0 |
 
 The native runtime lives under `native/` and consumes the same `PWB1` program image as the Python compiler. It is opt in. The Python VM remains the default engine and the differential oracle.
 
@@ -88,13 +88,23 @@ N5 gate results, commit range after `e7d7331`:
 - `ctest --test-dir build/native`: 1 of 1 test passes.
 - Full Python suite: 638 tests pass.
 
-`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 6 tests for deterministic PWBM metadata, the image hash, parameter metadata, PWBM version 2 descriptors and the C++ metadata round trip. `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_native_tasks.py` has 2 tests for host input parity and task status names. `tests/test_vm_native_corpus.py` has 5 differential tests covering the N1, N2, N3, N4 and N5 corpora. The full suite has 638 tests. Run them with:
+N6 is in progress. The engine integration is complete: `--engine=native`, the native differential runner, and `powang vm native diff`, `bench`, `clean` and `pack`. Every example under `examples/` matches the Python VM, including casts, match patterns, destructuring, typed declarations and defaults, named constructors, generic overload selection, spreads and the default host bridge for `math`, `strings`, `json`, `url`, `crypto`, `time` and `env`. Structure and element locks are enforced. On a 200,000 iteration arithmetic loop the native runtime ran in about 66 ms against about 7.8 seconds for the tree walker and 8.5 seconds for the Python VM over three runs. Remaining N6 work is the seeded fuzz gate, the stress gate, executable caching, inline caches, threaded dispatch, the default engine decision and the final release contract.
+
+N6 integration results:
+
+- Full Python VM suite: 644 tests pass.
+- Full tree walker suite with `POWANG_ENGINE=tree`: 644 tests pass.
+- Native differential over all 32 `examples/*.po`: zero mismatches.
+- N1 to N5 native corpora: zero mismatches.
+- `ctest --test-dir build/native`: 1 of 1 test passes.
+
+`tests/test_native_build.py` has 18 tests. They cover the generated opcode header, the in-memory buffer, the `print(1 + 2);` gate, byte-exact disassembly parity, corrupt image rejection, compiler diagnostics, temp cleanup, CLI run, CLI compile, native info, number semantics, print arity, loop image verification, bad jump rejection, missing compiler handling and stdin compilation. The number semantics test runs 36 subtests. `tests/test_native_meta.py` has 6 tests for deterministic PWBM metadata, the image hash, parameter metadata, PWBM version 2 descriptors and the C++ metadata round trip. `tests/test_native_bundle.py` has 15 tests for the bundle layout, digest, module graph, project block, parser rejection cases, generated source and bundle execution. `tests/test_native_tasks.py` has 2 tests for host input parity and task status names. `tests/test_vm_native_engine.py` has 5 tests for the `--engine=native` command line, imports, error stream parity and the differential module. `tests/test_vm_native_examples.py` runs the full example differential. `tests/test_vm_native_corpus.py` has 5 differential tests covering the N1, N2, N3, N4 and N5 corpora. The full suite has 644 tests. Run them with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_native_build -v
 ```
 
-The version is still `0.22.0`. N0, N1, N2, the N3 core, N4 and N5 are milestones, not releases. The plan targets `0.23.0` for the native milestone series. The N3 lock and error remainder and N6 remain planned, so the full native VM is not complete.
+The version is still `0.22.0`. N0, N1, N2, the N3 core, N4, N5 and the N6 integration are milestones, not releases. The plan targets `0.23.0` for the native milestone series. The N3 access-control and ambiguity error text remainder and the remaining N6 gates (fuzz, stress, caching, default engine decision and release) are open, so the full native VM is not complete.
 
 ## 2. Module status
 
