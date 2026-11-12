@@ -1,0 +1,27 @@
+## N3 default, public, private and static members.
+
+type PublicType[+] {
+    id: int;
+}
+public_value := PublicType.[];
+public_value.id = 7;
+println(public_value.id);
+
+type PrivateType[-] {
+    secret: str;
+    + fun this.reveal(): str { return this.secret; }
+    + fun this.assign(value: str): str {
+        this.secret = value;
+        return this.secret;
+    }
+}
+private_value := PrivateType.[];
+private_value.assign("hidden");
+println(private_value.reveal());
+
+type Point[+] {
+    | x: int;
+    fun zero(): Point >> Point.[0];
+}
+static_value := Point.zero();
+println(static_value.x);

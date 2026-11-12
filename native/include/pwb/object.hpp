@@ -10,16 +10,19 @@
 #include <deque>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "pwb/bigint.hpp"
+#include "pwb/image.hpp"
 #include "pwb/meta.hpp"
 #include "pwb/value.hpp"
 
 namespace pwb {
 
 struct FunctionObject;
+struct TypeRuntime;
 
 struct CapturedScope {
     std::unordered_map<std::string, Value> values;
@@ -33,6 +36,31 @@ struct FunctionObject {
     CapturedScope captured;
     Value receiver = make_nova();
     bool has_receiver = false;
+    const TypeRuntime* owner = nullptr;
+    bool is_static = false;
+    bool is_private = false;
+    std::string trait_qualifier;
+};
+
+struct ObjectObject {
+    std::string type_name;
+    std::string variant;
+    bool is_enum = false;
+    bool structure_locked = false;
+    bool elements_locked = false;
+    std::unordered_map<std::string, Value> fields;
+    std::unordered_set<std::string> private_fields;
+};
+
+struct TypeRuntime {
+    const TypeInfo* info = nullptr;
+    std::unordered_map<std::string, std::vector<FunctionObject*>> methods;
+    std::unordered_map<std::string, std::vector<FunctionObject*>> statics;
+    std::unordered_map<std::string, std::vector<FunctionObject*>> constructors;
+    std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::vector<FunctionObject*>>>
+        trait_methods;
 };
 
 struct ArrayObject {
@@ -76,6 +104,10 @@ public:
     TupleObject* allocate_tuple(std::vector<Value> items = {});
     MapObject* allocate_map();
     SetObject* allocate_set();
+    ObjectObject* allocate_object(
+        std::string type_name,
+        bool is_enum = false,
+        std::string variant = "");
 
     std::size_t bigint_count() const noexcept;
     std::size_t array_count() const noexcept;
@@ -85,6 +117,7 @@ public:
     std::size_t tuple_count() const noexcept;
     std::size_t map_count() const noexcept;
     std::size_t set_count() const noexcept;
+    std::size_t object_count() const noexcept;
 
 private:
     std::deque<BigIntObject> bigints_;
@@ -95,6 +128,7 @@ private:
     std::deque<TupleObject> tuples_;
     std::deque<MapObject> maps_;
     std::deque<SetObject> sets_;
+    std::deque<ObjectObject> objects_;
 };
 
 std::string format_heap_value(const Value& value);

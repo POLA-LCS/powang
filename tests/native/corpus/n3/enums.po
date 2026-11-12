@@ -1,0 +1,12 @@
+## N3 enums and enum equality.
+
+type Color enum {
+    RED,
+    GREEN,
+    BLUE,
+}
+
+value := Color.GREEN;
+println(value.name);
+println(value == Color.GREEN);
+println(value == Color.RED);

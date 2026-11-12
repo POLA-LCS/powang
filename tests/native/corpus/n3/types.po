@@ -1,0 +1,22 @@
+## N3 user types, constructors, instance methods and copy semantics.
+
+type Point[+] {
+    | x: int;
+    | y: int;
+    fun constructor(px: int, py: int): Point {
+        this.x = px;
+        this.y = py;
+    }
+    fun this.sum(other: Point): int {
+        return this.x + other.x + this.y + other.y;
+    }
+}
+
+first := Point.[1, 2];
+second := Point.[3, 4];
+println(first.sum(second));
+
+copy := first;
+copy.x = 9;
+println(first.x);
+println(copy.x);

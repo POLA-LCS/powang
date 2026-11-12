@@ -26,6 +26,8 @@ struct StringObject;
 struct TupleObject;
 struct MapObject;
 struct SetObject;
+struct ObjectObject;
+struct TypeRuntime;
 
 enum class Tag : std::uint8_t {
     Nova = 0,
@@ -43,6 +45,8 @@ enum class Tag : std::uint8_t {
     Tup = 12,
     Map = 13,
     Set = 14,
+    Obj = 15,
+    Type = 16,
 };
 
 struct Value {
@@ -78,6 +82,8 @@ inline const char* tag_name(Tag tag) noexcept {
         case Tag::Tup: return "tup";
         case Tag::Map: return "map";
         case Tag::Set: return "set";
+        case Tag::Obj: return "obj";
+        case Tag::Type: return "type";
     }
     return "unknown";
 }
@@ -185,6 +191,20 @@ inline Value make_set(SetObject* object) {
     return value;
 }
 
+inline Value make_object(ObjectObject* object) {
+    Value value{};
+    value.tag = Tag::Obj;
+    value.ref = object;
+    return value;
+}
+
+inline Value make_type(TypeRuntime* object) {
+    Value value{};
+    value.tag = Tag::Type;
+    value.ref = object;
+    return value;
+}
+
 inline bool is_nova(const Value& value) noexcept {
     return value.tag == Tag::Nova;
 }
@@ -225,6 +245,14 @@ inline bool is_set(const Value& value) noexcept {
     return value.tag == Tag::Set;
 }
 
+inline bool is_object(const Value& value) noexcept {
+    return value.tag == Tag::Obj;
+}
+
+inline bool is_type(const Value& value) noexcept {
+    return value.tag == Tag::Type;
+}
+
 inline BigIntObject* as_bigint(const Value& value) {
     return static_cast<BigIntObject*>(value.ref);
 }
@@ -263,6 +291,14 @@ inline MapObject* as_map(const Value& value) {
 
 inline SetObject* as_set(const Value& value) {
     return static_cast<SetObject*>(value.ref);
+}
+
+inline ObjectObject* as_object(const Value& value) {
+    return static_cast<ObjectObject*>(value.ref);
+}
+
+inline TypeRuntime* as_type(const Value& value) {
+    return static_cast<TypeRuntime*>(value.ref);
 }
 
 inline bool is_scalar_value(char32_t code_point) noexcept {
@@ -394,6 +430,8 @@ inline std::string format_value(const Value& value) {
         case Tag::Tup:
         case Tag::Map:
         case Tag::Set:
+        case Tag::Obj:
+        case Tag::Type:
             return format_heap_value(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);
@@ -430,6 +468,8 @@ inline bool truthy(const Value& value) {
         case Tag::Tup:
         case Tag::Map:
         case Tag::Set:
+        case Tag::Obj:
+        case Tag::Type:
             return heap_truthy(value);
         case Tag::BigInt: {
             const BigIntObject* object = as_bigint_const(value);

@@ -26,10 +26,17 @@
 namespace pwb {
 namespace {
 
+struct TraitRuntime {
+    const TraitInfo* info = nullptr;
+    std::unordered_map<std::string, std::vector<FunctionObject*>> defaults;
+};
+
 struct Module {
     std::unordered_map<std::string, Value> globals;
     std::unordered_map<std::string, std::vector<FunctionObject*>> functions;
     std::unordered_set<std::string> declared_globals;
+    std::unordered_map<std::string, TypeRuntime> types;
+    std::unordered_map<std::string, TraitRuntime> traits;
 };
 
 struct Frame {
@@ -43,6 +50,8 @@ struct Frame {
     std::vector<Value> captures;
     std::unordered_map<std::string, std::size_t> local_slots;
     std::vector<bool> declared;
+    Value receiver = make_nova();
+    bool has_receiver = false;
 };
 
 struct Machine {
@@ -153,8 +162,10 @@ std::uint32_t operand_target(
 }
 
 const std::string& global_name_at(
-    const Image& image, const DecodedInstruction& instruction) {
-    const std::int64_t index = operand_integer(instruction, "name");
+    const Image& image,
+    const DecodedInstruction& instruction,
+    const char* operand = "name") {
+    const std::int64_t index = operand_integer(instruction, operand);
     if (index < 0
         || static_cast<std::uint64_t>(index) >= image.global_names.size()) {
         runtime_fail(
@@ -682,7 +693,8 @@ Comparison compare_values(
         runtime_fail("ordering is not supported between str and char");
     }
     if ((left.tag == Tag::Arr || left.tag == Tag::Tup
-         || left.tag == Tag::Map || left.tag == Tag::Set)
+         || left.tag == Tag::Map || left.tag == Tag::Set
+         || left.tag == Tag::Obj || left.tag == Tag::Type)
         && left.tag == right.tag) {
         const std::string operation(opcode);
         if (operation == "EQ" || operation == "NEQ") {
@@ -708,6 +720,8 @@ Comparison compare_values(
             case Tag::Tup:
             case Tag::Map:
             case Tag::Set:
+            case Tag::Obj:
+            case Tag::Type:
                 break;
             case Tag::Bool:
             case Tag::Int:
@@ -770,7 +784,8 @@ Value call_function(
     FunctionObject* function,
     std::vector<Value> positional,
     std::vector<std::pair<std::string, Value>> named,
-    const std::string& where);
+    const std::string& where,
+    const Value* receiver = nullptr);
 Value call_builtin(
     Machine& machine,
     const std::string& name,
@@ -826,6 +841,17 @@ Value call_native_method(
     const CallSite& site,
     const std::vector<Value>& positional,
     const std::vector<std::pair<std::string, Value>>& named);
+Value call_type_method(
+    Machine& machine,
+    const Value& receiver,
+    const std::string& name,
+    const std::vector<Value>& arguments,
+    const std::string& where);
+Comparison compare_object_values(
+    Machine& machine,
+    const Value& left,
+    const Value& right,
+    const char* opcode);
 
 bool is_builtin_name(const std::string& name) {
     static const std::unordered_set<std::string> names = {
@@ -838,6 +864,37 @@ bool is_builtin_name(const std::string& name) {
     };
     return names.count(name) != 0;
 }
+
+bool private_access_allowed(
+    Machine& machine, Frame& frame, const ObjectObject& object) {
+    (void)machine;
+    if (frame.function == nullptr || frame.function->owner == nullptr) {
+        return false;
+    }
+    if (frame.function->owner->info == nullptr) {
+        return false;
+    }
+    return frame.function->owner->info->name == object.type_name
+        && !frame.function->is_static;
+}
+
+Value load_object_member(
+    Machine& machine,
+    Frame& frame,
+    const Value& owner,
+    const std::string& name,
+    bool safe,
+    bool allow_methods);
+Value store_object_member(
+    Machine& machine,
+    Frame& frame,
+    const Value& owner,
+    const std::string& name,
+    const Value& value);
+bool object_satisfies_trait(
+    Machine& machine,
+    const ObjectObject& object,
+    const TraitRuntime& trait);
 
 Value execute(const Image& image, Frame& frame, Machine& machine) {
     const CodeObject& code = *frame.code;
@@ -978,6 +1035,108 @@ Value execute(const Image& image, Frame& frame, Machine& machine) {
                         machine, code,
                         operand_integer(instruction, "const")));
                 break;
+            case Opcode::DECLARE_TYPE: {
+                const std::int64_t index =
+                    operand_integer(instruction, "type");
+                if (machine.meta == nullptr || machine.image == nullptr) {
+                    runtime_fail("type metadata is required");
+                }
+                if (index < 0
+                    || static_cast<std::uint64_t>(index)
+                        >= machine.image->types.size()) {
+                    runtime_fail(
+                        "type index out of range: "
+                        + std::to_string(index));
+                }
+                const TypeInfo& info =
+                    machine.image->types[static_cast<std::size_t>(index)];
+                TypeRuntime& runtime = machine.module.types[info.name];
+                runtime = TypeRuntime{};
+                runtime.info = &info;
+                for (const TypeMethod& method : info.methods) {
+                    if (static_cast<std::uint64_t>(method.index)
+                        >= machine.meta->functions.size()) {
+                        continue;
+                    }
+                    FunctionObject* function =
+                        machine.arena.allocate_function(
+                            &machine.meta->functions[
+                                static_cast<std::size_t>(method.index)]);
+                    const bool is_instance =
+                        method.name == "constructor" || method.is_static;
+                    function->owner = &runtime;
+                    function->is_static = !is_instance;
+                    function->is_private = !method.is_private;
+                    if (method.type_name.has_value()) {
+                        function->trait_qualifier = *method.type_name;
+                    }
+                    if (!function->trait_qualifier.empty()) {
+                        runtime.trait_methods[
+                            function->trait_qualifier][method.name]
+                            .push_back(function);
+                    } else if (!is_instance) {
+                        runtime.statics[method.name].push_back(function);
+                    } else if (method.name == "constructor") {
+                        runtime.constructors[method.name].push_back(function);
+                    } else {
+                        runtime.methods[method.name].push_back(function);
+                    }
+                }
+                if (info.kind == "enum") {
+                    MapObject* variants = machine.arena.allocate_map();
+                    for (const std::string& variant : info.variants) {
+                        ObjectObject* object =
+                            machine.arena.allocate_object(
+                                info.name, true, variant);
+                        object->fields["name"] =
+                            string_from_utf8(machine, variant);
+                        map_set(
+                            *variants,
+                            string_from_utf8(machine, variant),
+                            make_object(object));
+                    }
+                    const Value enum_value = make_map(variants);
+                    machine.module.globals[info.name] = enum_value;
+                    push_value(frame, enum_value);
+                } else {
+                    const Value type_value = make_type(&runtime);
+                    machine.module.globals[info.name] = type_value;
+                    push_value(frame, type_value);
+                }
+                break;
+            }
+            case Opcode::DECLARE_TRAIT: {
+                const std::int64_t index =
+                    operand_integer(instruction, "trait");
+                if (machine.meta == nullptr || machine.image == nullptr) {
+                    runtime_fail("trait metadata is required");
+                }
+                if (index < 0
+                    || static_cast<std::uint64_t>(index)
+                        >= machine.image->traits.size()) {
+                    runtime_fail(
+                        "trait index out of range: "
+                        + std::to_string(index));
+                }
+                const TraitInfo& info =
+                    machine.image->traits[static_cast<std::size_t>(index)];
+                TraitRuntime& runtime = machine.module.traits[info.name];
+                runtime = TraitRuntime{};
+                runtime.info = &info;
+                for (const TraitMethod& method : info.methods) {
+                    if (static_cast<std::uint64_t>(method.index)
+                        >= machine.meta->functions.size()) {
+                        continue;
+                    }
+                    FunctionObject* function =
+                        machine.arena.allocate_function(
+                            &machine.meta->functions[
+                                static_cast<std::size_t>(method.index)]);
+                    function->trait_qualifier = info.name;
+                    runtime.defaults[method.name].push_back(function);
+                }
+                break;
+            }
             case Opcode::MAKE_ARRAY:
             case Opcode::MAKE_ARRAY_TYPED: {
                 const std::int64_t count =
@@ -1365,39 +1524,189 @@ Value execute(const Image& image, Frame& frame, Machine& machine) {
                 frame.locals[operand_slot(instruction, code, "slot")] =
                     pop_value(frame);
                 break;
+            case Opcode::LOAD_THIS:
+                if (!frame.has_receiver) {
+                    runtime_fail("this is not available in this frame");
+                }
+                push_value(frame, frame.receiver);
+                break;
+            case Opcode::NEW_ENUM:
+            case Opcode::LOAD_ENUM_MEMBER: {
+                const std::int64_t enum_index =
+                    operand_integer(instruction, "enum");
+                const std::int64_t variant =
+                    operand_integer(instruction, "variant");
+                if (machine.image == nullptr || enum_index < 0
+                    || static_cast<std::uint64_t>(enum_index)
+                        >= machine.image->types.size()) {
+                    runtime_fail("enum type index out of range");
+                }
+                const TypeInfo& info =
+                    machine.image->types[static_cast<std::size_t>(enum_index)];
+                if (variant < 0
+                    || static_cast<std::uint64_t>(variant)
+                        >= info.variants.size()) {
+                    runtime_fail("enum variant index out of range");
+                }
+                const std::string& variant_name =
+                    info.variants[static_cast<std::size_t>(variant)];
+                ObjectObject* object = machine.arena.allocate_object(
+                    info.name, true, variant_name);
+                object->fields["name"] =
+                    string_from_utf8(machine, variant_name);
+                push_value(frame, make_object(object));
+                break;
+            }
+            case Opcode::LOAD_FIELD: {
+                const std::string& name =
+                    global_name_at(image, instruction, "field");
+                const Value owner = pop_value(frame);
+                push_value(
+                    frame,
+                    load_object_member(
+                        machine, frame, owner, name, false, false));
+                break;
+            }
+            case Opcode::STORE_FIELD: {
+                const std::string& name =
+                    global_name_at(image, instruction, "field");
+                const Value value = pop_value(frame);
+                const Value owner = pop_value(frame);
+                push_value(
+                    frame,
+                    store_object_member(
+                        machine, frame, owner, name, value));
+                break;
+            }
+            case Opcode::LOAD_MEMBER:
+            case Opcode::LOAD_MEMBER_SAFE: {
+                const std::string& name =
+                    global_name_at(image, instruction, "name");
+                const Value owner = pop_value(frame);
+                push_value(
+                    frame,
+                    load_object_member(
+                        machine, frame, owner, name,
+                        static_cast<Opcode>(instruction.opcode)
+                            == Opcode::LOAD_MEMBER_SAFE,
+                        true));
+                break;
+            }
+            case Opcode::STORE_MEMBER: {
+                const std::string& name =
+                    global_name_at(image, instruction, "name");
+                const Value value = pop_value(frame);
+                const Value owner = pop_value(frame);
+                push_value(
+                    frame,
+                    store_object_member(
+                        machine, frame, owner, name, value));
+                break;
+            }
+            case Opcode::SET_LOCKS: {
+                const std::int64_t flags =
+                    operand_integer(instruction, "flags");
+                const Value owner = pop_value(frame);
+                if (owner.tag != Tag::Obj) {
+                    runtime_fail("locks require an object value");
+                }
+                ObjectObject* object = as_object(owner);
+                if ((flags & 1) != 0) {
+                    object->structure_locked = true;
+                }
+                if ((flags & 2) != 0) {
+                    object->elements_locked = true;
+                }
+                break;
+            }
+            case Opcode::CHECK_TRAIT:
+            case Opcode::TRAIT_CAST: {
+                const std::int64_t index =
+                    operand_integer(instruction, "trait");
+                const Value value = pop_value(frame);
+                if (machine.image == nullptr || index < 0
+                    || static_cast<std::uint64_t>(index)
+                        >= machine.image->traits.size()
+                    || value.tag != Tag::Obj) {
+                    runtime_fail("value does not satisfy the trait");
+                }
+                const TraitInfo& info = machine.image->traits[
+                    static_cast<std::size_t>(index)];
+                const auto trait = machine.module.traits.find(info.name);
+                if (trait == machine.module.traits.end()
+                    || !object_satisfies_trait(
+                        machine, *as_object(value), trait->second)) {
+                    runtime_fail(
+                        "value does not satisfy trait '" + info.name + "'");
+                }
+                push_value(frame, value);
+                break;
+            }
             case Opcode::ADD: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (left.tag == Tag::Obj) {
+                    push_value(frame, call_type_method(
+                        machine, left, "add", {right}, "operator +"));
+                    break;
+                }
                 push_value(frame, arithmetic_add(machine, left, right));
                 break;
             }
             case Opcode::SUB: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (left.tag == Tag::Obj) {
+                    push_value(frame, call_type_method(
+                        machine, left, "subtract", {right}, "operator -"));
+                    break;
+                }
                 push_value(frame, arithmetic_sub(machine, left, right));
                 break;
             }
             case Opcode::MUL: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (left.tag == Tag::Obj) {
+                    push_value(frame, call_type_method(
+                        machine, left, "multiply", {right}, "operator *"));
+                    break;
+                }
                 push_value(frame, arithmetic_mul(machine, left, right));
                 break;
             }
             case Opcode::DIV: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (left.tag == Tag::Obj) {
+                    push_value(frame, call_type_method(
+                        machine, left, "divide", {right}, "operator /"));
+                    break;
+                }
                 push_value(frame, arithmetic_div(machine, left, right));
                 break;
             }
             case Opcode::MOD: {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
+                if (left.tag == Tag::Obj) {
+                    push_value(frame, call_type_method(
+                        machine, left, "remainder", {right}, "operator %"));
+                    break;
+                }
                 push_value(frame, arithmetic_mod(machine, left, right));
                 break;
             }
-            case Opcode::NEG:
-                push_value(frame, arithmetic_negate(machine, pop_value(frame)));
+            case Opcode::NEG: {
+                const Value value = pop_value(frame);
+                if (value.tag == Tag::Obj) {
+                    push_value(frame, call_type_method(
+                        machine, value, "negate", {}, "operator -"));
+                    break;
+                }
+                push_value(frame, arithmetic_negate(machine, value));
                 break;
+            }
             case Opcode::NOT:
                 push_value(frame, make_bool(!truthy(pop_value(frame))));
                 break;
@@ -1413,7 +1722,10 @@ Value execute(const Image& image, Frame& frame, Machine& machine) {
                 const Value right = pop_value(frame);
                 const Value left = pop_value(frame);
                 const Comparison comparison =
-                    compare_values(left, right, instruction.spec->name);
+                    (left.tag == Tag::Obj || right.tag == Tag::Obj)
+                    ? compare_object_values(
+                        machine, left, right, instruction.spec->name)
+                    : compare_values(left, right, instruction.spec->name);
                 bool result = false;
                 switch (static_cast<Opcode>(instruction.opcode)) {
                     case Opcode::EQ:
@@ -1601,6 +1913,268 @@ Value execute(const Image& image, Frame& frame, Machine& machine) {
                 }
                 runtime_fail("identifier '" + site.name + "' not found");
             }
+            case Opcode::CALL_METHOD: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                const Value receiver = pop_value(frame);
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                (void)named;
+                if (receiver.tag != Tag::Obj) {
+                    runtime_fail("method call requires an object receiver");
+                }
+                ObjectObject* object = as_object(receiver);
+                const auto type_it =
+                    machine.module.types.find(object->type_name);
+                if (type_it == machine.module.types.end()) {
+                    runtime_fail(
+                        "unknown type '" + object->type_name + "'");
+                }
+                const TypeRuntime& type = type_it->second;
+                const std::vector<FunctionObject*>* candidates = nullptr;
+                if (site.trait_name.has_value()) {
+                    const auto trait =
+                        type.trait_methods.find(*site.trait_name);
+                    if (trait != type.trait_methods.end()) {
+                        const auto found =
+                            trait->second.find(site.name);
+                        if (found != trait->second.end()) {
+                            candidates = &found->second;
+                        }
+                    }
+                }
+                if (candidates == nullptr) {
+                    const auto found = type.methods.find(site.name);
+                    if (found != type.methods.end()) {
+                        candidates = &found->second;
+                    }
+                }
+                if (candidates == nullptr) {
+                    for (const auto& entry : machine.module.traits) {
+                        const auto found =
+                            entry.second.defaults.find(site.name);
+                        if (found != entry.second.defaults.end()) {
+                            candidates = &found->second;
+                            break;
+                        }
+                    }
+                }
+                if (candidates == nullptr || candidates->empty()) {
+                    runtime_fail("method not found: " + site.name);
+                }
+                FunctionObject* function = select_overload(
+                    *candidates, positional, *machine.meta);
+                if (function->is_private
+                    && !private_access_allowed(machine, frame, *object)) {
+                    runtime_fail("private method: " + site.name);
+                }
+                push_value(
+                    frame,
+                    call_function(
+                        machine, function, positional, {},
+                        "method call: " + site.name, &receiver));
+                break;
+            }
+            case Opcode::CALL_STATIC: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                if (!site.type_name.has_value()) {
+                    runtime_fail("static call requires a type name");
+                }
+                const auto type_it =
+                    machine.module.types.find(*site.type_name);
+                if (type_it == machine.module.types.end()) {
+                    runtime_fail(
+                        "unknown type '" + *site.type_name + "'");
+                }
+                const auto methods =
+                    type_it->second.statics.find(site.name);
+                if (methods == type_it->second.statics.end()
+                    || methods->second.empty()) {
+                    runtime_fail("static method not found: " + site.name);
+                }
+                FunctionObject* function = select_overload(
+                    methods->second, positional, *machine.meta);
+                push_value(
+                    frame,
+                    call_function(
+                        machine, function, positional, named,
+                        "method call: " + *site.type_name + "."
+                        + site.name));
+                break;
+            }
+            case Opcode::CALL_TRAIT: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                (void)named;
+                if (positional.empty()) {
+                    runtime_fail("trait call requires a receiver");
+                }
+                const Value receiver = positional[0];
+                const std::vector<Value> arguments(
+                    positional.begin() + 1, positional.end());
+                if (receiver.tag != Tag::Obj) {
+                    runtime_fail("trait call requires an object receiver");
+                }
+                ObjectObject* object = as_object(receiver);
+                const auto type_it =
+                    machine.module.types.find(object->type_name);
+                if (type_it == machine.module.types.end()) {
+                    runtime_fail(
+                        "unknown type '" + object->type_name + "'");
+                }
+                const std::string trait_name =
+                    site.trait_name.value_or("");
+                const std::vector<FunctionObject*>* candidates = nullptr;
+                const auto trait =
+                    type_it->second.trait_methods.find(trait_name);
+                if (trait != type_it->second.trait_methods.end()) {
+                    const auto found = trait->second.find(site.name);
+                    if (found != trait->second.end()) {
+                        candidates = &found->second;
+                    }
+                }
+                if (candidates == nullptr) {
+                    const auto defaults =
+                        machine.module.traits.find(trait_name);
+                    if (defaults != machine.module.traits.end()) {
+                        const auto found =
+                            defaults->second.defaults.find(site.name);
+                        if (found != defaults->second.defaults.end()) {
+                            candidates = &found->second;
+                        }
+                    }
+                }
+                if (candidates == nullptr || candidates->empty()) {
+                    runtime_fail("trait method not found: " + site.name);
+                }
+                FunctionObject* function = select_overload(
+                    *candidates, arguments, *machine.meta);
+                push_value(
+                    frame,
+                    call_function(
+                        machine, function, arguments, {},
+                        "trait call: " + trait_name + "." + site.name,
+                        &receiver));
+                break;
+            }
+            case Opcode::CALL_OPERATOR: {
+                const std::int64_t call_index =
+                    operand_integer(instruction, "call");
+                if (call_index < 0
+                    || static_cast<std::uint64_t>(call_index)
+                        >= image.call_sites.size()) {
+                    runtime_fail(
+                        "call index out of range: "
+                        + std::to_string(call_index));
+                }
+                const CallSite& site =
+                    image.call_sites[static_cast<std::size_t>(call_index)];
+                const std::vector<Value> raw =
+                    collect_arguments(frame, site.positional_count);
+                std::vector<std::pair<std::string, Value>> named;
+                const std::vector<Value> positional =
+                    flatten_arguments(site, raw, named);
+                (void)named;
+                if (positional.empty()) {
+                    runtime_fail("operator call requires a receiver");
+                }
+                const Value receiver = positional[0];
+                const std::vector<Value> arguments(
+                    positional.begin() + 1, positional.end());
+                if (receiver.tag != Tag::Obj) {
+                    runtime_fail(
+                        "operator methods require an object receiver");
+                }
+                ObjectObject* object = as_object(receiver);
+                const auto type_it =
+                    machine.module.types.find(object->type_name);
+                if (type_it == machine.module.types.end()) {
+                    runtime_fail(
+                        "unknown type '" + object->type_name + "'");
+                }
+                const std::string trait_name =
+                    site.operator_trait.value_or("");
+                const std::vector<FunctionObject*>* candidates = nullptr;
+                const auto trait =
+                    type_it->second.trait_methods.find(trait_name);
+                if (trait != type_it->second.trait_methods.end()) {
+                    const auto found = trait->second.find(site.name);
+                    if (found != trait->second.end()) {
+                        candidates = &found->second;
+                    }
+                }
+                if (candidates == nullptr) {
+                    const auto defaults =
+                        machine.module.traits.find(trait_name);
+                    if (defaults != machine.module.traits.end()) {
+                        const auto found =
+                            defaults->second.defaults.find(site.name);
+                        if (found != defaults->second.defaults.end()) {
+                            candidates = &found->second;
+                        }
+                    }
+                }
+                if (candidates == nullptr) {
+                    const auto methods =
+                        type_it->second.methods.find(site.name);
+                    if (methods != type_it->second.methods.end()) {
+                        candidates = &methods->second;
+                    }
+                }
+                if (candidates == nullptr || candidates->empty()) {
+                    runtime_fail(
+                        "operator method not found: " + site.name);
+                }
+                FunctionObject* function = select_overload(
+                    *candidates, arguments, *machine.meta);
+                push_value(
+                    frame,
+                    call_function(
+                        machine, function, arguments, {},
+                        "operator call: " + site.name, &receiver));
+                break;
+            }
             case Opcode::CONSTRUCT: {
                 const std::int64_t call_index =
                     operand_integer(instruction, "call");
@@ -1690,8 +2264,54 @@ Value execute(const Image& image, Frame& frame, Machine& machine) {
                     push_value(frame, make_map(map));
                     break;
                 }
+                const auto type_it =
+                    machine.module.types.find(site.name);
+                if (type_it != machine.module.types.end()
+                    && type_it->second.info != nullptr
+                    && type_it->second.info->kind == "object") {
+                    TypeRuntime& type = type_it->second;
+                    ObjectObject* object =
+                        machine.arena.allocate_object(site.name, false, "");
+                    for (const TypeProperty& property :
+                         type.info->properties) {
+                        object->fields[property.name] = make_undef();
+                        if (!property.is_private) {
+                            object->private_fields.insert(property.name);
+                        }
+                    }
+                    const Value object_value = make_object(object);
+                    const auto constructors =
+                        type.constructors.find("constructor");
+                    if (constructors == type.constructors.end()
+                        || constructors->second.empty()) {
+                        if (positional.size()
+                            > type.info->properties.size()) {
+                            runtime_fail(
+                                "too many arguments for the default "
+                                "constructor");
+                        }
+                        for (std::size_t index = 0;
+                             index < positional.size(); ++index) {
+                            object->fields[
+                                type.info->properties[index].name] =
+                                copy_value(
+                                    machine.arena, positional[index]);
+                        }
+                        push_value(frame, object_value);
+                        break;
+                    }
+                    FunctionObject* function = select_overload(
+                        constructors->second, positional, *machine.meta);
+                    const Value result = call_function(
+                        machine, function, positional, {},
+                        "instantiation", &object_value);
+                    push_value(
+                        frame,
+                        result.tag == Tag::Nova ? object_value : result);
+                    break;
+                }
                 runtime_fail(
-                    "native N2 does not implement construction of '"
+                    "native N3 does not implement construction of '"
                     + site.name + "'");
             }
             case Opcode::RETURN:
@@ -1765,6 +2385,8 @@ std::string runtime_type_name(const Value& value) {
         case Tag::Tup: return "tup";
         case Tag::Map: return "map";
         case Tag::Set: return "set";
+        case Tag::Obj: return "obj";
+        case Tag::Type: return "type";
     }
     return "unknown";
 }
@@ -2144,7 +2766,8 @@ Value call_function(
     FunctionObject* function,
     std::vector<Value> positional,
     std::vector<std::pair<std::string, Value>> named,
-    const std::string& where) {
+    const std::string& where,
+    const Value* receiver) {
     if (machine.meta == nullptr || machine.image == nullptr) {
         runtime_fail("function metadata is required");
     }
@@ -2161,6 +2784,13 @@ Value call_function(
         runtime_fail("maximum frame depth exceeded");
     }
     Frame frame = make_frame(code, machine.module, function);
+    if (receiver == nullptr && function->has_receiver) {
+        receiver = &function->receiver;
+    }
+    if (receiver != nullptr) {
+        frame.receiver = *receiver;
+        frame.has_receiver = true;
+    }
     bind_function(
         machine, frame, function, positional, named, where);
     ++machine.frame_depth;
@@ -3107,6 +3737,207 @@ Value call_native_method(
         return char_method(machine, site.name, positional);
     }
     runtime_fail("native method type not implemented: " + type);
+}
+
+Value load_object_member(
+    Machine& machine,
+    Frame& frame,
+    const Value& owner,
+    const std::string& name,
+    bool safe,
+    bool allow_methods) {
+    if (owner.tag == Tag::Map) {
+        const Value key = string_from_utf8(machine, name);
+        const Value* found = map_get(*as_map(owner), key);
+        if (found != nullptr) {
+            return *found;
+        }
+        if (safe) {
+            return make_nova();
+        }
+        runtime_fail("map has no member '" + name + "'");
+    }
+    if (owner.tag != Tag::Obj) {
+        if (safe) {
+            return make_nova();
+        }
+        runtime_fail("member access requires an object value");
+    }
+    ObjectObject* object = as_object(owner);
+    const auto field = object->fields.find(name);
+    if (field != object->fields.end()) {
+        if (object->private_fields.count(name) != 0
+            && !private_access_allowed(machine, frame, *object)) {
+            runtime_fail("private member: " + name);
+        }
+        return field->second;
+    }
+    if (!allow_methods) {
+        if (safe) {
+            return make_nova();
+        }
+        runtime_fail("object has no field '" + name + "'");
+    }
+    const auto type_it = machine.module.types.find(object->type_name);
+    if (type_it != machine.module.types.end()) {
+        const auto methods = type_it->second.methods.find(name);
+        if (methods != type_it->second.methods.end()
+            && !methods->second.empty()) {
+            FunctionObject* source = methods->second.back();
+            if (source->is_private
+                && !private_access_allowed(machine, frame, *object)) {
+                runtime_fail("private method: " + name);
+            }
+            FunctionObject* bound = machine.arena.allocate_function(
+                source->metadata);
+            bound->owner = source->owner;
+            bound->is_static = false;
+            bound->is_private = source->is_private;
+            bound->trait_qualifier = source->trait_qualifier;
+            bound->receiver = owner;
+            bound->has_receiver = true;
+            return make_function(bound);
+        }
+    }
+    if (safe) {
+        return make_nova();
+    }
+    runtime_fail("object has no member '" + name + "'");
+}
+
+Value store_object_member(
+    Machine& machine,
+    Frame& frame,
+    const Value& owner,
+    const std::string& name,
+    const Value& value) {
+    if (owner.tag != Tag::Obj) {
+        runtime_fail("member assignment requires an object value");
+    }
+    ObjectObject* object = as_object(owner);
+    const auto field = object->fields.find(name);
+    if (field == object->fields.end()) {
+        runtime_fail("object has no field '" + name + "'");
+    }
+    if (object->private_fields.count(name) != 0
+        && !private_access_allowed(machine, frame, *object)) {
+        runtime_fail("private member: " + name);
+    }
+    const Value stored = copy_value(machine.arena, value);
+    field->second = stored;
+    return stored;
+}
+
+bool object_satisfies_trait(
+    Machine& machine,
+    const ObjectObject& object,
+    const TraitRuntime& trait) {
+    if (trait.info == nullptr) {
+        return false;
+    }
+    const auto type_it = machine.module.types.find(object.type_name);
+    if (type_it == machine.module.types.end()) {
+        return false;
+    }
+    const TypeRuntime& type = type_it->second;
+    for (const std::string& property : trait.info->properties) {
+        bool found = object.fields.count(property) != 0;
+        if (!found && type.info != nullptr) {
+            for (const TypeProperty& info_property :
+                 type.info->properties) {
+                if (info_property.name == property) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    for (const TraitMethod& method : trait.info->methods) {
+        bool found = type.methods.count(method.name) != 0;
+        if (!found) {
+            const auto trait_methods =
+                type.trait_methods.find(trait.info->name);
+            if (trait_methods != type.trait_methods.end()
+                && trait_methods->second.count(method.name) != 0) {
+                found = true;
+            }
+        }
+        if (!found) {
+            const auto defaults = trait.defaults.find(method.name);
+            if (defaults != trait.defaults.end()) {
+                found = true;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    return true;
+}
+
+Value call_type_method(
+    Machine& machine,
+    const Value& receiver,
+    const std::string& name,
+    const std::vector<Value>& arguments,
+    const std::string& where) {
+    if (receiver.tag != Tag::Obj) {
+        runtime_fail(where + " requires an object receiver");
+    }
+    ObjectObject* object = as_object(receiver);
+    const auto type_it = machine.module.types.find(object->type_name);
+    if (type_it == machine.module.types.end()) {
+        runtime_fail("unknown type '" + object->type_name + "'");
+    }
+    const auto methods = type_it->second.methods.find(name);
+    if (methods == type_it->second.methods.end()
+        || methods->second.empty()) {
+        runtime_fail("operator method not found: " + name);
+    }
+    FunctionObject* function = select_overload(
+        methods->second, arguments, *machine.meta);
+    return call_function(
+        machine, function, arguments, {}, where, &receiver);
+}
+
+Comparison compare_object_values(
+    Machine& machine,
+    const Value& left,
+    const Value& right,
+    const char* opcode) {
+    if (left.tag == Tag::Obj && right.tag == Tag::Obj) {
+        const ObjectObject* a = as_object(left);
+        const ObjectObject* b = as_object(right);
+        if (a->is_enum || b->is_enum) {
+            return {false, value_equal(left, right) ? 0 : 1};
+        }
+        const auto type_it = machine.module.types.find(a->type_name);
+        if (type_it != machine.module.types.end()) {
+            const auto methods = type_it->second.methods.find("compare");
+            if (methods != type_it->second.methods.end()
+                && !methods->second.empty()) {
+                FunctionObject* function = select_overload(
+                    methods->second, {right}, *machine.meta);
+                const Value result = call_function(
+                    machine, function, {right}, {},
+                    "operator compare", &left);
+                const std::int64_t order =
+                    value_as_int(result, "compare");
+                return {
+                    false,
+                    order < 0 ? -1 : (order > 0 ? 1 : 0)};
+            }
+        }
+        return {false, left.ref == right.ref ? 0 : 1};
+    }
+    const std::string operation(opcode);
+    if (operation == "EQ" || operation == "NEQ") {
+        return {false, left.ref == right.ref ? 0 : 1};
+    }
+    runtime_fail("ordering is not supported for object values");
 }
 
 Value call_builtin(

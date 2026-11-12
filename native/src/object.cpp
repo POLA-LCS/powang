@@ -161,6 +161,16 @@ SetObject* Arena::allocate_set() {
     return &sets_.back();
 }
 
+ObjectObject* Arena::allocate_object(
+    std::string type_name, bool is_enum, std::string variant) {
+    ObjectObject object;
+    object.type_name = std::move(type_name);
+    object.is_enum = is_enum;
+    object.variant = std::move(variant);
+    objects_.push_back(std::move(object));
+    return &objects_.back();
+}
+
 std::size_t Arena::bigint_count() const noexcept {
     return bigints_.size();
 }
@@ -193,6 +203,10 @@ std::size_t Arena::set_count() const noexcept {
     return sets_.size();
 }
 
+std::size_t Arena::object_count() const noexcept {
+    return objects_.size();
+}
+
 std::string format_heap_value(const Value& value) {
     switch (value.tag) {
         case Tag::Str: {
@@ -222,6 +236,22 @@ std::string format_heap_value(const Value& value) {
         }
         case Tag::Set:
             return "[/" + join_values(as_set(value)->items, ", ") + "]";
+        case Tag::Obj: {
+            const ObjectObject* object = as_object(value);
+            if (object->is_enum) {
+                return "<" + object->type_name + ": "
+                    + object->variant + ">";
+            }
+            return "<" + object->type_name + ">";
+        }
+        case Tag::Type: {
+            const TypeRuntime* runtime = as_type(value);
+            const std::string name =
+                runtime != nullptr && runtime->info != nullptr
+                ? runtime->info->name
+                : "type";
+            return "<" + name + ">";
+        }
         default:
             throw RuntimeError("value has no heap formatting rule");
     }
@@ -239,6 +269,9 @@ bool heap_truthy(const Value& value) {
             return !as_map(value)->entries.empty();
         case Tag::Set:
             return !as_set(value)->items.empty();
+        case Tag::Obj:
+        case Tag::Type:
+            return true;
         default:
             return false;
     }
@@ -338,6 +371,16 @@ bool value_equal(const Value& left, const Value& right) {
             }
             return true;
         }
+        case Tag::Obj: {
+            const ObjectObject* a = as_object(left);
+            const ObjectObject* b = as_object(right);
+            if (a->is_enum && b->is_enum) {
+                return a->type_name == b->type_name
+                    && a->variant == b->variant;
+            }
+            return left.ref == right.ref;
+        }
+        case Tag::Type:
         case Tag::Fun:
         case Tag::Spread:
         case Tag::Iter:
@@ -441,6 +484,27 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
             }
             return result;
         }
+        case Tag::Obj: {
+            const auto found = memo.seen.find(value.ref);
+            if (found != memo.seen.end()) {
+                return found->second;
+            }
+            const ObjectObject* source = as_object(value);
+            ObjectObject* copy = arena.allocate_object(
+                source->type_name, source->is_enum, source->variant);
+            copy->structure_locked = source->structure_locked;
+            copy->elements_locked = source->elements_locked;
+            copy->private_fields = source->private_fields;
+            const Value result = make_object(copy);
+            memo.seen[value.ref] = result;
+            for (const auto& entry : source->fields) {
+                copy->fields.emplace(
+                    entry.first,
+                    copy_value(arena, entry.second, memo));
+            }
+            return result;
+        }
+        case Tag::Type:
         case Tag::Str:
         case Tag::BigInt:
         case Tag::Fun:

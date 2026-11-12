@@ -1,0 +1,22 @@
+## N3 operator overloading.
+
+type Vector[+] {
+    | x: int;
+    | y: int;
+    fun constructor(px: int, py: int): Vector {
+        this.x = px;
+        this.y = py;
+    }
+    fun this.add(other: Vector): Vector {
+        return Vector.[this.x + other.x, this.y + other.y];
+    }
+    fun this.compare(other: Vector): int >> this.x - other.x;
+}
+
+first := Vector.[1, 2];
+second := Vector.[3, 4];
+sum := first + second;
+println(sum.x);
+println(sum.y);
+println(first < second);
+println(first == second);

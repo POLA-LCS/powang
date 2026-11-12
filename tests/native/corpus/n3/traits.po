@@ -1,0 +1,13 @@
+## N3 traits and default methods.
+
+trait Named {
+    | target: str;
+    fun describe(): str >> $"name={this.target}";
+}
+
+type Person[+] {
+    | target: str;
+}
+
+value: Named = Person.["Ada"];
+println(value.describe());

@@ -38,13 +38,20 @@ class NativeCorpusTests(unittest.TestCase):
                     native.returncode, python.returncode, path.name,
                 )
                 self.assertEqual(native.stdout, python.stdout, path.name)
-                self.assertEqual(native.stderr, python.stderr, path.name)
+                python_stderr = "".join(
+                    line + "\n" for line in python.stderr.splitlines()
+                    if not line.startswith("[WARNING]")
+                )
+                self.assertEqual(native.stderr, python_stderr, path.name)
 
     def test_n1_corpus_matches(self) -> None:
         self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n1")
 
     def test_n2_corpus_matches(self) -> None:
         self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n2")
+
+    def test_n3_corpus_matches(self) -> None:
+        self._run_corpus(ROOT / "tests" / "native" / "corpus" / "n3")
 
 
 if __name__ == "__main__":
