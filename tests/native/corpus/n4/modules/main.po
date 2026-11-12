@@ -1,0 +1,4 @@
+use "../fixtures/geometry.po" as g;
+a: g.Point = g.Point.[0, 0];
+b: g.Point = g.Point.[3, 4];
+print(g.distance(a, b)); print("\n");

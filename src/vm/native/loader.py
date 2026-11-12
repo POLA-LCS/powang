@@ -18,7 +18,7 @@ from typing import Sequence
 from ..image import ProgramImage
 from .build import RuntimePaths, ensure_runtime
 from .compiler import CompileResult, IntegratedGcc, NativeBuildError
-from .source_gen import render_temp_cpp
+from .source_gen import render_bundle_cpp, render_temp_cpp
 
 
 @dataclass(frozen=True)
@@ -54,10 +54,14 @@ def compile_image(
     output: Path | None = None,
     keep_source: bool = False,
     paths: RuntimePaths | None = None,
+    bundle: bytes | None = None,
 ) -> NativeProgram:
     """Render, compile and return the native program for ``image``."""
     paths = paths or ensure_runtime()
-    source = render_temp_cpp(image)
+    source = (
+        render_bundle_cpp(bundle) if bundle is not None
+        else render_temp_cpp(image)
+    )
     temporary = output is None
     if temporary:
         directory = Path(tempfile.mkdtemp(prefix="powang-native-"))
@@ -95,9 +99,19 @@ def run_native(
     input_text: str | None = None,
     timeout: float = 60.0,
     paths: RuntimePaths | None = None,
+    state: object | None = None,
+    bundle: bytes | None = None,
 ) -> NativeRunResult:
-    """Compile ``image``, run the executable and capture its output."""
-    program = compile_image(image, paths=paths)
+    """Compile ``image``, run the executable and capture its output.
+
+    A prebuilt bundle is used as is. With a state and no bundle, the bundle is
+    built here and the state must already be the active state, because the
+    builder resolves imports through ``get_module_loader()``.
+    """
+    if bundle is None and state is not None:
+        from .bundle import build_bundle
+        bundle = build_bundle(image, state)
+    program = compile_image(image, paths=paths, bundle=bundle)
     try:
         completed = subprocess.run(
             [str(program.executable), *args],

@@ -1,0 +1,5 @@
+module mathlib;
+export version: int = 3;
+secret: int = 7;
+export fun add(a: int, b: int): int >> a + b;
+export fun scaled(a: int): int >> a * secret;

@@ -11,6 +11,7 @@ Evaluation itself stays in :mod:`src.runtime`; the import is lazy to avoid a
 circular import at module load time.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,6 +24,15 @@ from .error import (
 from .parser import Parser, ParserTokenType
 from .powang_types import PowangModule
 from .state import get_state
+
+
+@dataclass(frozen=True)
+class ModuleSources:
+    """One module's name and ordered source texts, without evaluation."""
+
+    name: str
+    path: Path
+    sources: tuple[tuple[Path, str], ...]
 
 
 def _read_source(path: Path) -> str:
@@ -164,7 +174,12 @@ class ModuleLoader:
             self.loading.pop()
 
     # ------------------------------------------------------------- evaluation
-    def _evaluate(self, path: Path) -> PowangModule:
+    def read_sources(self, path: Path) -> ModuleSources:
+        """Return one module's ordered source texts without evaluating it.
+
+        Resolution, directory ordering and the read error wrapping match
+        ``_evaluate`` exactly. Parsing and compilation are the caller's job.
+        """
         if not path.exists():
             raise self._make_error(
                 path,
@@ -184,8 +199,7 @@ class ModuleLoader:
         if not sources:
             raise self._make_error(path, f"Module directory is empty: {path}")
 
-        ast: list[Any] = []
-        source_texts: list[tuple[str, str]] = []
+        collected: list[tuple[Path, str]] = []
         for source_path in sources:
             try:
                 content = _read_source(source_path)
@@ -195,6 +209,21 @@ class ModuleLoader:
                     f"Can't read module file: {source_path}",
                     [str(file_error)],
                 ) from None
+            collected.append((source_path, content))
+        return ModuleSources(
+            name=module_name,
+            path=path,
+            sources=tuple(collected),
+        )
+
+    def _evaluate(self, path: Path) -> PowangModule:
+        module_sources = self.read_sources(path)
+        sources = [source_path for source_path, _ in module_sources.sources]
+        module_name = module_sources.name
+
+        ast: list[Any] = []
+        source_texts: list[tuple[str, str]] = []
+        for source_path, content in module_sources.sources:
             source_texts.append((str(source_path), content))
             parser = Parser(content, source_path=source_path)
             try:

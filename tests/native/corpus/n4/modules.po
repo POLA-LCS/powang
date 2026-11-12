@@ -1,0 +1,11 @@
+use "./fixtures/mathlib.po" as m;
+use "./fixtures/mathlib.po" as n;
+base: int = 10;
+fun read_base(): int >> base;
+print(m.add(2, 3)); print(" ");
+print(m.version); print(" ");
+print(n.scaled(4)); print(" ");
+print(read_base()); print(" ");
+use "./fixtures/legacy.po";
+print(hello("powang")); print(" ");
+print(version); print("\n");

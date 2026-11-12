@@ -1,0 +1,3 @@
+module legacy;
+fun hello(name: str): str >> "hello " + name;
+version: int = 9;

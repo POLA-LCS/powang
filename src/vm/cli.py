@@ -244,16 +244,19 @@ def _native_compile(args: list[str]) -> int:
     if output is None:
         suffix = '.exe' if os.name == 'nt' else ''
         output = Path('build/native') / (Path(path).stem + suffix)
+    from .native.session import compile_native_file
+
     try:
-        state = _setup_state(path)
-        set_state(state)
-        try:
-            image = _compile_file(path, check=True)
-        finally:
-            state.close()
+        session = compile_native_file(path, check=True)
         program = compile_image(
-            image, output=output, keep_source=keep_source,
+            session.image,
+            output=output,
+            keep_source=keep_source,
+            bundle=session.bundle,
         )
+    except PowangError as error:
+        print(str(error))
+        return 1
     except NativeBuildError as error:
         print(f"native build error: {error}", file=sys.stderr)
         if error.result is not None and error.result.stderr:
@@ -265,7 +268,7 @@ def _native_compile(args: list[str]) -> int:
 
 def _native_run(args: list[str]) -> int:
     from .native.compiler import NativeBuildError
-    from .native.loader import run_native
+    from .native.session import run_native_file
 
     path: str | None = None
     script_args: list[str] = []
@@ -280,13 +283,10 @@ def _native_run(args: list[str]) -> int:
         _native_usage()
         return 2
     try:
-        state = _setup_state(path)
-        set_state(state)
-        try:
-            image = _compile_file(path, check=True)
-        finally:
-            state.close()
-        result = run_native(image, script_args)
+        result = run_native_file(path, script_args)
+    except PowangError as error:
+        print(str(error))
+        return 1
     except NativeBuildError as error:
         print(f"native build error: {error}", file=sys.stderr)
         if error.result is not None and error.result.stderr:

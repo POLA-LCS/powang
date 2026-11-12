@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ...error import PowangError, powang_error_format, powang_error_from_exception
+from ...module_loader import get_module_loader
+from ...parser import Parser
 from ..image import ProgramImage
+from ..modules import _has_project_declaration, compile_module_image
 from .meta import build_meta, parse_meta
 
 
@@ -201,6 +205,27 @@ class _Reader:
         return len(self.data) - self.offset
 
 
+@dataclass
+class _Node:
+    """Mutable builder state for one bundle module."""
+
+    module_id: int
+    name: str = ""
+    path: str = ""
+    identity: str = ""
+    image_module_index: int = 0
+    bind_project: bool = False
+    status: int = 0
+    image: ProgramImage | None = None
+    image_bytes: bytes = b""
+    meta_bytes: bytes = b""
+    imports: list[BundleImport] = field(default_factory=list)
+    exports: tuple[tuple[str, str], ...] = ()
+    error_kind: str = ""
+    error_message: str = ""
+    error_text: str = ""
+
+
 def build_bundle(image: ProgramImage, state: Any = None) -> bytes:
     """Build the PWBB payload for one entry image and its module graph."""
     return build_bundle_from_image(image, state).to_bytes()
@@ -209,8 +234,18 @@ def build_bundle(image: ProgramImage, state: Any = None) -> bytes:
 def build_bundle_from_image(
     image: ProgramImage, state: Any = None
 ) -> Bundle:
-    """Build the structured bundle used by tests and diagnostics."""
-    del state
+    """Build the structured bundle used by tests and diagnostics.
+
+    Without a state the builder keeps the N4.1a entry-only behavior. With a
+    state it resolves every ``use`` through the active module loader and emits
+    the full reachable module graph.
+    """
+    if state is None:
+        return _entry_only_bundle(image)
+    return collect_module_graph(image, state)
+
+
+def _entry_only_bundle(image: ProgramImage) -> Bundle:
     module = image.module_info(image.entry_module)
     entry = BundleModule(
         module_id=0,
@@ -232,6 +267,251 @@ def build_bundle_from_image(
         modules=(entry,),
         project=None,
         digest=b"",
+    )
+
+
+def collect_module_graph(image: ProgramImage, state: Any) -> Bundle:
+    """Resolve and compile the full module graph for ``image``."""
+    loader = get_module_loader()
+    entry_info = image.module_info(image.entry_module)
+    entry_path = entry_info.path or str(
+        getattr(state, "paths", {}).get("RELATIVE", "")
+    )
+    entry_ast = getattr(image, "entry_ast", None)
+    entry_line_count = 0
+    if entry_path and Path(entry_path).exists():
+        try:
+            sources = loader.read_sources(Path(entry_path))
+        except PowangError:
+            entry_source = ""
+        else:
+            entry_source = sources.sources[0][1] if sources.sources else ""
+        entry_line_count = entry_source.count("\n") + 1
+    entry_identity = str(Path(entry_path).resolve()) if entry_path else "<entry>"
+
+    nodes: list[_Node] = []
+    ids: dict[str, int] = {}
+    visiting: list[str] = []
+
+    def add_node(identity: str, name: str, path: str) -> _Node:
+        node = _Node(
+            module_id=len(nodes),
+            name=name,
+            path=path,
+            identity=identity,
+        )
+        nodes.append(node)
+        ids.setdefault(identity, node.module_id)
+        return node
+
+    entry_node = add_node(entry_identity, entry_info.name, entry_path)
+    entry_node.image_module_index = image.entry_module
+    entry_node.image = image
+    entry_node.image_bytes = image.to_bytes()
+    entry_node.meta_bytes = build_meta(image)
+    entry_node.exports = tuple(entry_info.exports)
+    entry_node.bind_project = bool(
+        isinstance(entry_ast, list) and _has_project_declaration(entry_ast)
+    )
+    _scan_image(
+        entry_node, image, loader, state, add_node, ids, visiting,
+    )
+
+    project = _project_block(state)
+    return _serialize_graph(
+        entry_path=entry_path,
+        entry_source_line_count=entry_line_count,
+        nodes=nodes,
+        project=project,
+    )
+
+
+def _scan_image(
+    node: _Node,
+    image: ProgramImage,
+    loader: Any,
+    state: Any,
+    add_node: Any,
+    ids: dict[str, int],
+    visiting: list[str],
+) -> None:
+    """Record the import bindings of one compiled image and recurse."""
+    if node.identity in visiting:
+        return
+    visiting.append(node.identity)
+    try:
+        for module_index, module_info in enumerate(image.modules):
+            for descriptor in module_info.imports:
+                if not isinstance(descriptor, dict):
+                    continue
+                kind = str(descriptor.get("kind", "name") or "name")
+                name = str(descriptor.get("name", "") or "")
+                base = descriptor.get("base") or module_info.path or node.path
+                level = descriptor.get("level", 0)
+                if not isinstance(level, int):
+                    level = 0
+                try:
+                    target_path = loader.resolve(
+                        kind, name, Path(str(base)), level,
+                    )
+                except (OSError, ValueError):
+                    target_path = Path(str(base)).parent / name
+                target_identity = str(target_path.resolve())
+                explicit_alias = descriptor.get("alias") is not None
+                alias = descriptor.get("alias")
+                if not isinstance(alias, str) or not alias:
+                    alias = Path(name).stem
+                wildcard = bool(descriptor.get("wildcard"))
+                if target_identity in ids:
+                    target_id = ids[target_identity]
+                else:
+                    target_node = add_node(
+                        target_identity, name, str(target_path),
+                    )
+                    _compile_imported_module(
+                        target_node, target_path, loader, state,
+                    )
+                    target_id = target_node.module_id
+                    if target_node.status == 0 and target_node.image is not None:
+                        _scan_image(
+                            target_node, target_node.image, loader, state,
+                            add_node, ids, visiting,
+                        )
+                node.imports.append(BundleImport(
+                    image_module_index=module_index,
+                    target_module_id=target_id,
+                    alias=str(alias),
+                    wildcard=wildcard,
+                    explicit_alias=explicit_alias,
+                ))
+    finally:
+        visiting.pop()
+
+
+def compile_imported_module(
+    loader: Any, target_path: Path, state: Any
+) -> tuple[ProgramImage | None, list[Any], str, PowangError | None]:
+    """Read, parse and compile one imported module without evaluating it."""
+    try:
+        sources = loader.read_sources(target_path)
+    except PowangError as error:
+        return None, [], "", error
+    ast: list[Any] = []
+    for source_path, content in sources.sources:
+        parser = Parser(content, source_path=source_path)
+        try:
+            ast.extend(parser.parse())
+        except AssertionError as parse_error:
+            converted = powang_error_from_exception(parse_error)
+            if converted is None:
+                raise
+            wrapped = loader._wrap(
+                source_path, converted, line=parser.tokenizer.row + 1,
+            )
+            return None, [], sources.name, wrapped
+    try:
+        imported = compile_module_image(
+            ast, sources.name, target_path, state,
+        )
+    except PowangError as error:
+        if getattr(error, "_module_error", False):
+            wrapped = error
+        else:
+            wrapped = loader._wrap(target_path, error)
+        return None, ast, sources.name, wrapped
+    except Exception as error:  # verifier or compiler internals
+        detail = PowangError(message=str(error), text=str(error))
+        wrapped = loader._wrap(target_path, detail)
+        return None, ast, sources.name, wrapped
+    return imported, ast, sources.name, None
+
+
+def _compile_imported_module(
+    node: _Node,
+    target_path: Path,
+    loader: Any,
+    state: Any,
+) -> None:
+    imported, ast, module_name, error = compile_imported_module(
+        loader, target_path, state,
+    )
+    node.name = module_name
+    node.path = str(target_path)
+    if error is not None or imported is None:
+        node.status = 1
+        if error is not None:
+            node.error_kind = error.kind
+            node.error_message = error.message
+            node.error_text = error._base_text
+        return
+    node.image = imported
+    node.image_bytes = imported.to_bytes()
+    node.meta_bytes = build_meta(imported)
+    node.image_module_index = imported.entry_module
+    module_info = imported.module_info(imported.entry_module)
+    node.exports = tuple(module_info.exports)
+    node.bind_project = _has_project_declaration(ast)
+
+
+def _serialize_graph(
+    *,
+    entry_path: str,
+    entry_source_line_count: int,
+    nodes: list[_Node],
+    project: BundleProject | None,
+) -> Bundle:
+    modules = tuple(
+        BundleModule(
+            module_id=node.module_id,
+            name=node.name,
+            path=node.path,
+            identity=node.identity,
+            image_module_index=node.image_module_index,
+            bind_project=node.bind_project,
+            status=node.status,
+            image=node.image_bytes,
+            meta=node.meta_bytes,
+            imports=tuple(node.imports),
+            exports=node.exports,
+            error_kind=node.error_kind,
+            error_message=node.error_message,
+            error_text=node.error_text,
+        )
+        for node in nodes
+    )
+    return Bundle(
+        entry_module=0,
+        entry_path=entry_path,
+        entry_source_line_count=entry_source_line_count,
+        modules=modules,
+        project=project,
+        digest=b"",
+    )
+
+
+def _project_block(state: Any) -> BundleProject | None:
+    project = getattr(state, "project_value", None)
+    if project is None:
+        return None
+    data = getattr(project, "data", {}) or {}
+
+    def scalar(name: str, default: Any) -> Any:
+        value = data.get(name)
+        if value is None:
+            return default
+        return getattr(value, "data", default)
+
+    def strings(name: str) -> tuple[str, ...]:
+        value = data.get(name)
+        items = getattr(value, "data", []) or []
+        return tuple(str(getattr(item, "data", item)) for item in items)
+
+    return BundleProject(
+        modules=strings("modules"),
+        paths=strings("paths"),
+        log_level=str(scalar("logLevel", "info")),
+        allow_system=bool(scalar("allowSystem", False)),
+        engine=str(scalar("engine", "tree")),
     )
 
 
