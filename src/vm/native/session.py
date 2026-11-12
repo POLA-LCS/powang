@@ -98,4 +98,5 @@ def run_native_file(
         input_text=input_text,
         timeout=timeout,
         bundle=session.bundle,
+        use_cache=True,
     )

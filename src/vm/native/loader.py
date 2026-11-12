@@ -7,6 +7,7 @@ an explicit output path.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ class NativeProgram:
 
     executable: Path
     source: str
-    compile_result: CompileResult
+    compile_result: CompileResult | None
     temporary: bool
 
     def cleanup(self) -> None:
@@ -48,6 +49,17 @@ class NativeRunResult:
     compile_result: CompileResult | None = None
 
 
+def _cache_key(source: str, paths: RuntimePaths) -> str:
+    digest = hashlib.sha256(source.encode("utf-8"))
+    try:
+        stat = paths.library.stat()
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        digest.update(str(stat.st_size).encode("ascii"))
+    except OSError:
+        pass
+    return digest.hexdigest()
+
+
 def compile_image(
     image: ProgramImage,
     *,
@@ -55,6 +67,7 @@ def compile_image(
     keep_source: bool = False,
     paths: RuntimePaths | None = None,
     bundle: bytes | None = None,
+    use_cache: bool = False,
 ) -> NativeProgram:
     """Render, compile and return the native program for ``image``."""
     paths = paths or ensure_runtime()
@@ -62,6 +75,21 @@ def compile_image(
         render_bundle_cpp(bundle) if bundle is not None
         else render_temp_cpp(image)
     )
+    cache_path: Path | None = None
+    if use_cache and output is None:
+        cache_directory = paths.build_dir / "cache"
+        cache_directory.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_directory / (
+            _cache_key(source, paths)
+            + (".exe" if os.name == "nt" else "")
+        )
+        if cache_path.is_file() and cache_path.stat().st_size > 0:
+            return NativeProgram(
+                executable=cache_path,
+                source=source,
+                compile_result=None,
+                temporary=False,
+            )
     temporary = output is None
     if temporary:
         directory = Path(tempfile.mkdtemp(prefix="powang-native-"))
@@ -84,6 +112,11 @@ def compile_image(
         if temporary:
             shutil.rmtree(executable.parent, ignore_errors=True)
         raise NativeBuildError("native compile failed", result)
+    if cache_path is not None:
+        try:
+            shutil.copy2(executable, cache_path)
+        except OSError:
+            pass
     return NativeProgram(
         executable=executable,
         source=source,
@@ -101,6 +134,7 @@ def run_native(
     paths: RuntimePaths | None = None,
     state: object | None = None,
     bundle: bytes | None = None,
+    use_cache: bool = False,
 ) -> NativeRunResult:
     """Compile ``image``, run the executable and capture its output.
 
@@ -111,7 +145,8 @@ def run_native(
     if bundle is None and state is not None:
         from .bundle import build_bundle
         bundle = build_bundle(image, state)
-    program = compile_image(image, paths=paths, bundle=bundle)
+    program = compile_image(
+        image, paths=paths, bundle=bundle, use_cache=use_cache)
     try:
         completed = subprocess.run(
             [str(program.executable), *args],

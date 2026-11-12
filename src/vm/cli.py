@@ -449,7 +449,10 @@ def _native_clean(args: list[str]) -> int:
 
     remove_all = '--all' in args
     root = Path(__file__).resolve().parents[2]
-    targets = [root / '.powang' / 'cache']
+    targets = [
+        root / '.powang' / 'cache',
+        root / 'build' / 'native' / 'cache',
+    ]
     if remove_all:
         targets.append(root / 'build' / 'native')
     for target in targets:
