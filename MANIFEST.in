@@ -1,0 +1,8 @@
+include README.md CHANGELOG.md LICENSE
+recursive-include docs *.md
+recursive-include examples *.po
+recursive-include modules *.po
+recursive-include native *
+recursive-include tests *.py *.po
+global-exclude __pycache__
+global-exclude *.py[cod]
