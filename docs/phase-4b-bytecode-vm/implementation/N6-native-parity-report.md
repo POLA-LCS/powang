@@ -16,8 +16,8 @@ remaining gates are listed at the end.
 
 | Gate | Result |
 |---|---|
-| Full Python VM suite | 655 tests, all pass |
-| Full tree walker suite (`POWANG_ENGINE=tree`) | 655 tests, all pass |
+| Full Python VM suite | 656 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 656 tests, all pass |
 | Native N1 corpus | 5 programs, zero mismatches |
 | Native N2 corpus | 6 programs, zero mismatches |
 | Native N3 corpus | 9 programs, zero mismatches |
@@ -37,7 +37,9 @@ warnings are compared on standard error.
 ## Performance
 
 The CPU bound benchmark is a 200,000 iteration integer accumulation loop. Each
-engine ran three times and the median wall time is reported.
+engine ran three times and the median wall time is reported. The
+`native/benches` suite also covers string building and array mutation, and
+`src.vm.native.bench.run_native_benchmarks` backs the `bench` command.
 
 | Engine | Median wall time |
 |---|---|
@@ -76,6 +78,8 @@ ten second cold and five second warm compile gates.
    random tokens, URL query parsing and building, JSON pretty printing, UTC
    ISO time formatting, structured stderr logging and Python-style
    `[EXTERN ERROR]` text.
+7. The `native/benches` loop, string and container programs and the
+   `src.vm.native.bench.run_native_benchmarks` runner.
 
 ## N3 closure
 
