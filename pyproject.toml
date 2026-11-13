@@ -31,7 +31,7 @@ powang = "powang:_entry"
 py-modules = ["powang"]
 
 [tool.setuptools.packages.find]
-include = ["src*", "modules*"]
+include = ["src*", "modules*", "native*"]
 namespaces = true
 
 [tool.setuptools.package-data]
@@ -47,3 +47,8 @@ namespaces = true
 "modules.http_router" = ["*.po"]
 "modules.host" = ["*.po"]
 "modules.log" = ["*.po"]
+"native" = ["CMakeLists.txt"]
+"native.benches" = ["*.po"]
+"native.include.pwb" = ["*.hpp"]
+"native.src" = ["*.cpp"]
+"native.tests" = ["*.cpp", "*.hpp"]

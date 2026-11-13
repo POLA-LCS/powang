@@ -39,20 +39,25 @@ else()
     target_compile_options(pwb_native PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-enable_testing()
+option(PWB_BUILD_TESTS "Build the native runtime tests" ON)
 
-add_executable(pwb_native_tests
-    tests/test_bigint.cpp
-    tests/test_value.cpp
-    tests/test_bundle.cpp
-    tests/test_errors.cpp
-    tests/test_tasks.cpp)
-target_link_libraries(pwb_native_tests PRIVATE pwb_runtime)
+if(PWB_BUILD_TESTS)
+    enable_testing()
 
-if(MSVC)
-    target_compile_options(pwb_native_tests PRIVATE /W4)
-else()
-    target_compile_options(pwb_native_tests PRIVATE -Wall -Wextra -Wpedantic)
+    add_executable(pwb_native_tests
+        tests/test_bigint.cpp
+        tests/test_value.cpp
+        tests/test_bundle.cpp
+        tests/test_errors.cpp
+        tests/test_tasks.cpp)
+    target_link_libraries(pwb_native_tests PRIVATE pwb_runtime)
+
+    if(MSVC)
+        target_compile_options(pwb_native_tests PRIVATE /W4)
+    else()
+        target_compile_options(
+            pwb_native_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    add_test(NAME pwb_native_tests COMMAND pwb_native_tests)
 endif()
-
-add_test(NAME pwb_native_tests COMMAND pwb_native_tests)

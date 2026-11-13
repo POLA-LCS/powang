@@ -6,8 +6,10 @@ tools and failed commands raise ``NativeBuildError`` with the captured output.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +19,27 @@ from .compiler import CompileResult, NativeBuildError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 NATIVE_DIR = REPOSITORY_ROOT / "native"
-BUILD_DIR = REPOSITORY_ROOT / "build" / "native"
+
+
+def _is_source_checkout() -> bool:
+    return (REPOSITORY_ROOT / "pyproject.toml").is_file()
+
+
+def _default_build_dir() -> Path:
+    """Use the checkout build directory or a writable temp directory.
+
+    A wheel install has no writable repository root. The native sources are
+    packaged under ``native/``, so the build cache moves to the system temp
+    directory in that case.
+    """
+    if _is_source_checkout():
+        return REPOSITORY_ROOT / "build" / "native"
+    return Path(tempfile.gettempdir()) / "powang-native-build"
+
+
+BUILD_DIR = Path(
+    os.environ.get("POWANG_NATIVE_BUILD_DIR") or _default_build_dir()
+)
 INCLUDE_DIR = NATIVE_DIR / "include"
 
 RUNTIME_LIBRARY = "libpwb_runtime.a"
@@ -130,19 +152,20 @@ def ensure_runtime(*, rebuild: bool = False) -> RuntimePaths:
         configure_needed = True
     if configure_needed:
         _require_tool("ninja")
-        _run_build_command(
-            [
-                "cmake",
-                "-S",
-                str(NATIVE_DIR),
-                "-B",
-                str(BUILD_DIR),
-                "-G",
-                "Ninja",
-                "-DCMAKE_BUILD_TYPE=Release",
-                "-DCMAKE_CXX_COMPILER=g++",
-            ]
-        )
+        configure = [
+            "cmake",
+            "-S",
+            str(NATIVE_DIR),
+            "-B",
+            str(BUILD_DIR),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_CXX_COMPILER=g++",
+        ]
+        if not _is_source_checkout():
+            configure.append("-DPWB_BUILD_TESTS=OFF")
+        _run_build_command(configure)
     _run_build_command(
         ["cmake", "--build", str(BUILD_DIR), "--config", "Release"]
     )

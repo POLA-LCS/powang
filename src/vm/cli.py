@@ -389,14 +389,10 @@ def _native_bench(args: list[str]) -> int:
 def _native_clean(args: list[str]) -> int:
     import shutil
 
+    from .native.build import BUILD_DIR
+
     remove_all = '--all' in args
-    root = Path(__file__).resolve().parents[2]
-    targets = [
-        root / '.powang' / 'cache',
-        root / 'build' / 'native' / 'cache',
-    ]
-    if remove_all:
-        targets.append(root / 'build' / 'native')
+    targets = [BUILD_DIR] if remove_all else [BUILD_DIR / 'cache']
     for target in targets:
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
@@ -429,9 +425,7 @@ def _native_pack(args: list[str]) -> int:
     except Exception as error:
         print(f"native build error: {error}", file=sys.stderr)
         return 1
-    destination = output or (
-        Path(__file__).resolve().parents[2] / 'dist' / 'native'
-    )
+    destination = output or (Path.cwd() / 'dist' / 'native')
     destination.mkdir(parents=True, exist_ok=True)
     shutil.copy2(paths.library, destination / paths.library.name)
     shutil.copy2(paths.executable, destination / paths.executable.name)
