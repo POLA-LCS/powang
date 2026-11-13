@@ -16,8 +16,8 @@ remaining gates are listed at the end.
 
 | Gate | Result |
 |---|---|
-| Full Python VM suite | 650 tests, all pass |
-| Full tree walker suite (`POWANG_ENGINE=tree`) | 650 tests, all pass |
+| Full Python VM suite | 655 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 655 tests, all pass |
 | Native N1 corpus | 5 programs, zero mismatches |
 | Native N2 corpus | 6 programs, zero mismatches |
 | Native N3 corpus | 9 programs, zero mismatches |
@@ -27,6 +27,7 @@ remaining gates are listed at the end.
 | Seeded fuzz seed 7 | 1000 programs, zero mismatches |
 | Seeded fuzz seed 2026 | 1000 programs, zero mismatches |
 | Runtime access control and ambiguity | 13 cases, zero mismatches |
+| Standard library host bridge | 5 tests, success and error paths match |
 | Native C++ tests | 1 of 1 CTest target passes |
 
 The differential comparison covers standard output, standard error and exit
@@ -70,8 +71,11 @@ ten second cold and five second warm compile gates.
 5. Structure and element lock enforcement, runtime private field and method
    access control, private static methods, and operator or trait method
    ambiguity error text.
-6. The default scalar host bridge for `math`, `strings`, `json`, `url`,
-   `crypto`, `time` and `env`.
+6. The default host bridge for `math`, `strings`, `json`, `url`, `crypto`,
+   `time`, `env`, `log` and script arguments. It includes HMAC-SHA-256,
+   random tokens, URL query parsing and building, JSON pretty printing, UTC
+   ISO time formatting, structured stderr logging and Python-style
+   `[EXTERN ERROR]` text.
 
 ## N3 closure
 
@@ -108,4 +112,5 @@ zero, every task settles, no process leaks and the expected task sums match.
 
 1. Optional inline caches and threaded dispatch.
 2. The default engine decision and the `0.25.0` release.
-3. The full Python host module surface and true parallel worker execution.
+3. The HTTP host modules, the generic host callback bridge and true parallel
+   worker execution.
