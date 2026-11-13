@@ -1295,6 +1295,50 @@ Value make_typed_undef(
     return value;
 }
 
+std::string spec_generic_text(
+    const std::string& text, std::size_t wanted) {
+    const std::size_t key = text.find("\"generics\":[");
+    if (key == std::string::npos) {
+        return "";
+    }
+    std::size_t position = key + 12;
+    std::size_t index = 0;
+    while (position < text.size()) {
+        while (position < text.size()
+               && (std::isspace(
+                       static_cast<unsigned char>(text[position]))
+                   || text[position] == ',')) {
+            ++position;
+        }
+        if (position >= text.size() || text[position] == ']') {
+            break;
+        }
+        if (text[position] != '{') {
+            ++position;
+            continue;
+        }
+        const std::size_t start = position;
+        int depth = 0;
+        while (position < text.size()) {
+            if (text[position] == '{') {
+                ++depth;
+            } else if (text[position] == '}') {
+                --depth;
+                if (depth == 0) {
+                    ++position;
+                    break;
+                }
+            }
+            ++position;
+        }
+        if (index == wanted) {
+            return text.substr(start, position - start);
+        }
+        ++index;
+    }
+    return "";
+}
+
 void apply_declared_spec_flags(
     const CodeObject& code, std::int64_t spec_index, Value& value) {
     if (spec_index < 0
@@ -1307,20 +1351,61 @@ void apply_declared_spec_flags(
     if (spec.kind != ConstantKind::Spec) {
         return;
     }
-    if (spec.text.find("\"const\":true") != std::string::npos) {
+    const std::size_t element_at =
+        spec.text.find("\"element_type\":");
+    const std::size_t generics_at =
+        spec.text.find("\"generics\":");
+    std::size_t nested_at = std::string::npos;
+    if (element_at != std::string::npos) {
+        nested_at = element_at;
+    }
+    if (generics_at != std::string::npos
+        && (nested_at == std::string::npos
+            || generics_at < nested_at)) {
+        nested_at = generics_at;
+    }
+    const std::size_t const_at =
+        spec.text.find("\"const\":true");
+    const bool outer_const =
+        const_at != std::string::npos
+        && (nested_at == std::string::npos || const_at < nested_at);
+    if (outer_const) {
         value.flags |= ValueConst;
         if (value.tag == Tag::Obj) {
             as_object(value)->structure_locked = true;
+        } else if (value.tag == Tag::Arr) {
+            as_array(value)->structure_locked = true;
+        } else if (value.tag == Tag::Map) {
+            as_map(value)->structure_locked = true;
+        } else if (value.tag == Tag::Set) {
+            as_set(value)->structure_locked = true;
         }
     }
-    const std::size_t element_at =
-        spec.text.find("\"element_type\":");
     if (value.tag == Tag::Arr && element_at != std::string::npos
         && spec.text.find("\"const\":true", element_at)
             != std::string::npos) {
         as_array(value)->elements_locked = true;
     }
-    if (spec.text.find("\"weak\":true") != std::string::npos) {
+    if (value.tag == Tag::Set) {
+        const std::string generic = spec_generic_text(spec.text, 0);
+        if (!generic.empty()
+            && generic.find("\"const\":true") != std::string::npos) {
+            as_set(value)->elements_locked = true;
+        }
+    }
+    if (value.tag == Tag::Map) {
+        const std::string generic = spec_generic_text(spec.text, 1);
+        if (!generic.empty()
+            && generic.find("\"const\":true") != std::string::npos) {
+            as_map(value)->elements_locked = true;
+        }
+    }
+    const std::size_t weak_at =
+        spec.text.find("\"weak\":true");
+    const bool outer_weak =
+        weak_at != std::string::npos
+        && (nested_at == std::string::npos || weak_at < nested_at);
+    if (outer_weak) {
         value.flags |= ValueWeak;
     }
 }
@@ -1441,6 +1526,12 @@ bool private_access_allowed(
     }
     return frame.function->owner->info->name == object.type_name
         && !frame.function->is_static;
+}
+
+bool private_static_access_allowed(
+    Frame& frame, const TypeRuntime& type) {
+    return frame.function != nullptr
+        && frame.function->owner == &type;
 }
 
 Value load_object_member(
@@ -3566,6 +3657,16 @@ Value execute(Frame& frame, Machine& machine) {
                     }
                     FunctionObject* function = select_overload(
                         statics->second, positional, *module->meta);
+                    if (function->is_private
+                        && !private_static_access_allowed(
+                            frame, *runtime)) {
+                        throw_error(error_identifier_not_found(
+                            machine.arena,
+                            "method call: " + runtime->info->name + "."
+                                + site.name,
+                            "method: " + site.name,
+                            {"perhaps is a private static method?"}));
+                    }
                     push_value(
                         frame,
                         invoke_function(
@@ -3642,14 +3743,26 @@ Value execute(Frame& frame, Machine& machine) {
                     }
                 }
                 if (candidates == nullptr) {
+                    const std::vector<FunctionObject*>* trait_candidate =
+                        nullptr;
                     for (const auto& entry : type.trait_methods) {
                         const auto found =
                             entry.second.find(site.name);
-                        if (found != entry.second.end()) {
-                            candidates = &found->second;
-                            break;
+                        if (found == entry.second.end()
+                            || found->second.empty()) {
+                            continue;
                         }
+                        if (trait_candidate != nullptr) {
+                            throw_error(make_error(
+                                machine.arena, "IMPLEMENTATION",
+                                "method call: " + site.name,
+                                "call to " + site.name
+                                    + " is ambiguous between trait methods",
+                                {"use Trait.method to select one"}));
+                        }
+                        trait_candidate = &found->second;
                     }
+                    candidates = trait_candidate;
                 }
                 if (candidates == nullptr && type.module != nullptr) {
                     for (const auto& entry : type.module->traits) {
@@ -3681,7 +3794,10 @@ Value execute(Frame& frame, Machine& machine) {
                     *candidates, positional, overload_meta);
                 if (function->is_private
                     && !private_access_allowed(machine, frame, *object)) {
-                    runtime_fail("private method: " + site.name);
+                    throw_error(error_identifier_not_found(
+                        machine.arena, "method call: " + site.name,
+                        "method: " + site.name,
+                        {"perhaps is a private method?"}));
                 }
                 push_value(
                     frame,
@@ -3732,6 +3848,15 @@ Value execute(Frame& frame, Machine& machine) {
                 }
                 FunctionObject* function = select_overload(
                     methods->second, positional, *owner->meta);
+                if (function->is_private
+                    && !private_static_access_allowed(frame, *runtime)) {
+                    throw_error(error_identifier_not_found(
+                        machine.arena,
+                        "method call: " + *site.type_name + "."
+                            + site.name,
+                        "method: " + site.name,
+                        {"perhaps is a private static method?"}));
+                }
                 push_value(
                     frame,
                     invoke_function(
@@ -6746,6 +6871,14 @@ Value array_method(
     }
     const ArrayObject* source = as_array(arguments[0]);
     const std::size_t size = source->items.size();
+    const auto require_unlocked = [&](const std::string& method) {
+        if (source->structure_locked) {
+            throw_error(error_const(
+                machine.arena, "native method: " + method,
+                "container structure is locked",
+                {"the type annotation ends with '!'"}));
+        }
+    };
     if (name == "size") {
         return make_int(static_cast<std::int64_t>(size));
     }
@@ -6754,6 +6887,9 @@ Value array_method(
             arguments.size() > 1 ? arguments[1] : make_int(-1);
         const std::int64_t position =
             resolved_index(machine, index, size, "arr");
+        if (name != "get") {
+            require_unlocked(name);
+        }
         return copy_value(
             machine.arena,
             source->items[static_cast<std::size_t>(position)]);
@@ -6762,6 +6898,7 @@ Value array_method(
         if (arguments.size() < 2) {
             runtime_fail("arr." + name + " requires an argument");
         }
+        require_unlocked(name);
         std::vector<Value> items;
         items.reserve(size + 1);
         for (const Value& item : source->items) {
@@ -6794,6 +6931,7 @@ Value array_method(
         if (arguments.size() < 3) {
             runtime_fail("arr.put requires an index and a value");
         }
+        require_unlocked(name);
         std::vector<Value> items;
         items.reserve(size + 1);
         for (const Value& item : source->items) {
@@ -6837,6 +6975,12 @@ Value array_method(
         if (arguments.size() < 3) {
             runtime_fail("arr.set requires an index and a value");
         }
+        if (source->elements_locked) {
+            throw_error(error_const(
+                machine.arena, "native method: set",
+                "container elements are locked",
+                {"the element type ends with '!'"}));
+        }
         std::vector<Value> items;
         items.reserve(size);
         for (const Value& item : source->items) {
@@ -6850,6 +6994,7 @@ Value array_method(
             machine.arena.allocate_array(std::move(items)));
     }
     if (name == "reverse") {
+        require_unlocked(name);
         std::vector<Value> items;
         items.reserve(size);
         for (const Value& item : source->items) {
@@ -6860,6 +7005,7 @@ Value array_method(
             machine.arena.allocate_array(std::move(items)));
     }
     if (name == "clear") {
+        require_unlocked(name);
         return make_array(machine.arena.allocate_array());
     }
     runtime_fail("unknown arr method: " + name);
@@ -6985,6 +7131,14 @@ Value map_method(
         runtime_fail("map method requires a map receiver");
     }
     const MapObject* source = as_map(arguments[0]);
+    const auto require_unlocked = [&](const std::string& method) {
+        if (source->structure_locked) {
+            throw_error(error_const(
+                machine.arena, "native method: " + method,
+                "container structure is locked",
+                {"the type annotation ends with '!'"}));
+        }
+    };
     if (name == "size") {
         return make_int(static_cast<std::int64_t>(source->entries.size()));
     }
@@ -7011,6 +7165,7 @@ Value map_method(
         if (arguments.size() < 2) {
             runtime_fail("map." + name + " requires a key");
         }
+        require_unlocked(name);
         const Value* found = map_get(*source, arguments[1]);
         if (found == nullptr) {
             runtime_fail("map key was not found");
@@ -7034,6 +7189,7 @@ Value map_method(
         if (arguments.size() < 2 || arguments[1].tag != Tag::Map) {
             runtime_fail("map.merge requires a map");
         }
+        require_unlocked(name);
         MapObject* result = machine.arena.allocate_map();
         for (const auto& entry : source->entries) {
             map_set(
@@ -7068,6 +7224,7 @@ Value map_method(
             machine.arena.allocate_array(std::move(values)));
     }
     if (name == "clear") {
+        require_unlocked(name);
         return make_map(machine.arena.allocate_map());
     }
     runtime_fail("unknown map method: " + name);
@@ -7081,6 +7238,14 @@ Value set_method(
         runtime_fail("set method requires a set receiver");
     }
     const SetObject* source = as_set(arguments[0]);
+    const auto require_unlocked = [&](const std::string& method) {
+        if (source->structure_locked) {
+            throw_error(error_const(
+                machine.arena, "native method: " + method,
+                "container structure is locked",
+                {"the type annotation ends with '!'"}));
+        }
+    };
     if (name == "size") {
         return make_int(static_cast<std::int64_t>(source->items.size()));
     }
@@ -7094,6 +7259,7 @@ Value set_method(
         if (arguments.size() < 2) {
             runtime_fail("set.add requires a value");
         }
+        require_unlocked(name);
         SetObject* result = machine.arena.allocate_set();
         for (const Value& item : source->items) {
             set_add(*result, copy_value(machine.arena, item));
@@ -7105,6 +7271,7 @@ Value set_method(
         if (arguments.size() < 2) {
             runtime_fail("set." + name + " requires a value");
         }
+        require_unlocked(name);
         const bool existed = set_has(*source, arguments[1]);
         if (name == "popget") {
             return make_bool(existed);
@@ -7121,6 +7288,7 @@ Value set_method(
         if (arguments.size() < 2 || arguments[1].tag != Tag::Set) {
             runtime_fail("set." + name + " requires a set");
         }
+        require_unlocked(name);
         const SetObject* other = as_set(arguments[1]);
         SetObject* result = machine.arena.allocate_set();
         if (name == "union") {
@@ -7155,6 +7323,7 @@ Value set_method(
             machine.arena.allocate_array(std::move(items)));
     }
     if (name == "clear") {
+        require_unlocked(name);
         return make_set(machine.arena.allocate_set());
     }
     runtime_fail("unknown set method: " + name);
@@ -8292,6 +8461,13 @@ Value load_object_member(
         const auto methods = runtime->statics.find(name);
         if (methods != runtime->statics.end() && !methods->second.empty()) {
             FunctionObject* source = methods->second.back();
+            if (source->is_private
+                && !private_static_access_allowed(frame, *runtime)) {
+                throw_error(error_identifier_not_found(
+                    machine.arena, "access expression",
+                    "method: " + name,
+                    {"perhaps is a private static method?"}));
+            }
             FunctionObject* bound = machine.arena.allocate_function(
                 source->metadata);
             bound->module = source->module;
@@ -8336,7 +8512,9 @@ Value load_object_member(
     if (field != object->fields.end()) {
         if (object->private_fields.count(name) != 0
             && !private_access_allowed(machine, frame, *object)) {
-            runtime_fail("private member: " + name);
+            throw_error(error_identifier_not_found(
+                machine.arena, "access expression", name,
+                {"perhaps it is a private property?"}));
         }
         return field->second;
     }
@@ -8360,7 +8538,9 @@ Value load_object_member(
             FunctionObject* source = methods->second.back();
             if (source->is_private
                 && !private_access_allowed(machine, frame, *object)) {
-                runtime_fail("private method: " + name);
+                throw_error(error_identifier_not_found(
+                    machine.arena, "access expression", name,
+                    {"perhaps it is a private property?"}));
             }
             FunctionObject* bound = machine.arena.allocate_function(
                 source->metadata);
@@ -8435,7 +8615,9 @@ Value store_object_member(
     }
     if (object->private_fields.count(name) != 0
         && !private_access_allowed(machine, frame, *object)) {
-        runtime_fail("private member: " + name);
+        throw_error(error_identifier_not_found(
+            machine.arena, "assignment", name,
+            {"perhaps it is a private property?"}));
     }
     const Value stored = copy_value(machine.arena, value);
     field->second = stored;
@@ -8513,17 +8695,58 @@ Value call_type_method(
     if (type == nullptr) {
         runtime_fail("unknown type '" + object->type_name + "'");
     }
-    const auto methods = type->methods.find(name);
-    if (methods == type->methods.end() || methods->second.empty()) {
-        runtime_fail("operator method not found: " + name);
-    }
     ModuleRuntime* module = type->module != nullptr
         ? type->module : object->module;
+    const std::vector<FunctionObject*>* candidates = nullptr;
+    const auto methods = type->methods.find(name);
+    if (methods != type->methods.end() && !methods->second.empty()) {
+        candidates = &methods->second;
+    } else {
+        for (const auto& entry : type->trait_methods) {
+            const auto found = entry.second.find(name);
+            if (found == entry.second.end() || found->second.empty()) {
+                continue;
+            }
+            if (candidates != nullptr) {
+                throw_error(make_error(
+                    machine.arena, "OPERATION", where,
+                    "operator method '" + name + "' is ambiguous",
+                    {
+                        "the type qualifies the method under multiple traits",
+                        "annotate the value with the intended trait",
+                    }));
+            }
+            candidates = &found->second;
+        }
+        if (candidates == nullptr && module != nullptr) {
+            for (const auto& entry : module->traits) {
+                const auto found = entry.second.defaults.find(name);
+                if (found == entry.second.defaults.end()
+                    || found->second.empty()) {
+                    continue;
+                }
+                if (candidates != nullptr) {
+                    throw_error(make_error(
+                        machine.arena, "OPERATION", where,
+                        "operator method '" + name + "' is ambiguous",
+                        {
+                            "the type qualifies the method under multiple "
+                            "traits",
+                            "annotate the value with the intended trait",
+                        }));
+                }
+                candidates = &found->second;
+            }
+        }
+    }
+    if (candidates == nullptr) {
+        runtime_fail("operator method not found: " + name);
+    }
     if (module == nullptr || module->meta == nullptr) {
         runtime_fail("operator method metadata is required");
     }
     FunctionObject* function = select_overload(
-        methods->second, arguments, *module->meta);
+        *candidates, arguments, *module->meta);
     return call_function(
         machine, function, arguments, {}, where, &receiver,
         runtime_type_name(receiver) + "." + name);

@@ -285,6 +285,7 @@ def main(args: list[str]):
                 result = run_native_file(
                     input_file, script_args, timeout=60.0,
                     warnings=not no_warnings,
+                    check=not no_check,
                 )
             except PowangError as error:
                 print(str(error))

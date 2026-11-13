@@ -103,6 +103,7 @@ def run_native_file(
     input_text: str | None = None,
     timeout: float = 60.0,
     warnings: bool = True,
+    check: bool = True,
 ) -> NativeRunResult:
     """Compile and run one Powang file on the native runtime."""
     warning_text = ""
@@ -110,7 +111,8 @@ def run_native_file(
         buffer = io.StringIO()
         try:
             with contextlib.redirect_stderr(buffer):
-                session = compile_native_file(path, warnings=True)
+                session = compile_native_file(
+                    path, check=check, warnings=True)
         except PowangError:
             warning_text = buffer.getvalue()
             if warning_text:
@@ -118,7 +120,8 @@ def run_native_file(
             raise
         warning_text = buffer.getvalue()
     else:
-        session = compile_native_file(path, warnings=False)
+        session = compile_native_file(
+            path, check=check, warnings=False)
     result = run_native(
         session.image,
         args,

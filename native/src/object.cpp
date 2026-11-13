@@ -509,6 +509,8 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
             ArrayObject* copy = arena.allocate_array();
             Value result = make_array(copy);
             result.flags = value.flags | ValueDefined;
+            copy->structure_locked =
+                as_array(value)->structure_locked;
             copy->elements_locked = as_array(value)->elements_locked;
             memo.seen[value.ref] = result;
             const ArrayObject* source = as_array(value);
@@ -540,6 +542,10 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
                 return found->second;
             }
             MapObject* copy = arena.allocate_map();
+            copy->structure_locked =
+                as_map(value)->structure_locked;
+            copy->elements_locked =
+                as_map(value)->elements_locked;
             Value result = make_map(copy);
             result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;
@@ -557,6 +563,10 @@ Value copy_value(Arena& arena, const Value& value, CopyMemo& memo) {
                 return found->second;
             }
             SetObject* copy = arena.allocate_set();
+            copy->structure_locked =
+                as_set(value)->structure_locked;
+            copy->elements_locked =
+                as_set(value)->elements_locked;
             Value result = make_set(copy);
             result.flags = value.flags | ValueDefined;
             memo.seen[value.ref] = result;

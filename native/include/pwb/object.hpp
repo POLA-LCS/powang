@@ -78,6 +78,7 @@ struct TypeRuntime {
 
 struct ArrayObject {
     std::vector<Value> items;
+    bool structure_locked = false;
     bool elements_locked = false;
 };
 
@@ -92,10 +93,14 @@ struct TupleObject {
 
 struct MapObject {
     std::vector<std::pair<Value, Value>> entries;
+    bool structure_locked = false;
+    bool elements_locked = false;
 };
 
 struct SetObject {
     std::vector<Value> items;
+    bool structure_locked = false;
+    bool elements_locked = false;
 };
 
 struct IteratorObject {
