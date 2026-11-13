@@ -16,8 +16,8 @@ remaining gates are listed at the end.
 
 | Gate | Result |
 |---|---|
-| Full Python VM suite | 648 tests, all pass |
-| Full tree walker suite (`POWANG_ENGINE=tree`) | 648 tests, all pass |
+| Full Python VM suite | 650 tests, all pass |
+| Full tree walker suite (`POWANG_ENGINE=tree`) | 650 tests, all pass |
 | Native N1 corpus | 5 programs, zero mismatches |
 | Native N2 corpus | 6 programs, zero mismatches |
 | Native N3 corpus | 9 programs, zero mismatches |
@@ -26,6 +26,7 @@ remaining gates are listed at the end.
 | Examples corpus | 32 programs, zero mismatches |
 | Seeded fuzz seed 7 | 1000 programs, zero mismatches |
 | Seeded fuzz seed 2026 | 1000 programs, zero mismatches |
+| Runtime access control and ambiguity | 13 cases, zero mismatches |
 | Native C++ tests | 1 of 1 CTest target passes |
 
 The differential comparison covers standard output, standard error and exit
@@ -66,9 +67,20 @@ ten second cold and five second warm compile gates.
    constructors, match patterns, destructuring, typed arithmetic, spreads from
    all containers, generic overload filtering and `typedeep` for tuples and
    sets.
-5. Structure and element lock enforcement.
+5. Structure and element lock enforcement, runtime private field and method
+   access control, private static methods, and operator or trait method
+   ambiguity error text.
 6. The default scalar host bridge for `math`, `strings`, `json`, `url`,
    `crypto`, `time` and `env`.
+
+## N3 closure
+
+N3 is gate green. `tests/native/corpus/n3` has 8 differential programs.
+`tests/test_native_access_control.py` checks 13 runtime cases against the
+Python VM: private fields, private methods, private statics, failed-method
+access reset, locked array and container methods, constant references, and
+operator and trait method ambiguity. The native `--no-check` flag now skips
+the Python checker before the native compile.
 
 ## Seeded fuzz status
 
@@ -96,4 +108,4 @@ zero, every task settles, no process leaks and the expected task sums match.
 
 1. Optional inline caches and threaded dispatch.
 2. The default engine decision and the `0.25.0` release.
-3. Native method access-control and ambiguity error text parity.
+3. The full Python host module surface and true parallel worker execution.
