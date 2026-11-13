@@ -30,6 +30,8 @@ remaining items are post-release work.
 | Runtime access control and ambiguity | 13 cases, zero mismatches |
 | Standard library host bridge | 5 tests, success and error paths match |
 | Native C++ tests | 1 of 1 CTest target passes |
+| Wheel and sdist contents | native sources, headers, tests and benches present |
+| Installed wheel native smoke | VM and native outputs match, native info and bench pass |
 
 The differential comparison covers standard output, standard error and exit
 code. Top-level language diagnostics are compared on standard output. Module
@@ -119,6 +121,11 @@ The package version is `0.25.0`. The image language version remains `0.22.0`
 because the image contract did not change. The Python VM remains the default
 engine and the differential oracle. The native engine is opt in with
 `--engine=native`.
+
+The sdist and wheel were built and validated. The wheel contains the native
+sources, headers, tests and benchmarks. A clean wheel install built the runtime
+in the system temporary directory and ran `--engine=native`, `native info` and
+`native bench` successfully.
 
 ## Post-release work
 

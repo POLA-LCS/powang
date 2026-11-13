@@ -102,6 +102,8 @@ cmake --build build/native
 
 The verified environment is Windows 11 with g++ 16.1.0, CMake 4.4.2 and Ninja 1.13.2.
 
+The sdist and wheel include the native sources, headers, tests and benchmarks. A source checkout builds the runtime into `build/native`. An installed wheel builds it into the system temporary directory on first use, so the package directory can stay read-only.
+
 Inspect, run, compare and benchmark a program:
 
 ```sh
