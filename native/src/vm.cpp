@@ -7888,6 +7888,11 @@ Value call_extern_descriptor(
         result = machine.host.call_extern(
             descriptor.python_target,
             positional.data(), positional.size(), machine.arena);
+    } catch (const HostCallError& error) {
+        throw_error(make_error(
+            machine.arena, "EXTERN", "extern function: " + name,
+            "The extern function raised an exception",
+            {error.python_type + ": " + error.what()}));
     } catch (const std::runtime_error& error) {
         throw_error(error_development(
             machine.arena, "extern function: " + name,

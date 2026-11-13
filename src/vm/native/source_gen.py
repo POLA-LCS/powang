@@ -87,8 +87,8 @@ def render_temp_cpp_into(
             "&pwb::run_embedded_image_with_meta;\n"
         )
     buffer.write("\n} // namespace\n\n")
-    buffer.write("int main() {\n")
-    buffer.write("    pwb::StdoutHost host;\n")
+    buffer.write("int main(int argc, char** argv) {\n")
+    buffer.write("    pwb::StdoutHost host(argc, argv);\n")
     if options.emit_bundle:
         buffer.write(
             "    return pwb::run_embedded_bundle_with_meta("
@@ -146,8 +146,8 @@ def render_bundle_cpp(
         "\nconstexpr std::size_t kPwbBundleSize = sizeof(kPwbBundle);\n"
     )
     buffer.write("\n} // namespace\n\n")
-    buffer.write("int main() {\n")
-    buffer.write("    pwb::StdoutHost host;\n")
+    buffer.write("int main(int argc, char** argv) {\n")
+    buffer.write("    pwb::StdoutHost host(argc, argv);\n")
     buffer.write(
         "    return pwb::run_embedded_bundle_with_meta("
         "kPwbBundle, kPwbBundleSize, host);\n"
