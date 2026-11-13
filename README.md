@@ -33,16 +33,18 @@ Start the interactive REPL by running `python powang.py` with no arguments.
 
 ## Execution engines
 
-Powang ships two stable execution engines.
+Powang ships two stable Python execution engines and an opt-in native C++17 engine.
 
 - `vm` is the stack based bytecode virtual machine in `src/vm`. It is the default engine.
 - `tree` is the tree-walking interpreter. It is the reference engine and the fallback.
+- `native` is the C++17 runtime under `native/`. It is opt in and consumes the same `PWB1` image as the Python compiler.
 
 Select an engine per run:
 
 ```sh
 python powang.py --engine=vm main.po
 python powang.py --engine=tree main.po
+python powang.py --engine=native main.po
 ```
 
 Select a default engine for a shell session:
@@ -50,6 +52,7 @@ Select a default engine for a shell session:
 ```sh
 POWANG_ENGINE=tree python powang.py main.po
 POWANG_ENGINE=vm python powang.py main.po
+POWANG_ENGINE=native python powang.py main.po
 ```
 
 A project can select an engine in `project.po`:
@@ -62,6 +65,8 @@ export project: Project = Project.[
 ];
 ```
 
+The engine value accepts `vm`, `tree` or `native`.
+
 Inspect, trace or compare a program:
 
 ```sh
@@ -72,18 +77,21 @@ python powang.py vm bench --runs 3
 ```
 
 The VM is the default. The tree walker remains the reference oracle and the
-fallback. Both engines must produce the same output, the same runtime error
-text, the same source positions and the same exit code.
+fallback. The native engine is opt in. The engines must produce the same
+output, runtime error text, source positions and exit code on the supported
+surface.
 
-## Native C++17 runtime (N3 core plus N4.1a bundle)
+## Native C++17 runtime
 
 An optional native C++17 runtime lives under `native/`. It is not the default engine. The Python VM remains the default engine and the differential oracle, and the tree walker remains the reference engine and the fallback.
 
-The native runtime consumes the same `PWB1` program image as the Python compiler. The integrated build now embeds a deterministic `PWBB` bundle and calls `run_embedded_bundle_with_meta`. The raw single-image path remains available. N4.1a carries the entry image and metadata inside the bundle. Imported module records, the module runtime, language errors and references remain planned.
+The native runtime consumes the same `PWB1` program image as the Python compiler. The integrated build embeds a deterministic `PWBB` bundle and calls `run_embedded_bundle_with_meta`. The bundle carries the entry image, the module graph, the project block and a SHA-256 digest. `PWBM` version 2 carries function and type descriptors. The raw single-image path remains available.
 
-N3 core covers scalars, big integers with int64 promotion, globals, functions, recursion, closures by value and reference, defaults, named arguments, variadics, overload selection, range loops, iterators, UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, deep copy, interpolation, the format and character builtins, the container native methods, user types, constructors, public and private fields, instance methods, statics, enums, traits, default methods and operator overloading. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Float modulo follows the divisor sign, including signed zero. Native method lock enforcement, exact access-control, ambiguity and lock error text, modules, project values, externs, errors, references, tasks, file and task methods and the full host bridge remain. Runtime error stream and text parity is not complete, so the native runtime does not yet have full language parity.
+The native engine covers scalars, big integers with int64 promotion, globals, functions, recursion, closures by value and reference, defaults, named arguments, variadics, overload selection, generic overload filtering, range loops, iterators, UTF-32 strings, arrays, tuples, insertion ordered maps and sets, indexing, slicing, string and array operators, deep copy, interpolation, the format and character builtins, the container native methods, user types, constructors, public and private fields, instance methods, statics, enums, traits, default methods, operator overloading, modules, imports, exports, project values, externs, language errors, try, catch, finally, propagation, references, lazy tasks, worker tasks, cancellation, task errors, file values, file builtins, casts, match patterns, destructuring, typed declarations, field defaults, named constructors, spreads, structure and element locks, runtime access control and ambiguity errors.
 
-The Python side of the build is under `src/vm/native/`. `source_gen.py` renders the generated `temp.cpp` translation unit into an in-memory buffer, and the default integrated compiler writes a temporary `temp.cpp` file for diagnostics. `compiler.py` runs the integrated `g++` driver, `build.py` configures and builds the runtime with CMake and Ninja, and `loader.py` compiles and runs an image. The generated source is temporary and is never committed.
+The default host bridge covers `math`, `strings`, `json`, `url`, `crypto`, `time`, `env`, `log` and script arguments, including JSON pretty printing, URL query parsing and building, HMAC-SHA-256, random tokens, UTC time formatting, structured stderr logging and Python-style `[EXTERN ERROR]` text. The HTTP modules, the generic host callback bridge and true parallel worker execution are not implemented. `random_token` uses `std::random_device` rather than a platform CSPRNG.
+
+The Python side of the build is under `src/vm/native/`. `source_gen.py` renders the generated `temp.cpp` translation unit into an in-memory buffer, and the default integrated compiler writes a temporary `temp.cpp` file for diagnostics. `compiler.py` runs the integrated `g++` driver, `build.py` configures and builds the runtime with CMake and Ninja, and `loader.py` compiles and runs an image. The generated source is temporary and is never committed. `session.py` builds the bundle, `differential.py` compares the engines and `bench.py` runs the benchmark suite under `native/benches`.
 
 Build the runtime with g++ 16.1.0 or a compatible C++17 compiler, CMake and Ninja:
 
@@ -94,15 +102,20 @@ cmake --build build/native
 
 The verified environment is Windows 11 with g++ 16.1.0, CMake 4.4.2 and Ninja 1.13.2.
 
-Inspect, run and compile a program:
+Inspect, run, compare and benchmark a program:
 
 ```sh
+python powang.py --engine=native main.po
 python powang.py vm native info
 python powang.py vm native run main.po
 python powang.py vm native compile --output build/main.exe main.po
+python powang.py vm native diff --examples examples
+python powang.py vm native bench --runs 3
+python powang.py vm native clean
+python powang.py vm native pack
 ```
 
-`compile` accepts `--keep-source` to write `<output-stem>.cpp` next to the executable for debugging, for example `build/main.cpp` for `build/main.exe`. The package version is still `0.22.0` and N0, N1, N2 and the N3 core are milestones, not releases. Full native parity is not claimed.
+`compile` accepts `--keep-source` to write `<output-stem>.cpp` next to the executable for debugging, for example `build/main.cpp` for `build/main.exe`. The package version is `0.25.0`. The image language version remains `0.22.0` because the image contract did not change. The native engine is opt in at this milestone: it passes the full parity suite, the examples, the native corpora, the seeded fuzz gates, the stress gate and the benchmark gates, but the HTTP host modules, the generic host callback bridge and true parallel workers remain.
 
 ## Language at a glance
 

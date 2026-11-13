@@ -57,6 +57,8 @@ The implemented runtime consumes the contract above and adds these boundaries:
 
 ### Default engine decision at the native milestone
 
+The package version is `0.25.0`. The image language version remains `0.22.0` because the image contract did not change.
+
 The Python VM remains the default engine at the native milestone. The native engine is opt in. The full parity gates pass, but the HTTP host modules, the generic host callback bridge and true parallel worker execution are not implemented. Flipping the default would change behavior for programs that use those host modules. The flip condition is a complete host surface and a green full parity sweep after the flip.
 
 ### Runtime limits

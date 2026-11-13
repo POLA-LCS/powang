@@ -1,7 +1,8 @@
 # N6 native parity report
 
-Status: in progress. This report records the N6 integration results. The
-remaining gates are listed at the end.
+Status: release candidate at `0.25.0`. The N6 parity, performance, stress and
+distribution gates are green. The Python VM remains the default engine. The
+remaining items are post-release work.
 
 ## Environment
 
@@ -112,9 +113,16 @@ and the comparison path are implemented.
 and runs 200 task lifecycles, 100 lazy and 100 worker. Every startup returns
 zero, every task settles, no process leaks and the expected task sums match.
 
-## Remaining gates
+## Release decision
 
-1. Optional inline caches and threaded dispatch.
-2. The default engine decision and the `0.25.0` release.
-3. The HTTP host modules, the generic host callback bridge and true parallel
-   worker execution.
+The package version is `0.25.0`. The image language version remains `0.22.0`
+because the image contract did not change. The Python VM remains the default
+engine and the differential oracle. The native engine is opt in with
+`--engine=native`.
+
+## Post-release work
+
+1. Optional inline caches and threaded dispatch. The performance target is
+   already met without them.
+2. The HTTP host modules and the generic host callback bridge.
+3. True parallel worker execution.

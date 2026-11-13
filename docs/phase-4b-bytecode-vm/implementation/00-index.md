@@ -84,8 +84,9 @@ Parallel work that does not change a gate:
 - The target tooling version is powang-lsp `0.27.0`. The LSP itself keeps the same parser and checker.
 - `0.22.0` is the default switch release. The VM is the default engine and the tree walker remains the reference engine and the fallback.
 - The tree walker remains available as `--engine=tree` and `POWANG_ENGINE=tree` for at least one release after the default switch.
-- V10 defines the native ABI contract for a separate native implementation.
-- N0 is implemented at `0.22.0` as a milestone, not a release. The plan targets `0.23.0` for N0 to N2. N1 to N6 remain planned.
+- V10 defines the native ABI contract consumed by the implemented native runtime.
+- N0 to N6 are implemented. The plan targets `0.23.0` for N0 to N2, `0.24.0` for N5 and `0.25.0` for N6. The package version is `0.25.0` for the N6 release candidate. The image language version remains `0.22.0` because the image contract did not change.
+- The Python VM remains the default engine. The native engine is opt in at `0.25.0`. The HTTP host modules, the generic host callback bridge and true parallel worker execution are post-release work.
 - A cached image is valid only when the format version, language version, source hash, compiler version, package version, module dependency hashes and engine feature flags all match.
 
 ## 5. Commit convention

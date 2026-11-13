@@ -55,7 +55,7 @@ Recorded results for `0.22.0`:
 | N3 | User types, constructors, fields, methods, statics, enums, traits, operator dispatch and locks | gate green | 0.23.0 |
 | N4 | Modules, project, externs, errors and references | gate green | 0.23.0 |
 | N5 | Async, tasks, file I/O and the host bridge | gate green | 0.24.0 |
-| N6 | Full parity, performance and distribution | in progress | 0.25.0 |
+| N6 | Full parity, performance and distribution | gate green | 0.25.0 |
 
 The native runtime lives under `native/` and consumes the same `PWB1` program image as the Python compiler. It is opt in. The Python VM remains the default engine and the differential oracle.
 
@@ -88,7 +88,7 @@ N5 gate results, commit range after `e7d7331`:
 - `ctest --test-dir build/native`: 1 of 1 test passes.
 - Full Python suite: 638 tests pass.
 
-N6 is in progress. The engine integration is complete: `--engine=native`, the native differential runner, seeded native fuzzing, and `powang vm native diff`, `bench`, `clean` and `pack`. Every example under `examples/` matches the Python VM, including casts, match patterns, destructuring, typed declarations and defaults, named constructors, generic overload selection, spreads and the default host bridge for `math`, `strings`, `json`, `url`, `crypto`, `time`, `env`, `log` and script arguments. Structure and element locks are enforced. On a 200,000 iteration arithmetic loop the native runtime ran in about 66 ms against about 7.8 seconds for the tree walker and 8.5 seconds for the Python VM over three runs. The `native/benches` loop, string and container suites and the `src.vm.native.bench` runner back the `bench` command. The seeded fuzz gate is green: 1000 of 1000 generated programs on seed 7 and 1000 of 1000 on seed 2026 match the Python VM, including weak nova, bool, char and modulo edge cases. Checker warnings are emitted before native compile and check errors. The stress gate is green: 100 native startups and 200 task lifecycles pass without leaks. The warm executable cache is implemented for the integrated file path: a 1.12 second cold start drops to a 0.29 second warm start, within 1.23 times the tree walker on the same small program. A 50 KB source program compiles in 1.12 seconds cold and 0.46 seconds warm, inside the compile gates. Remaining N6 work is inline caches, threaded dispatch, the default engine decision and the final release contract.
+N6 is gate green at the `0.25.0` release candidate. The engine integration is complete: `--engine=native`, the native differential runner, seeded native fuzzing, and `powang vm native diff`, `bench`, `clean` and `pack`. Every example under `examples/` matches the Python VM, including casts, match patterns, destructuring, typed declarations and defaults, named constructors, generic overload selection, spreads and the default host bridge for `math`, `strings`, `json`, `url`, `crypto`, `time`, `env`, `log` and script arguments. Structure and element locks are enforced. On a 200,000 iteration arithmetic loop the native runtime ran in about 66 ms against about 7.8 seconds for the tree walker and 8.5 seconds for the Python VM over three runs. The `native/benches` loop, string and container suites and the `src.vm.native.bench` runner back the `bench` command. The seeded fuzz gate is green: 1000 of 1000 generated programs on seed 7 and 1000 of 1000 on seed 2026 match the Python VM, including weak nova, bool, char and modulo edge cases. Checker warnings are emitted before native compile and check errors. The stress gate is green: 100 native startups and 200 task lifecycles pass without leaks. The warm executable cache is implemented for the integrated file path: a 1.12 second cold start drops to a 0.29 second warm start, within 1.23 times the tree walker on the same small program. A 50 KB source program compiles in 1.12 seconds cold and 0.46 seconds warm, inside the compile gates. The default engine decision is recorded: the Python VM remains the default. Remaining work after the release candidate is optional inline caches and threaded dispatch, the HTTP host modules, the generic host callback bridge and true parallel worker execution.
 
 N6 integration results:
 
@@ -104,7 +104,7 @@ N6 integration results:
 .\.venv\Scripts\python.exe -m unittest tests.test_native_build -v
 ```
 
-The version is still `0.22.0`. N0, N1, N2, N3, N4, N5 and the N6 integration are milestones, not releases. The plan targets `0.23.0` for the native milestone series. The remaining N6 gates (inline caches, threaded dispatch, default engine decision and release) are open, so the full native VM is not complete.
+The package version is `0.25.0` for the N6 release candidate. The image language version remains `0.22.0` because the image contract did not change. The Python VM remains the default engine. Inline caches and threaded dispatch are optional and not implemented because the performance gates are met. The HTTP host modules, the generic host callback bridge and true parallel worker execution are post-release work.
 
 ## 2. Module status
 
