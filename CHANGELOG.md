@@ -4,8 +4,8 @@ All notable changes to powang are documented here.
 
 ## 0.25.0
 
-Native runtime milestone release candidate. The Python VM remains the default
-engine and the native engine is opt in.
+Native runtime milestone release. The Python VM remains the default engine and
+the native engine is opt in.
 
 ### Added
 
@@ -43,8 +43,8 @@ engine and the native engine is opt in.
 
 ### Notes
 
-- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The package version is `0.25.0` for the N6 release candidate. The image language version remains `0.22.0` because the image contract did not change.
-- N0 through N5 and the N6 integration cover scalars, big integers, functions, closures, strings, containers, user types, enums, traits, operators, native methods, the `PWBB` bundle, modules, imports, exports, language errors, try, catch, finally, propagation, references, project values, the scalar extern boundary, lazy async tasks, worker tasks, cancellation, file I/O, the default host bridge, `--engine=native` and the native differential and packaging tools. The N5 worker executor runs spawned work deterministically on the spawning thread against a cloned module snapshot, which matches the single-worker differential contract. N3 is gate green. Remaining N6 work is inline caches, threaded dispatch, the default engine decision and the final release contract. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow promotes to bigint. The HTTP modules and the generic host callback bridge are not implemented. `random_token` uses `std::random_device` rather than a platform CSPRNG. Full native parity is not claimed across every host module and platform.
+- The native runtime is opt in. The Python VM remains the default engine and the differential oracle. The package version is `0.25.0` for the N6 release. The image language version remains `0.22.0` because the image contract did not change.
+- N0 through N5 and the N6 integration cover scalars, big integers, functions, closures, strings, containers, user types, enums, traits, operators, native methods, the `PWBB` bundle, modules, imports, exports, language errors, try, catch, finally, propagation, references, project values, the scalar extern boundary, lazy async tasks, worker tasks, cancellation, file I/O, the default host bridge, `--engine=native` and the native differential and packaging tools. The N5 worker executor runs spawned work deterministically on the spawning thread against a cloned module snapshot, which matches the single-worker differential contract. N3 and N6 are gate green. The default engine decision is recorded and the native contract is updated. Inline caches and threaded dispatch are optional and not implemented because the performance gates are met. The HTTP modules, the generic host callback bridge and true parallel workers remain post-release work. Mixed int/num arithmetic and comparisons follow the Python VM cast order. Division and modulo by zero return nova for int and num. Integer overflow promotes to bigint. The HTTP modules and the generic host callback bridge are not implemented. `random_token` uses `std::random_device` rather than a platform CSPRNG. Full native parity is not claimed across every host module and platform.
 
 ## 0.22.0
 

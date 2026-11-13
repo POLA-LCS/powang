@@ -1,6 +1,6 @@
 # N6 native parity report
 
-Status: release candidate at `0.25.0`. The N6 parity, performance, stress and
+Status: released at `0.25.0`. The N6 parity, performance, stress and
 distribution gates are green. The Python VM remains the default engine. The
 remaining items are post-release work.
 
