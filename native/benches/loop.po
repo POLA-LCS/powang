@@ -1,0 +1,6 @@
+total := 0;
+for index := 0; index < 50000; index += 1 {
+    total += index;
+}
+print(total);
+print("\n");

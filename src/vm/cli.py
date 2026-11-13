@@ -343,12 +343,8 @@ def _native_diff(args: list[str]) -> int:
 
 def _native_bench(args: list[str]) -> int:
     import json
-    import statistics
-    import subprocess
-    import time
 
-    from .native.loader import compile_image
-    from .native.session import compile_native_file
+    from .native.bench import run_native_benchmarks
 
     runs = 3
     as_json = False
@@ -369,68 +365,14 @@ def _native_bench(args: list[str]) -> int:
             return 2
         paths.append(Path(argument))
         index += 1
-    root = Path(__file__).resolve().parents[2]
-    if not paths:
-        paths = sorted((root / 'tests' / 'native' / 'corpus' / 'n1').glob('*.po'))
-    if not paths:
+    try:
+        records = run_native_benchmarks(paths or None, runs=runs)
+    except FileNotFoundError:
         print('no benchmark programs selected', file=sys.stderr)
         return 2
-
-    records = []
-    for path in paths:
-        try:
-            session = compile_native_file(path)
-            program = compile_image(
-                session.image, bundle=session.bundle,
-            )
-        except Exception as error:
-            print(f"native build error: {error}", file=sys.stderr)
-            return 1
-        try:
-            native_times = []
-            for _ in range(runs):
-                started = time.perf_counter()
-                subprocess.run(
-                    [str(program.executable)],
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=120,
-                )
-                native_times.append(time.perf_counter() - started)
-            python_times = []
-            for _ in range(runs):
-                started = time.perf_counter()
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(root / 'powang.py'),
-                        '--engine=vm',
-                        str(path),
-                    ],
-                    cwd=str(root),
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=120,
-                )
-                python_times.append(time.perf_counter() - started)
-        finally:
-            program.cleanup()
-        native_median = statistics.median(native_times)
-        python_median = statistics.median(python_times)
-        records.append({
-            'program': str(path),
-            'runs': runs,
-            'python_seconds': python_median,
-            'native_seconds': native_median,
-            'speedup': (
-                python_median / native_median
-                if native_median > 0 else 0.0
-            ),
-        })
+    except Exception as error:
+        print(f"native build error: {error}", file=sys.stderr)
+        return 1
     if as_json:
         print(json.dumps(records, indent=2))
     else:
